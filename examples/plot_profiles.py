@@ -6,7 +6,14 @@ from sheath_model import ZhaoParams, ZhaoSheathSolver
 
 
 def main() -> None:
-    params = ZhaoParams(alpha_deg=60.0, zmax_hat=120.0)
+    # Dayside
+    params = ZhaoParams(
+        n_swi_inf_cm3=5,
+        T_swe_eV=10,
+        T_phe_eV=2.2,
+        v_sw_total_mps=400e3,
+        alpha_deg=90.0,
+        zmax_hat=120.0)
     solver = ZhaoSheathSolver(params)
 
     branches = ["A", "B"]
@@ -15,6 +22,7 @@ def main() -> None:
         out = solver.solve_profile(branch)
         ax.plot(out["phi_V"], out["z_hat"], label=f"Type {branch}")
 
+    # Nightside
     params_c = ZhaoParams(
         n_swi_inf_cm3=5,
         T_swe_eV=10,
