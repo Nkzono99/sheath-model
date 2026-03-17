@@ -54,22 +54,8 @@ python -m zhao_sheath --branch A --alpha 60 --zmax-hat 120
 python examples/plot_profiles.py
 ```
 
-## 典型的な構成方針
+## 構成
 
 - **Type A**: 非単調ポテンシャル。未知数 `(phi0, phi_m, n_swe_inf)` を解いた後、一次積分ベースでプロファイルを再構成。
 - **Type B**: 単調正電位枝。未知数 `(phi0, n_swe_inf)` を解いて BVP を解く。
 - **Type C**: 単調負電位枝。未知数 `(phi0, n_swe_inf)` を解いて BVP を解く。
-
-## 今後足しやすいもの
-
-- `tests/` に数値回帰テスト追加
-- `docs/` に式と論文対応表を追加
-- GitHub Actions で lint / test を追加
-- Release を切って版管理
-
-## 推奨する GitHub 初期運用
-
-1. この構成でリポジトリ作成
-2. `v0.1.0` を tag / Release
-3. 数式説明や図を README / docs に追加
-4. 安定したら PyPI 公開を検討
