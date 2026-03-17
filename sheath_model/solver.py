@@ -422,6 +422,63 @@ class ZhaoSheathSolver:
     # ------------------------------------------------------------------
     # Type-A profile: piecewise first-integral reconstruction
     # ------------------------------------------------------------------
+    def _type_a_branch_from_minimum(
+        self,
+        phi_nodes_asc: np.ndarray,
+        phi0_hat: float,
+        n_swe_inf_hat: float,
+        phi_m_hat: float,
+        side: TypeASide,
+    ) -> tuple[np.ndarray, np.ndarray, Dict[str, np.ndarray], np.ndarray]:
+        """Build one Type-A branch starting just above the potential minimum.
+
+        The first version integrated z(phi)=∫dphi/|E| with a node value E(phi_1)=0
+        imposed by cumulative_trapezoid(..., initial=0). That makes the first
+        1/sqrt(E^2) sample artificially huge and creates a fake plateau just above
+        z_m. Here we instead:
+
+        1) include the small interval [phi_m, phi_1] explicitly in E^2, and
+        2) start z-z_m with the local asymptotic form near the minimum,
+           z-z_m ~ sqrt(2 (phi-phi_m) / (-rho(phi_m))).
+
+        The remaining cells are advanced with midpoint integration in phi, which
+        avoids evaluating 1/|E| at the singular endpoint.
+        """
+        phi_nodes_asc = np.asarray(phi_nodes_asc, dtype=float)
+        if phi_nodes_asc.ndim != 1 or len(phi_nodes_asc) < 2:
+            raise ValueError("phi_nodes_asc must be a 1D array with at least 2 points")
+        if not np.all(np.diff(phi_nodes_asc) > 0.0):
+            raise ValueError("phi_nodes_asc must be strictly increasing")
+        if phi_nodes_asc[0] <= phi_m_hat:
+            raise ValueError("phi_nodes_asc must start above phi_m_hat")
+
+        dens_nodes = self._densities_hat_type_a_side(phi_nodes_asc, phi0_hat, n_swe_inf_hat, phi_m_hat, side=side)
+        rho_nodes = self._rho_hat_from_densities(dens_nodes)
+
+        dens_m = self._densities_hat_type_a_side(
+            np.array([phi_m_hat], dtype=float), phi0_hat, n_swe_inf_hat, phi_m_hat, side=side
+        )
+        rho_m = float(self._rho_hat_from_densities(dens_m)[0])
+        rho_m_neg = max(-rho_m, 1.0e-14)
+
+        # E^2(phi) = -2 ∫_{phi_m}^{phi} rho(psi) dpsi
+        dphi0 = float(phi_nodes_asc[0] - phi_m_hat)
+        int0 = 0.5 * (rho_m + rho_nodes[0]) * dphi0
+        int_from_first = cumulative_trapezoid(rho_nodes, phi_nodes_asc, initial=0.0)
+        integral_nodes = int0 + int_from_first
+        e2_nodes = np.maximum(-2.0 * integral_nodes, 0.0)
+
+        # Start with the local quadratic minimum asymptotic instead of sampling
+        # 1/|E| at the singular endpoint.
+        s_nodes = np.empty_like(phi_nodes_asc)
+        s_nodes[0] = math.sqrt(max(0.0, 2.0 * dphi0 / rho_m_neg))
+        for i in range(1, len(phi_nodes_asc)):
+            dphi = float(phi_nodes_asc[i] - phi_nodes_asc[i - 1])
+            e2_mid = max(0.5 * (e2_nodes[i - 1] + e2_nodes[i]), 1.0e-14)
+            s_nodes[i] = s_nodes[i - 1] + dphi / math.sqrt(e2_mid)
+
+        return s_nodes, e2_nodes, dens_nodes, np.asarray(rho_nodes, dtype=float)
+
     def _build_type_a_profile(self, uk: Dict[str, float | str]) -> Dict[str, np.ndarray | float | str]:
         p = self.p
         phi0_hat = float(uk["phi0_hat"])
@@ -438,16 +495,12 @@ class ZhaoSheathSolver:
         ngrid_upper = ngrid
         ngrid_lower = max(ngrid // 2, 1500)
 
-        # Lower branch: surface -> z_m.  Use side="lower" so reflected solar-wind
-        # electrons are absent below the barrier while captured photoelectrons exist.
+        # Lower branch: surface -> z_m.
         x_lower = np.linspace(0.0, 1.0, ngrid_lower)
         phi_lower_asc = (phi_m_hat + phi_m_eps) + (phi0_hat - (phi_m_hat + phi_m_eps)) * x_lower**2
-        dens_lower_asc = self._densities_hat_type_a_side(phi_lower_asc, phi0_hat, n_swe_inf_hat, phi_m_hat, side="lower")
-        rho_lower_asc = self._rho_hat_from_densities(dens_lower_asc)
-        e2_lower_asc = -2.0 * cumulative_trapezoid(rho_lower_asc, phi_lower_asc, initial=0.0)
-        e2_lower_asc = np.maximum(e2_lower_asc, 0.0)
-        inv_abs_e_lower_asc = 1.0 / np.sqrt(np.maximum(e2_lower_asc, 1.0e-12))
-        s_lower_asc = cumulative_trapezoid(inv_abs_e_lower_asc, phi_lower_asc, initial=0.0)
+        s_lower_asc, e2_lower_asc, dens_lower_asc, _rho_lower = self._type_a_branch_from_minimum(
+            phi_lower_asc, phi0_hat, n_swe_inf_hat, phi_m_hat, side="lower"
+        )
         z_m_hat = float(s_lower_asc[-1])
 
         phi_lower_desc = phi_lower_asc[::-1]
@@ -455,50 +508,32 @@ class ZhaoSheathSolver:
         ehat_lower_desc = -np.sqrt(e2_lower_asc[::-1])
         dens_lower_desc = {k: v[::-1] for k, v in dens_lower_asc.items()}
 
-        # Upper branch: z_m -> asymptotic region.  Use side="upper" so captured
-        # photoelectrons vanish above the barrier and reflected solar-wind electrons
-        # are present.
+        # Upper branch: z_m -> asymptotic region.
         x_upper = np.linspace(0.0, 1.0, ngrid_upper)
         phi_upper_asc = (phi_m_hat + phi_m_eps) + (phi_end_hat - (phi_m_hat + phi_m_eps)) * (2.0 * x_upper - x_upper**2)
-        dens_upper_asc = self._densities_hat_type_a_side(phi_upper_asc, phi0_hat, n_swe_inf_hat, phi_m_hat, side="upper")
-        rho_upper_asc = self._rho_hat_from_densities(dens_upper_asc)
-        e2_upper_asc = -2.0 * cumulative_trapezoid(rho_upper_asc, phi_upper_asc, initial=0.0)
-        e2_upper_asc = np.maximum(e2_upper_asc, 0.0)
-        inv_abs_e_upper_asc = 1.0 / np.sqrt(np.maximum(e2_upper_asc, 1.0e-12))
-        s_upper_asc = cumulative_trapezoid(inv_abs_e_upper_asc, phi_upper_asc, initial=0.0)
+        s_upper_asc, e2_upper_asc, dens_upper_asc, _rho_upper = self._type_a_branch_from_minimum(
+            phi_upper_asc, phi0_hat, n_swe_inf_hat, phi_m_hat, side="upper"
+        )
         z_upper_asc = z_m_hat + s_upper_asc
         ehat_upper_asc = np.sqrt(e2_upper_asc)
 
         # Concatenate at the barrier without duplicating the first upper point.
-        z_hat = np.concatenate([z_lower_desc, z_upper_asc[1:]])
-        phi_hat = np.concatenate([phi_lower_desc, phi_upper_asc[1:]])
-        ehat = np.concatenate([ehat_lower_desc, ehat_upper_asc[1:]])
-
+        z_hat = np.concatenate([z_lower_desc, z_upper_asc])
+        phi_hat = np.concatenate([phi_lower_desc, phi_upper_asc])
+        ehat = np.concatenate([ehat_lower_desc, ehat_upper_asc])
         dens = {
-            k: np.concatenate([dens_lower_desc[k], dens_upper_asc[k][1:]])
+            k: np.concatenate([dens_lower_desc[k], dens_upper_asc[k]])
             for k in dens_lower_desc
         }
 
-        # If the physical profile has essentially reached the asymptotic region before
-        # zmax_hat, pad with a zero-potential tail instead of forcing a late Dirichlet
-        # recovery.  This is the key fix for the user's reported artifact.
-        if z_hat[-1] < p.zmax_hat:
-            dens_inf = self._densities_hat_type_a_side(
-                np.array([0.0]), phi0_hat, n_swe_inf_hat, phi_m_hat, side="upper"
-            )
-            n_tail = max(5, int(0.03 * len(z_hat)))
-            z_tail = np.linspace(z_hat[-1], p.zmax_hat, n_tail + 1)[1:]
-            z_hat = np.concatenate([z_hat, z_tail])
-            phi_hat = np.concatenate([phi_hat, np.zeros_like(z_tail)])
-            ehat = np.concatenate([ehat, np.zeros_like(z_tail)])
-            for k in dens:
-                dens[k] = np.concatenate([dens[k], np.full_like(z_tail, dens_inf[k][0], dtype=float)])
-        else:
-            keep = z_hat <= p.zmax_hat
-            z_hat = z_hat[keep]
-            phi_hat = phi_hat[keep]
-            ehat = ehat[keep]
-            dens = {k: v[keep] for k, v in dens.items()}
+        # Do not append an artificial phi=0 tail. If the asymptotic branch reaches
+        # beyond the requested zmax_hat, clip it; otherwise keep the physically
+        # reconstructed interval only.
+        keep = z_hat <= p.zmax_hat
+        z_hat = z_hat[keep]
+        phi_hat = phi_hat[keep]
+        ehat = ehat[keep]
+        dens = {k: v[keep] for k, v in dens.items()}
 
         out: Dict[str, np.ndarray | float | str] = {
             **uk,
