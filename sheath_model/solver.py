@@ -57,17 +57,21 @@ class ZhaoParams:
     m_i_kg: float = MP
 
     # Choice of which drift component enters the 1-D algebra.
-    # "full"   : use the full 468 km/s in the 1-D formulas.
+    # The Zhao model is 1-D along the sheath normal, so the projected normal
+    # drift is the paper-consistent default.
+    # "full"   : use the full solar-wind speed in the 1-D formulas.
     # "normal" : use v_sw * sin(alpha).
-    electron_drift_mode: DriftMode = "full"
-    ion_drift_mode: DriftMode = "full"
+    electron_drift_mode: DriftMode = "normal"
+    ion_drift_mode: DriftMode = "normal"
 
     zmax_hat: float = 80.0
     n_bvp_grid: int = 600
     n_type_a_grid: int = 8000
     type_a_phi_tol_hat: float = 1.0e-3
     type_a_phi_m_eps_hat: float = 1.0e-5
-    allow_type_c_normal_ion_fallback: bool = True
+    # Experimental convergence fallback for legacy "full" ion-drift runs.
+    # Disabled by default because it changes the branch equations.
+    allow_type_c_normal_ion_fallback: bool = False
 
     @property
     def alpha_rad(self) -> float:
@@ -133,6 +137,14 @@ class ZhaoSheathSolver:
     # ------------------------------------------------------------------
     # Algebraic unknown solver
     # ------------------------------------------------------------------
+    def _swe_free_current_term(self, n_swe_inf_m3: float, a_swe: float) -> float:
+        """Normalized free solar-wind electron current term from Eq. (16)."""
+        p = self.p
+        return n_swe_inf_m3 * (
+            math.sqrt(p.T_swe_eV / p.T_phe_eV) * math.exp(-(a_swe ** 2))
+            + math.sqrt(math.pi) * (p.v_d_electron_mps / p.v_phe_th_mps) * erfc(a_swe)
+        )
+
     def _type_a_e2_sum_at_infinity(self, phi0_V: float, phi_m_V: float, n_swe_inf_m3: float) -> float:
         """Eq. (24) for Type A, evaluated at phi(infty)=0.
 
@@ -204,11 +216,7 @@ class ZhaoSheathSolver:
         )
         r2 = (
             p.n_phe0_m3 * math.exp((phi_m_V - phi0_V) / p.T_phe_eV)
-            - n_swe_inf_m3 * math.sqrt(p.T_swe_eV / p.T_phe_eV)
-            * (
-                math.exp(-(a_swe ** 2))
-                + (p.v_d_electron_mps / (p.v_phe_th_mps * math.sqrt(math.pi))) * erfc(a_swe)
-            )
+            - self._swe_free_current_term(n_swe_inf_m3, a_swe)
             + ion_term
         )
         r3 = self._type_a_e2_sum_at_infinity(phi0_V, phi_m_V, n_swe_inf_m3)
@@ -224,11 +232,7 @@ class ZhaoSheathSolver:
         r1 = 0.5 * n_swe_inf_m3 * (1.0 + erf(p.u)) + 0.5 * p.n_phe0_m3 * math.exp(-phi0_V / p.T_phe_eV) - p.n_swi_inf_m3
         r2 = (
             p.n_phe0_m3 * math.exp(-phi0_V / p.T_phe_eV)
-            - n_swe_inf_m3 * math.sqrt(p.T_swe_eV / p.T_phe_eV)
-            * (
-                math.exp(-(p.u ** 2))
-                + (p.v_d_electron_mps / (p.v_phe_th_mps * math.sqrt(math.pi))) * erfc(-p.u)
-            )
+            - self._swe_free_current_term(n_swe_inf_m3, -p.u)
             + ion_term
         )
         return np.array([r1, r2], dtype=float)
@@ -240,19 +244,16 @@ class ZhaoSheathSolver:
             return np.array([1e6, 1e6], dtype=float)
 
         a_swe = math.sqrt(max(0.0, -phi0_V / p.T_swe_eV)) - p.u
+        a_phe = math.sqrt(max(0.0, -phi0_V / p.T_phe_eV))
         ion_term = p.n_swi_inf_m3 * math.sqrt(2.0 * math.pi * p.T_swe_eV / p.T_phe_eV * ME / p.m_i_kg) * p.mach
         r1 = (
             0.5 * n_swe_inf_m3 * (1.0 + 2.0 * erf(p.u) + erf(a_swe))
-            + 0.5 * p.n_phe0_m3 * math.exp(-phi0_V / p.T_phe_eV)
+            + 0.5 * p.n_phe0_m3 * math.exp(-phi0_V / p.T_phe_eV) * erfc(a_phe)
             - p.n_swi_inf_m3
         )
         r2 = (
             p.n_phe0_m3
-            - n_swe_inf_m3 * math.sqrt(p.T_swe_eV / p.T_phe_eV)
-            * (
-                math.exp(-(a_swe ** 2))
-                + (p.v_d_electron_mps / (p.v_phe_th_mps * math.sqrt(math.pi))) * erfc(a_swe)
-            )
+            - self._swe_free_current_term(n_swe_inf_m3, a_swe)
             + ion_term
         )
         return np.array([r1, r2], dtype=float)
@@ -295,11 +296,11 @@ class ZhaoSheathSolver:
             phi_m_V = math.nan
         elif branch == "C":
             guesses = [np.array(guess, dtype=float)] if guess is not None else [
-                np.array([-0.1, 5.0e6]),
                 np.array([-0.5, 6.0e6]),
-                np.array([-1.0, 7.0e6]),
-                np.array([-2.0, 4.0e6]),
-                np.array([-5.0, 2.0e6]),
+                np.array([-2.0, 7.0e6]),
+                np.array([-5.0, 8.0e6]),
+                np.array([-10.0, 8.2e6]),
+                np.array([-15.0, 8.5e6]),
             ]
             try:
                 phi0_V, n_swe_inf_m3 = self._try_root_guesses(self._residuals_type_c, guesses)
@@ -400,9 +401,10 @@ class ZhaoSheathSolver:
             n_phe_c_hat = sin_alpha * np.exp(phi_hat - phi0_hat) * erf(s_phe)
         elif branch == "C":
             s_swe = np.sqrt(np.maximum(0.0, (phi_hat - phi0_hat) / tau))
+            s_phe = np.sqrt(np.maximum(0.0, phi_hat - phi0_hat))
             n_swe_f_hat = 0.5 * n_swe_inf_hat * np.exp(phi_hat / tau) * (1.0 - erf(s_swe - p.u))
             n_swe_r_hat = n_swe_inf_hat * np.exp(phi_hat / tau) * (erf(s_swe - p.u) + erf(p.u))
-            n_phe_f_hat = 0.5 * sin_alpha * np.exp(phi_hat - phi0_hat)
+            n_phe_f_hat = 0.5 * sin_alpha * np.exp(phi_hat - phi0_hat) * erfc(s_phe)
             n_phe_c_hat = np.zeros_like(phi_hat)
         else:
             raise ValueError(f"unknown branch: {branch}")

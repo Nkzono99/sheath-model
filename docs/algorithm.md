@@ -1,6 +1,6 @@
 # Algorithm notes
 
-This document summarizes the numerical formulation implemented in `zhao_sheath/solver.py` for the Zhao et al. semianalytic lunar photoelectron sheath model.
+This document summarizes the numerical formulation implemented in `sheath_model/solver.py` for the Zhao et al. semianalytic lunar photoelectron sheath model.
 
 ## Scope
 
@@ -16,6 +16,72 @@ The code assumes a 1D sheath normal to the surface and includes three particle p
 - drifting Maxwellian solar-wind electrons
 - Maxwellian photoelectrons
 
+## Model Assumptions From Zhao et al.
+
+The semi-analytic model in Zhao et al. is not a general lunar charging model; it is a specific 1-D sheath model with several built-in assumptions.
+
+### Geometry and dimensionality
+
+- The sheath is treated as **1-D** along the direction normal to the surface.
+- The lunar surface is treated as a **flat illuminated plane**.
+- The model targets the **vertical sheath structure** only; horizontal structure and topography are not included.
+
+### Particle populations
+
+- Only three charged populations are included:
+  - solar-wind ions
+  - solar-wind electrons
+  - photoelectrons emitted from the surface
+- Solar-wind ions are treated as a **cold beam**.
+- Solar-wind electrons are modeled as a **drifting Maxwellian**.
+- Photoelectrons emitted from the surface are modeled as a **stationary Maxwellian**.
+
+### Photoelectron source model
+
+- The photoelectrons considered in the semi-analytic model are only those emitted from the **lunar surface**.
+- Photoelectrons generated from **lofted dust grains** are neglected.
+- The surface photoelectron density is parameterized as
+
+```math
+n_{\mathrm{phe},0} = n_{\mathrm{phe},\mathrm{ref}} \sin\alpha
+```
+
+where `alpha` is the Sun elevation angle and `n_phe_ref` is the normal-incidence reference density.
+
+### Dynamical assumptions
+
+- The sheath is assumed to be in **steady state**.
+- Particle motion is treated through **energy conservation along the sheath-normal direction**.
+- The branch topology is fixed by the Zhao classification:
+  - Type A: non-monotonic with an internal minimum
+  - Type B: monotonic positive
+  - Type C: monotonic negative
+
+### Boundary and closure conditions
+
+- The potential at infinity is taken as the reference:
+
+```math
+\phi(\infty)=0.
+```
+
+- The total charge density at infinity is assumed to vanish:
+
+```math
+n_{\mathrm{swe}}(\infty)+n_{\mathrm{phe}}(\infty)-n_{\mathrm{swi}}(\infty)=0.
+```
+
+- The net current at infinity is assumed to vanish in steady state.
+- For Type A, the electric field at infinity is additionally required to vanish in order to determine the potential minimum `phi_m`.
+
+### What is not included
+
+- Surface topography
+- Multi-dimensional electric-field structure
+- Dust charging / dust-emitted photoelectrons
+- Non-Maxwellian photoelectron distribution in the semi-analytic model
+- Time-dependent sheath evolution
+
 ## Common definitions
 
 The implementation uses the photoelectron temperature as the potential scale.
@@ -23,8 +89,14 @@ The implementation uses the photoelectron temperature as the potential scale.
 - `phi_hat = phi / T_phe_eV`
 - `z_hat = z / lambda_D_phe_ref`
 - `tau = T_swe / T_phe`
-- `u = v_d / v_th_swe`
+- `u = v_{d,z} / v_th_swe`
 - `M = v_i_inf / c_s`
+
+By default, the 1-D solver uses the **solar-wind component normal to the surface**
+
+- `v_{d,z} = v_sw sin(alpha)`
+
+rather than the full bulk speed, because the sheath equations are written along the sheath normal.
 
 The normalized Poisson equation is written as
 
@@ -235,6 +307,14 @@ with
 \hat\phi(\hat z_{\max}) = 0.
 ```
 
+## Density treatment
+
+Type C still uses the paper's free-photoelectron expression from Eq. (8), specialized with the surface minimum `phi_m = phi0`.
+
+- reflected solar-wind electrons are present
+- captured photoelectrons are absent
+- free photoelectrons retain the `erfc(sqrt(phi - phi0))` cutoff implied by the lower-velocity bound
+
 ## Numerical notes
 
 ### 1. Type A is treated differently on purpose
@@ -253,6 +333,10 @@ The current implementation does not append a constant `phi = 0` tail to Type A a
 ### 4. Tightening the Type A outer tolerance
 
 The parameter `type_a_phi_tol_hat` controls how close the Type A reconstruction approaches `phi = 0` before stopping. Smaller values produce a longer tail and allow the recovery toward `0 V` to be followed more closely.
+
+### 5. Legacy Type C fallback is optional
+
+An experimental `allow_type_c_normal_ion_fallback` switch remains available for legacy runs that force the full ion drift into the Type C algebra and fail to converge. It is disabled by default because it changes the branch equations away from the paper-consistent 1-D normal-drift form.
 
 ## Recommended outputs
 
