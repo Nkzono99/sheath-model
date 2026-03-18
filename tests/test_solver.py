@@ -57,6 +57,12 @@ class ZhaoSolverTests(unittest.TestCase):
         self.assertGreater(out_10["phi0_hat"], -3.0)
         self.assertLess(out_10["n_swe_inf_m3"], ZhaoParams(alpha_deg=10.0).n_swi_inf_m3)
 
+    def test_zero_sun_elevation_normal_drift_raises_clear_error(self) -> None:
+        solver = ZhaoSheathSolver(ZhaoParams(alpha_deg=0.0))
+
+        with self.assertRaisesRegex(ValueError, "degenerate"):
+            solver.solve_profile("C")
+
 
 if __name__ == "__main__":
     unittest.main()

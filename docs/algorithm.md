@@ -98,6 +98,8 @@ By default, the 1-D solver uses the **solar-wind component normal to the surface
 
 rather than the full bulk speed, because the sheath equations are written along the sheath normal.
 
+With this choice, the exact limit `alpha = 0` gives `v_{d,z} = 0` and `M = 0`, so the Zhao ion-density model becomes degenerate. In practice, Type C should be evaluated for small but nonzero Sun elevation angles such as the `5^\circ` and `10^\circ` cases shown in the paper, unless a legacy full-drift approximation is requested explicitly.
+
 The normalized Poisson equation is written as
 
 ```math

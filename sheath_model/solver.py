@@ -137,6 +137,15 @@ class ZhaoSheathSolver:
     # ------------------------------------------------------------------
     # Algebraic unknown solver
     # ------------------------------------------------------------------
+    def _validate_params_for_branch(self, branch: Branch) -> None:
+        p = self.p
+        if abs(p.v_d_ion_mps) < 1.0e-12:
+            raise ValueError(
+                f"branch {branch} is degenerate with ion_drift_mode={p.ion_drift_mode!r} at alpha={p.alpha_deg:g} deg: "
+                "the 1-D normal ion drift is zero, so the Zhao ion-density model is undefined. "
+                "Use alpha > 0 or switch to the legacy full-drift modes explicitly."
+            )
+
     def _swe_free_current_term(self, n_swe_inf_m3: float, a_swe: float) -> float:
         """Normalized free solar-wind electron current term from Eq. (16)."""
         p = self.p
@@ -278,6 +287,7 @@ class ZhaoSheathSolver:
 
     def solve_unknowns(self, branch: Branch, guess: tuple[float, ...] | None = None) -> Dict[str, float | str]:
         p = self.p
+        self._validate_params_for_branch(branch)
         note = ""
         if branch == "A":
             guesses = [np.array(guess, dtype=float)] if guess is not None else [
