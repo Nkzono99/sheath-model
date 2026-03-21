@@ -23,6 +23,20 @@ piecewise form around the potential minimum z_m:
 
 This matches the population topology shown in Zhao's Fig. 1 and removes the
 spurious recovery-to-Dirichlet artifact.
+
+Additional utilities
+--------------------
+This file also provides local diagnostics built consistently from the same
+branch-wise kinetic assumptions:
+
+    - sample_at_z(profile, z, unit="hat"|"m")
+    - fluxes_at_z(profile, z, unit="hat"|"m")
+    - vdf_1d_at_z(profile, z, species=...)
+
+The returned velocity distributions are reduced 1D distributions g(v_z) such
+that int g(v_z) dv_z = n(z). For the cold-ion species, the exact model is a
+Dirac delta at the local bulk speed; for plotting, vdf_1d_at_z regularizes it
+with a narrow Gaussian and reports the exact peak velocity separately.
 """
 
 from dataclasses import dataclass, replace
@@ -42,6 +56,8 @@ MP = 1.67262192369e-27
 Branch = Literal["A", "B", "C"]
 DriftMode = Literal["full", "normal"]
 TypeASide = Literal["lower", "upper"]
+Species = Literal["swi", "swe", "phe", "all"]
+ZUnit = Literal["hat", "m"]
 
 
 @dataclass(frozen=True)
@@ -531,20 +547,7 @@ class ZhaoSheathSolver:
         phi_m_hat: float,
         side: TypeASide,
     ) -> tuple[np.ndarray, np.ndarray, Dict[str, np.ndarray], np.ndarray]:
-        """Build one Type-A branch starting just above the potential minimum.
-
-        The first version integrated z(phi)=∫dphi/|E| with a node value E(phi_1)=0
-        imposed by cumulative_trapezoid(..., initial=0). That makes the first
-        1/sqrt(E^2) sample artificially huge and creates a fake plateau just above
-        z_m. Here we instead:
-
-        1) include the small interval [phi_m, phi_1] explicitly in E^2, and
-        2) start z-z_m with the local asymptotic form near the minimum,
-           z-z_m ~ sqrt(2 (phi-phi_m) / (-rho(phi_m))).
-
-        The remaining cells are advanced with midpoint integration in phi, which
-        avoids evaluating 1/|E| at the singular endpoint.
-        """
+        """Build one Type-A branch starting just above the potential minimum."""
         phi_nodes_asc = np.asarray(phi_nodes_asc, dtype=float)
         if phi_nodes_asc.ndim != 1 or len(phi_nodes_asc) < 2:
             raise ValueError("phi_nodes_asc must be a 1D array with at least 2 points")
@@ -768,3 +771,374 @@ class ZhaoSheathSolver:
             except Exception as exc:  # noqa: BLE001
                 errs.append(f"{br}: {exc}")
         raise RuntimeError("auto branch selection failed: " + " | ".join(errs))
+
+    # ------------------------------------------------------------------
+    # Local diagnostics: densities, fluxes, reduced 1D VDFs
+    # ------------------------------------------------------------------
+    def _to_z_hat(self, z: float, unit: ZUnit) -> float:
+        if unit == "hat":
+            return float(z)
+        if unit == "m":
+            return float(z) / self.p.lambda_d_phe_ref_m
+        raise ValueError(f"unknown z unit: {unit}")
+
+    @staticmethod
+    def _interp_on_profile(profile: Dict[str, np.ndarray | float | str], key: str, z_hat: float) -> float:
+        z_arr = np.asarray(profile["z_hat"], dtype=float)
+        y_arr = np.asarray(profile[key], dtype=float)
+        if z_hat < float(z_arr[0]) or z_hat > float(z_arr[-1]):
+            raise ValueError(
+                f"requested z_hat={z_hat:.6g} is outside the solved interval "
+                f"[{float(z_arr[0]):.6g}, {float(z_arr[-1]):.6g}]"
+            )
+        return float(np.interp(z_hat, z_arr, y_arr))
+
+    def sample_at_z(
+        self,
+        profile: Dict[str, np.ndarray | float | str],
+        z: float,
+        unit: ZUnit = "hat",
+    ) -> Dict[str, float | str]:
+        """Return a branch-consistent local state at a single position.
+
+        Densities are recomputed from the local potential and branch formulas,
+        rather than directly interpolated from the stored profile arrays, so that
+        they stay exactly consistent with the local VDF and flux reconstruction.
+        """
+        p = self.p
+        z_hat = self._to_z_hat(z, unit)
+        branch = str(profile["branch"])
+        if branch not in {"A", "B", "C"}:
+            raise ValueError("profile does not contain a valid branch label")
+
+        phi_hat = self._interp_on_profile(profile, "phi_hat", z_hat)
+        dphi_dzhat = self._interp_on_profile(profile, "dphi_dzhat", z_hat)
+        E_Vpm = self._interp_on_profile(profile, "E_Vpm", z_hat)
+        phi0_hat = float(profile["phi0_hat"])
+        phi_m_hat = float(profile["phi_m_hat"])
+        n_swe_inf_hat = float(profile["n_swe_inf_hat"])
+        z_m_hat = float(profile["z_m_hat"])
+
+        if branch == "A":
+            side: str = "lower" if z_hat <= z_m_hat else "upper"
+            dens_hat = self._densities_hat_type_a_side(
+                np.array([phi_hat], dtype=float),
+                phi0_hat,
+                n_swe_inf_hat,
+                phi_m_hat,
+                side=side,  # type: ignore[arg-type]
+            )
+        else:
+            side = "monotonic"
+            dens_hat = self._densities_hat(
+                branch,  # type: ignore[arg-type]
+                np.array([phi_hat], dtype=float),
+                phi0_hat,
+                n_swe_inf_hat,
+                phi_m_hat,
+            )
+
+        dens_hat_scalar = {k: float(v[0]) for k, v in dens_hat.items()}
+        dens_m3 = {k.replace("_hat", "_m3"): v * p.n_phe_ref_m3 for k, v in dens_hat_scalar.items()}
+        n_total_hat = (
+            dens_hat_scalar["n_swe_f_hat"]
+            + dens_hat_scalar["n_swe_r_hat"]
+            + dens_hat_scalar["n_phe_f_hat"]
+            + dens_hat_scalar["n_phe_c_hat"]
+        )
+        rho_hat = dens_hat_scalar["n_swi_hat"] - n_total_hat
+
+        arg_ion = 1.0 - 2.0 * phi_hat / (p.tau * p.mach * p.mach)
+        if arg_ion <= 0.0:
+            raise ValueError("local ion energy argument became non-positive")
+        v_i_local = p.v_d_ion_mps * math.sqrt(arg_ion)
+
+        if branch == "B":
+            a_swe = 0.0
+            a_phe = math.sqrt(max(0.0, phi_hat))
+            swe_reflected_active = False
+            phe_captured_active = True
+        elif branch == "C":
+            a_swe = math.sqrt(max(0.0, (phi_hat - phi0_hat) / p.tau))
+            a_phe = math.sqrt(max(0.0, phi_hat - phi0_hat))
+            swe_reflected_active = True
+            phe_captured_active = False
+        else:  # branch == "A"
+            a_swe = math.sqrt(max(0.0, (phi_hat - phi_m_hat) / p.tau))
+            a_phe = math.sqrt(max(0.0, phi_hat - phi_m_hat))
+            swe_reflected_active = side == "upper"
+            phe_captured_active = side == "lower"
+
+        return {
+            "branch": branch,
+            "side": side,
+            "z_hat": z_hat,
+            "z_m": z_hat * p.lambda_d_phe_ref_m,
+            "phi_hat": phi_hat,
+            "phi_V": phi_hat * p.T_phe_eV,
+            "phi0_hat": phi0_hat,
+            "phi0_V": phi0_hat * p.T_phe_eV,
+            "phi_m_hat": phi_m_hat,
+            "phi_m_V": phi_m_hat * p.T_phe_eV if math.isfinite(phi_m_hat) else math.nan,
+            "z_m_hat": z_m_hat,
+            "dphi_dzhat": dphi_dzhat,
+            "E_Vpm": E_Vpm,
+            "n_swe_inf_hat": n_swe_inf_hat,
+            "n_swe_inf_m3": n_swe_inf_hat * p.n_phe_ref_m3,
+            "a_swe": a_swe,
+            "a_phe": a_phe,
+            "vcut_swe_mps": a_swe * p.v_swe_th_mps,
+            "vcut_phe_mps": a_phe * p.v_phe_th_mps,
+            "v_i_mps": v_i_local,
+            "swe_reflected_active": swe_reflected_active,
+            "phe_captured_active": phe_captured_active,
+            "n_swi_hat": dens_hat_scalar["n_swi_hat"],
+            "n_swe_f_hat": dens_hat_scalar["n_swe_f_hat"],
+            "n_swe_r_hat": dens_hat_scalar["n_swe_r_hat"],
+            "n_phe_f_hat": dens_hat_scalar["n_phe_f_hat"],
+            "n_phe_c_hat": dens_hat_scalar["n_phe_c_hat"],
+            "n_total_hat": n_total_hat,
+            "rho_hat": rho_hat,
+            **dens_m3,
+            "n_total_m3": n_total_hat * p.n_phe_ref_m3,
+            "rho_m3": rho_hat * p.n_phe_ref_m3,
+        }
+
+    def _velocity_grid_for_species(
+        self,
+        state: Dict[str, float | str],
+        species: Species,
+        n_v: int,
+        n_sigma: float,
+    ) -> np.ndarray:
+        p = self.p
+        if n_v < 201:
+            raise ValueError("n_v must be >= 201")
+        if n_v % 2 == 0:
+            n_v += 1
+
+        if species == "swe":
+            vmax = max(
+                state["vcut_swe_mps"],
+                abs(p.v_d_electron_mps) + n_sigma * p.v_swe_th_mps,
+            )
+            vmax = float(vmax)
+            return np.linspace(-vmax, vmax, n_v)
+        if species == "phe":
+            vmax = max(
+                state["vcut_phe_mps"],
+                n_sigma * p.v_phe_th_mps,
+            )
+            vmax = float(vmax)
+            return np.linspace(-vmax, vmax, n_v)
+        if species == "swi":
+            v_i = abs(float(state["v_i_mps"]))
+            vmax = max(v_i * 1.4, v_i + 6.0 * self.p.cs_mps, 2.0 * self.p.cs_mps)
+            return np.linspace(-vmax, vmax, n_v)
+        raise ValueError(f"unknown species for grid construction: {species}")
+
+    def _swe_vdf_components(self, state: Dict[str, float | str], vz_mps: np.ndarray) -> Dict[str, np.ndarray]:
+        p = self.p
+        vz = np.asarray(vz_mps, dtype=float)
+        amp = float(state["n_swe_inf_m3"]) * math.exp(float(state["phi_hat"]) / p.tau) / (
+            math.sqrt(math.pi) * p.v_swe_th_mps
+        )
+        a = float(state["a_swe"])
+        vcut = float(state["vcut_swe_mps"])
+        w = vz / p.v_swe_th_mps
+        free_in = amp * np.exp(-((w + p.u) ** 2)) * (vz <= -vcut)
+
+        if bool(state["swe_reflected_active"]):
+            reflected_in = amp * np.exp(-((w + p.u) ** 2)) * ((vz >= -vcut) & (vz <= 0.0))
+            reflected_out = amp * np.exp(-((w - p.u) ** 2)) * ((vz >= 0.0) & (vz <= vcut))
+        else:
+            reflected_in = np.zeros_like(vz)
+            reflected_out = np.zeros_like(vz)
+
+        total = free_in + reflected_in + reflected_out
+        return {
+            "vz_mps": vz,
+            "g_free_incoming": free_in,
+            "g_reflected_incoming": reflected_in,
+            "g_reflected_outgoing": reflected_out,
+            "g_total": total,
+            "support_cutoff_mps": np.full_like(vz, vcut, dtype=float),
+            "a_swe": np.full_like(vz, a, dtype=float),
+        }
+
+    def _phe_vdf_components(self, state: Dict[str, float | str], vz_mps: np.ndarray) -> Dict[str, np.ndarray]:
+        p = self.p
+        vz = np.asarray(vz_mps, dtype=float)
+        amp = p.n_phe0_m3 * math.exp(float(state["phi_hat"]) - float(state["phi0_hat"])) / (
+            math.sqrt(math.pi) * p.v_phe_th_mps
+        )
+        vcut = float(state["vcut_phe_mps"])
+        w = vz / p.v_phe_th_mps
+        free_out = amp * np.exp(-(w**2)) * (vz >= vcut)
+
+        if bool(state["phe_captured_active"]):
+            captured_out = amp * np.exp(-(w**2)) * ((vz >= 0.0) & (vz <= vcut))
+            captured_ret = amp * np.exp(-(w**2)) * ((vz >= -vcut) & (vz <= 0.0))
+        else:
+            captured_out = np.zeros_like(vz)
+            captured_ret = np.zeros_like(vz)
+
+        total = free_out + captured_out + captured_ret
+        return {
+            "vz_mps": vz,
+            "g_free_outgoing": free_out,
+            "g_captured_outgoing": captured_out,
+            "g_captured_returning": captured_ret,
+            "g_total": total,
+            "support_cutoff_mps": np.full_like(vz, vcut, dtype=float),
+        }
+
+    def _swi_vdf_components(
+        self,
+        state: Dict[str, float | str],
+        vz_mps: np.ndarray,
+        ion_sigma_frac: float,
+    ) -> Dict[str, np.ndarray | float | str]:
+        p = self.p
+        vz = np.asarray(vz_mps, dtype=float)
+        n_i = float(state["n_swi_m3"])
+        v_peak = -float(state["v_i_mps"])
+        sigma = max(ion_sigma_frac * abs(v_peak), 0.02 * p.cs_mps, 1.0)
+        g_total = n_i * np.exp(-0.5 * ((vz - v_peak) / sigma) ** 2) / (
+            math.sqrt(2.0 * math.pi) * sigma
+        )
+        return {
+            "vz_mps": vz,
+            "g_total": g_total,
+            "distribution_kind": "cold-delta-regularized",
+            "v_peak_mps": v_peak,
+            "sigma_mps": sigma,
+        }
+
+    @staticmethod
+    def _moments_from_reduced_vdf(vz_mps: np.ndarray, g_vz: np.ndarray, charge_C: float) -> Dict[str, float]:
+        vz = np.asarray(vz_mps, dtype=float)
+        g = np.asarray(g_vz, dtype=float)
+        n = float(np.trapezoid(g, vz))
+        gamma_signed = float(np.trapezoid(vz * g, vz))
+        gamma_plus = float(np.trapezoid(np.clip(vz, 0.0, None) * g, vz))
+        gamma_minus_mag = float(np.trapezoid(np.clip(-vz, 0.0, None) * g, vz))
+        j_signed = charge_C * gamma_signed
+        j_plus = charge_C * gamma_plus
+        j_minus_mag = abs(charge_C) * gamma_minus_mag
+        mean_v = gamma_signed / n if abs(n) > 0.0 else math.nan
+        return {
+            "n_m3": n,
+            "Gamma_signed_m2s": gamma_signed,
+            "Gamma_plus_m2s": gamma_plus,
+            "Gamma_minus_mag_m2s": gamma_minus_mag,
+            "J_signed_Apm2": j_signed,
+            "J_plus_Apm2": j_plus,
+            "J_minus_mag_Apm2": j_minus_mag,
+            "mean_v_mps": mean_v,
+        }
+
+    def vdf_1d_at_z(
+        self,
+        profile: Dict[str, np.ndarray | float | str],
+        z: float,
+        species: Species = "all",
+        unit: ZUnit = "hat",
+        n_v: int = 4001,
+        n_sigma: float = 6.0,
+        ion_sigma_frac: float = 0.03,
+    ) -> Dict[str, object]:
+        """Return reduced 1D velocity distributions at one location.
+
+        The returned arrays satisfy approximately
+            ∫ g(v_z) dv_z = n(z)
+        with the exact branch-wise accessibility rules used in the solver.
+        """
+        state = self.sample_at_z(profile, z, unit=unit)
+        out: Dict[str, object] = {"state": state, "species": species}
+
+        if species in {"swe", "all"}:
+            vz_swe = self._velocity_grid_for_species(state, "swe", n_v, n_sigma)
+            out["swe"] = self._swe_vdf_components(state, vz_swe)
+        if species in {"phe", "all"}:
+            vz_phe = self._velocity_grid_for_species(state, "phe", n_v, n_sigma)
+            out["phe"] = self._phe_vdf_components(state, vz_phe)
+        if species in {"swi", "all"}:
+            vz_swi = self._velocity_grid_for_species(state, "swi", n_v, n_sigma)
+            out["swi"] = self._swi_vdf_components(state, vz_swi, ion_sigma_frac=ion_sigma_frac)
+        return out
+
+    def fluxes_at_z(
+        self,
+        profile: Dict[str, np.ndarray | float | str],
+        z: float,
+        unit: ZUnit = "hat",
+        n_v: int = 4001,
+        n_sigma: float = 6.0,
+        ion_sigma_frac: float = 0.03,
+    ) -> Dict[str, float | str]:
+        """Return local particle fluxes and current densities at one position."""
+        state = self.sample_at_z(profile, z, unit=unit)
+        vdfs = self.vdf_1d_at_z(
+            profile,
+            z,
+            species="all",
+            unit=unit,
+            n_v=n_v,
+            n_sigma=n_sigma,
+            ion_sigma_frac=ion_sigma_frac,
+        )
+
+        swe = vdfs["swe"]
+        phe = vdfs["phe"]
+        swi = vdfs["swi"]
+
+        swe_total = self._moments_from_reduced_vdf(swe["vz_mps"], swe["g_total"], -QE)
+        phe_total = self._moments_from_reduced_vdf(phe["vz_mps"], phe["g_total"], -QE)
+        swi_total = self._moments_from_reduced_vdf(swi["vz_mps"], swi["g_total"], QE)
+
+        swe_free = self._moments_from_reduced_vdf(swe["vz_mps"], swe["g_free_incoming"], -QE)
+        swe_ref_in = self._moments_from_reduced_vdf(swe["vz_mps"], swe["g_reflected_incoming"], -QE)
+        swe_ref_out = self._moments_from_reduced_vdf(swe["vz_mps"], swe["g_reflected_outgoing"], -QE)
+        phe_free = self._moments_from_reduced_vdf(phe["vz_mps"], phe["g_free_outgoing"], -QE)
+        phe_cap_out = self._moments_from_reduced_vdf(phe["vz_mps"], phe["g_captured_outgoing"], -QE)
+        phe_cap_ret = self._moments_from_reduced_vdf(phe["vz_mps"], phe["g_captured_returning"], -QE)
+
+        net_gamma = (
+            swe_total["Gamma_signed_m2s"]
+            + phe_total["Gamma_signed_m2s"]
+            + swi_total["Gamma_signed_m2s"]
+        )
+        net_current = (
+            swe_total["J_signed_Apm2"]
+            + phe_total["J_signed_Apm2"]
+            + swi_total["J_signed_Apm2"]
+        )
+
+        out: Dict[str, float | str] = {
+            **state,
+            "Gamma_net_m2s": float(net_gamma),
+            "J_net_Apm2": float(net_current),
+            "Gamma_swi_signed_m2s": float(swi_total["Gamma_signed_m2s"]),
+            "J_swi_signed_Apm2": float(swi_total["J_signed_Apm2"]),
+            "mean_v_swi_mps": float(swi_total["mean_v_mps"]),
+            "Gamma_swe_signed_m2s": float(swe_total["Gamma_signed_m2s"]),
+            "J_swe_signed_Apm2": float(swe_total["J_signed_Apm2"]),
+            "mean_v_swe_mps": float(swe_total["mean_v_mps"]),
+            "Gamma_phe_signed_m2s": float(phe_total["Gamma_signed_m2s"]),
+            "J_phe_signed_Apm2": float(phe_total["J_signed_Apm2"]),
+            "mean_v_phe_mps": float(phe_total["mean_v_mps"]),
+            "Gamma_swe_free_incoming_m2s": float(swe_free["Gamma_signed_m2s"]),
+            "Gamma_swe_reflected_incoming_m2s": float(swe_ref_in["Gamma_signed_m2s"]),
+            "Gamma_swe_reflected_outgoing_m2s": float(swe_ref_out["Gamma_signed_m2s"]),
+            "Gamma_phe_free_outgoing_m2s": float(phe_free["Gamma_signed_m2s"]),
+            "Gamma_phe_captured_outgoing_m2s": float(phe_cap_out["Gamma_signed_m2s"]),
+            "Gamma_phe_captured_returning_m2s": float(phe_cap_ret["Gamma_signed_m2s"]),
+            "J_swe_free_incoming_Apm2": float(swe_free["J_signed_Apm2"]),
+            "J_swe_reflected_incoming_Apm2": float(swe_ref_in["J_signed_Apm2"]),
+            "J_swe_reflected_outgoing_Apm2": float(swe_ref_out["J_signed_Apm2"]),
+            "J_phe_free_outgoing_Apm2": float(phe_free["J_signed_Apm2"]),
+            "J_phe_captured_outgoing_Apm2": float(phe_cap_out["J_signed_Apm2"]),
+            "J_phe_captured_returning_Apm2": float(phe_cap_ret["J_signed_Apm2"]),
+        }
+        return out
