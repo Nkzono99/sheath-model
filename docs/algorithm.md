@@ -358,3 +358,15 @@ This is intended to support both plotting and regression testing.
 - expose branch equations in a separate `equations.py`
 - add a notebook comparing Type A/B/C across solar zenith angle
 - document the exact correspondence between code expressions and equation numbers in the paper
+
+## Fortran library
+
+The independent Fortran implementation is described in [Fortran API](fortran-api.md).
+`solve_equilibrium` imposes zero net current; `solve_prescribed_field` accepts
+the normal field E_H in V/m and leaves the current unconstrained. Both return
+physical potentials, densities, particle fluxes, and the outward conventional
+current `J_z = e (Gamma_e,in - Gamma_i,in - Gamma_pe,escape)`.
+
+Fortran also exposes local densities and profiles for the zero-current solution.
+Its B/C profiles use the first integral with zero field at infinity, whereas
+this Python implementation retains its finite-interval Dirichlet BVP.

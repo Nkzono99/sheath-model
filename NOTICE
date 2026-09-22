@@ -1,0 +1,19 @@
+sheath-model
+Copyright (c) 2026 Jin Nakazono
+
+The Zhao numerical equations and prescribed-field root solver in
+  src/internal/sheath_model_core.f90
+  src/sheath_model_field.f90
+  src/internal/sheath_model_field_*.f90
+are adapted from BEACH's src/physics/sheath/zhao/:
+https://github.com/Nkzono99/BEACH
+Revision: 3a6ed66daf28ac59def5a53d391f3a8a949bedba
+These files are licensed under Apache-2.0 (LICENSES/Apache-2.0.txt).
+
+Modifications extract the sheath equations and root search into a standalone
+library with physical inputs and results. Application-specific array contracts,
+boundary response adapters, continuation/restart state, inactive outflow moments,
+and population-fraction coupling have been removed. Process termination has
+been replaced with status results. Particle flux and current outputs were added.
+
+Other files retain the MIT license in LICENSE unless marked otherwise.
