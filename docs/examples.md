@@ -82,6 +82,12 @@ A+B などは同じ条件で複数の Type が得られたことを表し、安�
 CSV の Type はビット値 `A=1, B=2, C=4` の和です。例えば `types_found=3` は A+B を表します。
 `unresolved_types` と `rejected_types` も同じビット表現を使い、採用解の有無とは別に探索結果を記録します。
 `candidate_count` は報告された候補数です。
+E_H 側は枝ごとの `zhao_field_search_diagnostics` から未解決・棄却のビットを記録し、
+採用候補がある格子点でも未解決の初期値を保持します。
+掲載マップでは各格子点を独立に探索し、近隣解は初期値に使っていません。
+低電場の浅い Type A や A/B の境界付近では初期値による検出差が残ります。
+連続したパラメータ掃引では [field_sweep.f90](../example/field_sweep.f90) のように
+近隣解も渡すことで、独立探索で漏れる枝を回収できる場合があります。
 
 ## 図を再生成する
 
@@ -128,11 +134,13 @@ KUDPC 等の共有環境では、ビルド・ソルバー・テスト・描画�
 fpm build
 fpm test
 fpm run --example compare_closures
+fpm run --example field_sweep
 fpm run --example equilibrium_profile
 fpm install --prefix ./install
 ```
 
 [compare_closures.f90](../example/compare_closures.f90) は J=0 と E_H 指定の比較、
+[field_sweep.f90](../example/field_sweep.f90) は近隣解を初期値に加える電場掃引、
 [equilibrium_profile.f90](../example/equilibrium_profile.f90) は J=0 の高さ・電位・電場・電荷密度の CSV 出力です。
 後者は標準のプロファイル設定を使うため、README の図とは遠方の打ち切りが異なります。
 

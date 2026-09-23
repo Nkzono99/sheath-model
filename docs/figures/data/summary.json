@@ -61,15 +61,14 @@
         129
       ],
       "displayed_category_counts": {
-        "Candidates rejected": 10,
         "A": 1406,
-        "B": 204,
-        "A + B": 1841,
-        "C": 16422,
+        "B": 98,
+        "A + B": 1980,
+        "C": 16550,
         "B + C": 44,
-        "No root resolved": 13226
+        "No root resolved": 13075
       },
-      "cells_with_unresolved_search": 13226,
+      "cells_with_unresolved_search": 26721,
       "maximum_candidates_reported": 3
     }
   }

@@ -134,12 +134,29 @@ Fortran とのバインディングはなく、局所流束・速度分布の診
 | ドキュメント | 内容 |
 | --- | --- |
 | [図と計算例](docs/examples.md) | 図の条件、CSV / PDF、再生成手順、実行例 |
-| [Fortran API](docs/fortran-api.md) | 入出力・単位・既定値・ステータス・候補選択 |
+| [Fortran API](docs/fortran-api.md) | 入出力・単位・既定値・探索診断・近隣解の利用 |
 | [運動論モデル](docs/kinetic-model.md) | 軌道保存、半無限上流条件、解の採用条件 |
 | [Algorithm notes](docs/algorithm.md) | Python モデルの式と数値解法 |
 
 図の A/C は無ドリフト電子の例です。正の内向き電子ドリフトと完全反射を仮定した A/C は、
 このモデルの半無限上流条件に接続できません。詳細は [運動論モデル](docs/kinetic-model.md) に記載しています。
+
+## 開発時の整形
+
+Fortran は [fprettify](https://github.com/fortran-lang/fprettify/tree/v0.3.7) で空白を整え、
+[findent](https://pypi.org/project/findent/4.3.6/) で submodule を含む構文の字下げを統一し、
+[pre-commit](https://pre-commit.com/) でコミット時に自動整形します。
+リポジトリ直下で一度設定してください。
+
+```bash
+python -m pip install -e '.[dev]'
+pre-commit install
+pre-commit run --all-files
+```
+
+対象は `src/`・`test/`・`example/` の `.f90`、インデントは2文字、行長の目安は132文字です。
+整形で変更されたファイルは確認して再度 stage し、コミットします。
+`build/` の生成物と `outputs/` の検証用 snapshot は対象外です。
 
 ## ライセンス
 

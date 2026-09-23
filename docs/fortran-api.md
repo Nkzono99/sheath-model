@@ -110,6 +110,56 @@ A の極小が境界へ合流したゼロ電場端点は C として一度だけ
 有限個の初期値による探索で全パラメータ域の存在・一意性を保証するものではありません。
 探索は指定枝に限定します。ただし A/C のゼロ電場端点は共通の C 表現にまとめます。
 
+## E_H 探索の診断と近隣解の利用
+
+両方の E_H 関数は、末尾に省略可能な `diagnostics` と `initial_guesses` を受け取ります。
+
+```fortran
+type(zhao_field_search_diagnostics) :: diagnostics
+type(zhao_field_result), allocatable :: previous(:), candidates(:)
+
+allocate(previous(0))
+call solve_prescribed_field_candidates(input, candidates, status, message, &
+                                      diagnostics=diagnostics, initial_guesses=previous)
+if (status == sheath_ok) call move_alloc(candidates, previous)
+```
+
+次の呼び出しでは電場などを更新し、`previous` を再び渡せます。
+出力配列と初期推定配列には**別の変数**を使ってください。出力配列は呼び出し時に未確保へ戻ります。
+完全な掃引例は [field_sweep.f90](../example/field_sweep.f90) です。
+
+標準の初期値は、電位を光電子温度、密度を上流イオン密度で規格化して作ります。
+放出強度、指定電場、イオンの到達限界も使い、重複を除いた最大16個の初期値を各枝で試します。
+電子密度の初期値は可能な範囲で上流準中性条件に合わせます。
+`initial_guesses(:)` は前回得た `zhao_field_result` の配列で、標準の探索に追加されます。
+`valid=.false.`、対象外の枝、非有限値、枝の電位制約を満たさない候補は初期値として使いません。
+対数変換で表せない平坦解も初期値には使わず、ゼロ電場の候補として別途検査します。
+初期値から根への対応や根の並び順は保証しません。近隣解の利用によって物理条件や枝の選択方針は変えません。
+
+`zhao_field_search_diagnostics` の各フィールドは長さ3の配列で、順番は **A、B、C** です。
+
+| フィールド | 意味 |
+| --- | --- |
+| `searched` | 呼び出しで探索対象とした枝 |
+| `excluded` | 電場の符号・ドリフトと上流条件の不整合によって、数値探索前に除外した枝 |
+| `starts` | 実際に Newton 法を開始した回数 |
+| `unconverged` | 非収束または根の復元に失敗した初期値の数 |
+| `rejected` | 代数根に収束したが物理プロファイル条件で棄却された初期値の数 |
+| `profile_failures` | プロファイル積分・指定電場の照合が数値的に失敗した初期値の数 |
+| `roots_found` | 重複除去後の物理候補数。A/C の合流点は C として数える |
+
+`rejected` などは初期値ごとの回数であり、異なる根の数とは限りません。
+診断は成功・曖昧性・失敗のいずれでも返し、入力エラーでは初期状態に戻します。
+
+候補が一つもなく、非収束・評価失敗・開始できなかった探索が残っている場合は、
+棄却された根があっても **`sheath_numerical_failure`** を返します。
+すべての対象枝が事前に除外されたか、試した全初期値が物理的棄却に至った場合は
+`sheath_no_physical_solution` です。有限探索による後者の判定も、全根の不存在証明ではありません。
+
+採用候補があれば候補列挙は `sheath_ok` として結果を返し、未解決の探索は診断と `message` に残します。
+単一解の関数は発見した候補が一つなら成功、複数なら `sheath_ambiguous_solution` です。
+**成功や候補が一つという結果は、探索の完了や数学的な一意性の保証ではありません。**
+
 ## 結果
 
 両結果型に共通する物理量です。
@@ -165,7 +215,7 @@ Python の B/C も同じ半無限条件の一次積分です。`n_profile_grid` 
 | --- | --- | --- |
 | `sheath_ok` | 0 | 成功 |
 | `sheath_invalid_argument` | 1 | 不正な入力、設定、評価範囲 |
-| `sheath_no_physical_solution` | 2 | 指定電場・枝で物理解が成立しない |
+| `sheath_no_physical_solution` | 2 | 物理条件による除外・棄却。E_H 探索では未解決の試行が残らない場合 |
 | `sheath_numerical_failure` | 3 | 収束失敗、非有限値、プロファイル積分失敗等 |
 | `sheath_ambiguous_solution` | 4 | 複数の物理解を検出した |
 

@@ -26,10 +26,10 @@ program test_closures
     vth_pe = sqrt(2.0_dp*qe*input%photoelectron_temperature_ev/input%electron_mass_kg)
     ! Direct velocity quadrature is independent of the solver's erfc expression.
     gamma_e = integrate_electron_flux(root%ambient_electron_density_m3, vth_e, 0.0_dp, &
-                                      sqrt(-root%minimum_potential_v/input%electron_temperature_ev))
+        sqrt(-root%minimum_potential_v/input%electron_temperature_ev))
     gamma_i = input%ion_density_m3*drift
     gamma_pe = n_source*vth_pe/(2.0_dp*sqrt(pi))* &
-               exp((root%minimum_potential_v - root%surface_potential_v)/input%photoelectron_temperature_ev)
+        exp((root%minimum_potential_v - root%surface_potential_v)/input%photoelectron_temperature_ev)
     current_scale = qe*max(gamma_e, gamma_i, gamma_pe)
     call near(qe*(gamma_e - gamma_i - gamma_pe), 0.0_dp, 1e-8_dp*current_scale, 'independent J=0 current integral')
     call near(root%net_current_a_m2, 0.0_dp, 1e-8_dp*current_scale, 'reported equilibrium current')
@@ -60,13 +60,13 @@ program test_closures
   do i = 1, size(responses)
     response = responses(i)
     call near(integrate_type_a_field(response%boundary_potential_v, response%minimum_potential_v, &
-                        response%ambient_electron_density_m3), field_input%electric_field_v_m, 2e-6_dp, 'independent Sagdeev field')
+        response%ambient_electron_density_m3), field_input%electric_field_v_m, 2e-6_dp, 'independent Sagdeev field')
     gamma_pe = n_source*vth_pe/(2.0_dp*sqrt(pi))* &
-             exp((response%minimum_potential_v - response%boundary_potential_v)/input%photoelectron_temperature_ev)
+        exp((response%minimum_potential_v - response%boundary_potential_v)/input%photoelectron_temperature_ev)
     current_scale = qe*response%electron_inward_flux_m2_s
     call near(response%photoelectron_escape_flux_m2_s, gamma_pe, 1e-12_dp*gamma_pe, 'E_H escaping flux')
     call near(response%net_current_a_m2, qe*(response%electron_inward_flux_m2_s - &
-                                        response%ion_inward_flux_m2_s - gamma_pe), 1e-12_dp*current_scale, 'E_H current diagnostic')
+        response%ion_inward_flux_m2_s - gamma_pe), 1e-12_dp*current_scale, 'E_H current diagnostic')
     call check(abs(response%net_current_a_m2) > 1e-3_dp*current_scale, 'E_H model does not impose J=0')
   end do
   print *, 'J=0 and E_H closure checks passed.'

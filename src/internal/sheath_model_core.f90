@@ -64,16 +64,16 @@ contains
     real(dp) :: n_swi_hat, n_swe_f_hat, n_swe_r_hat, n_phe_f_hat, n_phe_c_hat
 
     call evaluate_zhao_density_hat( &
-      p, branch, side, phi_hat, phi0_hat, phi_m_hat, n_swe_inf_hat, &
-      n_swi_hat, n_swe_f_hat, n_swe_r_hat, n_phe_f_hat, n_phe_c_hat &
-      )
+        p, branch, side, phi_hat, phi0_hat, phi_m_hat, n_swe_inf_hat, &
+        n_swi_hat, n_swe_f_hat, n_swe_r_hat, n_phe_f_hat, n_phe_c_hat &
+        )
     rho_hat = n_swi_hat - n_swe_f_hat - n_swe_r_hat - n_phe_f_hat - n_phe_c_hat
   end subroutine evaluate_zhao_rho_hat
 
   subroutine evaluate_zhao_density_hat( &
-    p, branch, side, phi_hat, phi0_hat, phi_m_hat, n_swe_inf_hat, &
-    n_swi_hat, n_swe_f_hat, n_swe_r_hat, n_phe_f_hat, n_phe_c_hat &
-    )
+      p, branch, side, phi_hat, phi0_hat, phi_m_hat, n_swe_inf_hat, &
+      n_swi_hat, n_swe_f_hat, n_swe_r_hat, n_phe_f_hat, n_phe_c_hat &
+      )
     type(zhao_params_type), intent(in) :: p
     character(len=1), intent(in) :: branch
     character(len=*), intent(in) :: side
@@ -291,14 +291,14 @@ contains
       if (branch == 'B') then
         phi_right = min(phi_limit, 2.0_dp*phi_right)
         call evaluate_monotonic_stationary_phi( &
-          p, branch, phi_right, residual_right, density_right, right_ok &
-          )
+            p, branch, phi_right, residual_right, density_right, right_ok &
+            )
         if (.not. right_ok .or. phi_right >= phi_limit) exit
       else
         phi_left = max(phi_limit, 2.0_dp*phi_left)
         call evaluate_monotonic_stationary_phi( &
-          p, branch, phi_left, residual_left, density_left, left_ok &
-          )
+            p, branch, phi_left, residual_left, density_left, left_ok &
+            )
         if (.not. left_ok .or. phi_left <= phi_limit) exit
       end if
     end do
@@ -315,8 +315,8 @@ contains
       do iteration = 1, 160
         phi_mid = phi_left + 0.5_dp*(phi_right - phi_left)
         call evaluate_monotonic_stationary_phi( &
-          p, branch, phi_mid, residual_mid, density_mid, mid_ok &
-          )
+            p, branch, phi_mid, residual_mid, density_mid, mid_ok &
+            )
         if (.not. mid_ok) return
         if (residual_mid == 0.0_dp) then
           phi_left = phi_mid
@@ -339,8 +339,8 @@ contains
       end do
       phi_mid = phi_left + 0.5_dp*(phi_right - phi_left)
       call evaluate_monotonic_stationary_phi( &
-        p, branch, phi_mid, residual_mid, density_mid, mid_ok &
-        )
+          p, branch, phi_mid, residual_mid, density_mid, mid_ok &
+          )
       if (.not. mid_ok) return
       x = [phi_mid, density_mid]
     end if
@@ -351,8 +351,8 @@ contains
       call zhao_residuals_type_c(p, x, residual)
     end if
     success = all(ieee_is_finite(x)) .and. all(ieee_is_finite(residual)) .and. &
-              x(2) > 0.0_dp .and. residual_norm(residual) <= &
-              max(nonlinear_tol, 1024.0_dp*epsilon(1.0_dp)*residual_scale)
+        x(2) > 0.0_dp .and. residual_norm(residual) <= &
+        max(nonlinear_tol, 1024.0_dp*epsilon(1.0_dp)*residual_scale)
   end subroutine try_solve_zhao_monotonic_scalar
 
   subroutine evaluate_monotonic_stationary_phi(p, branch, phi_v, residual_v, density_m3, success)
@@ -380,8 +380,8 @@ contains
       return
     end select
     ion_term = p%n_swi_inf_m3*sqrt( &
-               2.0_dp*pi*p%t_swe_ev/p%t_phe_ev*p%m_e_kg/p%m_i_kg &
-               )*p%mach
+        2.0_dp*pi*p%t_swe_ev/p%t_phe_ev*p%m_e_kg/p%m_i_kg &
+        )*p%mach
     coefficient = swe_free_current_term(p, 1.0_dp, cutoff)
     if (.not. all(ieee_is_finite([source_current_term, ion_term, coefficient])) .or. &
         coefficient <= 0.0_dp) return
@@ -417,8 +417,8 @@ contains
     ion_term = p%n_swi_inf_m3*sqrt(2.0d0*pi*p%t_swe_ev/p%t_phe_ev*p%m_e_kg/p%m_i_kg)*p%mach
 
     f(1) = 0.5d0*n_swe_inf_m3*(1.0d0 + 2.0d0*erf(p%u) + erf(a_swe)) + &
-           0.5d0*p%n_phe0_m3* &
-           exp(-phi0_v/p%t_phe_ev)*(1.0d0 - erf(a_phe)) - p%n_swi_inf_m3
+        0.5d0*p%n_phe0_m3* &
+        exp(-phi0_v/p%t_phe_ev)*(1.0d0 - erf(a_phe)) - p%n_swi_inf_m3
     f(2) = p%n_phe0_m3*exp((phi_m_v - phi0_v)/p%t_phe_ev) - swe_free_current_term(p, n_swe_inf_m3, a_swe) + ion_term
     f(3) = type_a_e2_sum_at_infinity(p, phi0_v, phi_m_v, n_swe_inf_m3)
   end subroutine zhao_residuals_type_a
@@ -439,7 +439,7 @@ contains
 
     ion_term = p%n_swi_inf_m3*sqrt(2.0d0*pi*p%t_swe_ev/p%t_phe_ev*p%m_e_kg/p%m_i_kg)*p%mach
     f(1) = 0.5d0*n_swe_inf_m3*(1.0d0 + erf(p%u)) + &
-           0.5d0*p%n_phe0_m3*exp(-phi0_v/p%t_phe_ev) - p%n_swi_inf_m3
+        0.5d0*p%n_phe0_m3*exp(-phi0_v/p%t_phe_ev) - p%n_swi_inf_m3
     f(2) = p%n_phe0_m3*exp(-phi0_v/p%t_phe_ev) - swe_free_current_term(p, n_swe_inf_m3, -p%u) + ion_term
   end subroutine zhao_residuals_type_b
 
@@ -462,8 +462,8 @@ contains
     ion_term = p%n_swi_inf_m3*sqrt(2.0d0*pi*p%t_swe_ev/p%t_phe_ev*p%m_e_kg/p%m_i_kg)*p%mach
 
     f(1) = 0.5d0*n_swe_inf_m3*(1.0d0 + 2.0d0*erf(p%u) + erf(a_swe)) + &
-           0.5d0*p%n_phe0_m3* &
-           exp(-phi0_v/p%t_phe_ev)*erfc(a_phe) - p%n_swi_inf_m3
+        0.5d0*p%n_phe0_m3* &
+        exp(-phi0_v/p%t_phe_ev)*erfc(a_phe) - p%n_swi_inf_m3
     f(2) = p%n_phe0_m3 - swe_free_current_term(p, n_swe_inf_m3, a_swe) + ion_term
   end subroutine zhao_residuals_type_c
 
@@ -472,7 +472,7 @@ contains
     real(dp), intent(in) :: n_swe_inf_m3, a_swe
 
     term = n_swe_inf_m3*(sqrt(p%t_swe_ev/p%t_phe_ev)*exp(-(a_swe*a_swe)) + &
-                         sqrt(pi)*(p%v_d_electron_mps/p%v_phe_th_mps)*erfc(a_swe))
+        sqrt(pi)*(p%v_d_electron_mps/p%v_phe_th_mps)*erfc(a_swe))
   end function swe_free_current_term
 
   real(dp) function type_a_e2_sum_at_infinity(p, phi0_v, phi_m_v, n_swe_inf_m3) result(e2_sum)
@@ -481,7 +481,7 @@ contains
 
     ! Integrate the same orbit densities used in Poisson's equation. No 1/u term.
     e2_sum = -2.0_dp*integrate_zhao_rho(p, 'A', 'upper', phi_m_v/p%t_phe_ev, 0.0_dp, &
-                                        phi0_v/p%t_phe_ev, phi_m_v/p%t_phe_ev, n_swe_inf_m3/p%n_phe_ref_m3)
+        phi0_v/p%t_phe_ev, phi_m_v/p%t_phe_ev, n_swe_inf_m3/p%n_phe_ref_m3)
   end function type_a_e2_sum_at_infinity
 
   real(dp) function integrate_zhao_rho(p, branch, side, lo, hi, phi0, phim, density) result(value)

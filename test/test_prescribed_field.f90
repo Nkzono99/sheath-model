@@ -48,7 +48,7 @@ program test_prescribed_field
   call near(output%minimum_potential_v, output%boundary_potential_v, 0.0_dp, 'C minimum')
   call near(output%photoelectron_escape_flux_m2_s, 0.0_dp, 0.0_dp, 'no emission')
   call near(output%net_current_a_m2, qe*(output%electron_inward_flux_m2_s - output%ion_inward_flux_m2_s), &
-            1e-18_dp, 'C net current')
+      1e-18_dp, 'C net current')
   input%branch = 'B'
   call solve_prescribed_field(input, output, status, message)
   call check(status == sheath_no_physical_solution, 'explicit branch does not fall back')

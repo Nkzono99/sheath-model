@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: fortran-format
+        name: Format Fortran (fprettify + findent)
+        entry: python tools/format_fortran.py
+        language: python
+        additional_dependencies: [fprettify==0.3.7, findent==4.3.6]
+        files: ^(src|test|example)/.*\.[fF]90$
+        require_serial: true

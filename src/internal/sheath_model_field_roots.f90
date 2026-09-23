@@ -11,87 +11,88 @@ submodule(sheath_model_field) sheath_model_field_roots
 contains
 
   module procedure solve_field_root
-  type(zhao_field_root), allocatable :: roots(:)
-  root = zhao_field_root()
-  call find_field_roots(model, params, interface_field_v_m, roots, status, message)
-  if (status /= sheath_ok) return
-  if (size(roots) == 1) then
-    root = roots(1)
-  else
-    status = sheath_ambiguous_solution
-    message = 'Multiple admissible roots found; use solve_prescribed_field_candidates to inspect them.'
-  end if
+    type(zhao_field_root), allocatable :: roots(:)
+    root = zhao_field_root()
+    call find_field_roots(model, params, interface_field_v_m, roots, status, message, diagnostics, initial_guesses)
+    if (status /= sheath_ok) return
+    if (size(roots) == 1) then
+      root = roots(1)
+    else
+      status = sheath_ambiguous_solution
+      message = 'Multiple admissible roots found; use solve_prescribed_field_candidates to inspect them.'
+    end if
   end procedure solve_field_root
 
   module procedure find_field_roots
-  character(len=1) :: order(3)
-  type(zhao_field_root) :: found(25), candidates(8), flat
-  real(dp) :: field_scale, target, density
-  integer :: branch_count, i, j, k, count, n
-  logical :: nonphysical, failed_profile, duplicate, saw_nonphysical, saw_failure, unresolved_search
-  field_scale = params%t_phe_ev/params%lambda_d_phe_ref_m
-  target = interface_field_v_m/field_scale
-  status = sheath_numerical_failure
-  message = 'Invalid field normalization.'
-  if (.not. ieee_is_finite(target) .or. field_scale <= 0.0_dp) return
-  call field_branch_order(model, target, order, branch_count, status, message)
-  if (status /= sheath_ok) return
-  n = 0
-  saw_nonphysical = .false.
-  saw_failure = .false.
-  unresolved_search = .false.
-  ! The flat state is one candidate, never a shortcut around the non-flat search.
-  if (interface_field_v_m == 0.0_dp .and. (model == 'auto' .or. model == 'b')) then
-    density = (2.0_dp*params%n_swi_inf_m3 - params%n_phe0_m3)/(1.0_dp + erf(params%u))
-    if (density > 0.0_dp .and. ieee_is_finite(density)) then
-      flat = zhao_field_root()
-      flat%branch = 'B'
-      flat%ambient_electron_density_m3 = density
-      flat%residual_norm = 0.0_dp
-      flat%minimum_field_squared_hat = 0.0_dp
-      n = 1
-      found(n) = flat
+    character(len=1) :: order(3)
+    type(zhao_field_root), allocatable :: found(:), candidates(:)
+    type(zhao_field_root) :: flat
+    real(dp) :: field_scale, target, density
+    integer :: branch_count, i, j, k, count, n, capacity, branch_index
+    logical :: duplicate, unresolved
+
+    diagnostics = zhao_field_search_diagnostics()
+    field_scale = params%t_phe_ev/params%lambda_d_phe_ref_m
+    target = interface_field_v_m/field_scale
+    status = sheath_numerical_failure
+    message = 'Invalid field normalization.'
+    if (.not. ieee_is_finite(target) .or. field_scale <= 0.0_dp) return
+    call field_branch_order(model, target, order, branch_count, status, message)
+    if (status /= sheath_ok) return
+    capacity = default_field_starts
+    if (present(initial_guesses)) capacity = capacity + size(initial_guesses)
+    allocate (found(3*capacity + 1))
+    n = 0
+    ! The flat state is one candidate, never a shortcut around the non-flat search.
+    if (interface_field_v_m == 0.0_dp .and. (model == 'auto' .or. model == 'b')) then
+      density = (2.0_dp*params%n_swi_inf_m3 - params%n_phe0_m3)/(1.0_dp + erf(params%u))
+      if (density > 0.0_dp .and. ieee_is_finite(density)) then
+        flat = zhao_field_root()
+        flat%branch = 'B'
+        flat%ambient_electron_density_m3 = density
+        flat%residual_norm = 0.0_dp
+        flat%minimum_field_squared_hat = 0.0_dp
+        n = 1
+        found(n) = flat
+      end if
     end if
-  end if
-  do i = 1, branch_count
-    call collect_field_branch_roots(params, order(i), target, candidates, count, &
-                                    nonphysical, failed_profile, status, message)
-    saw_nonphysical = saw_nonphysical .or. nonphysical .or. status == sheath_no_physical_solution
-    saw_failure = saw_failure .or. failed_profile
-    unresolved_search = unresolved_search .or. status == sheath_numerical_failure
-    if (status /= sheath_ok) cycle
-    do j = 1, count
-      duplicate = .false.
-      do k = 1, n
-        duplicate = field_roots_equivalent(params, candidates(j), found(k))
-        if (interface_field_v_m == 0.0_dp .and. found(k)%phi0_v == 0.0_dp) then
-          duplicate = duplicate .or. max(abs(candidates(j)%phi0_v), abs(candidates(j)%phi_m_v)) &
-                      < 1e-4_dp*params%t_phe_ev
-        end if
-        if (duplicate) exit
+    do i = 1, branch_count
+      call collect_field_branch_roots(params, order(i), target, candidates, count, diagnostics, initial_guesses)
+      do j = 1, count
+        duplicate = .false.
+        do k = 1, n
+          duplicate = field_roots_equivalent(params, candidates(j), found(k))
+          if (interface_field_v_m == 0.0_dp .and. found(k)%phi0_v == 0.0_dp) then
+            duplicate = duplicate .or. max(abs(candidates(j)%phi0_v), abs(candidates(j)%phi_m_v)) &
+                < 1e-4_dp*params%t_phe_ev
+          end if
+          if (duplicate) exit
+        end do
+        if (duplicate) cycle
+        n = n + 1
+        found(n) = candidates(j)
       end do
-      if (duplicate) cycle
-      n = n + 1
-      found(n) = candidates(j)
     end do
-  end do
-  if (saw_failure) then
-    status = sheath_numerical_failure
-    message = 'A candidate profile integral could not be evaluated.'
-    return
-  end if
-  if (n == 0) then
-    status = sheath_numerical_failure
-    message = 'No root converged in the finite multistart search.'
-    if (saw_nonphysical .and. .not. unresolved_search) then
-      status = sheath_no_physical_solution
-      message = 'No admissible profile found among the converged roots or compatible branches.'
+    do i = 1, n
+      branch_index = index('ABC', found(i)%branch)
+      diagnostics%roots_found(branch_index) = diagnostics%roots_found(branch_index) + 1
+    end do
+    unresolved = any(diagnostics%unconverged > 0 .or. diagnostics%profile_failures > 0 .or. &
+        (diagnostics%searched .and. .not. diagnostics%excluded .and. diagnostics%starts == 0))
+    if (n == 0) then
+      if (unresolved) then
+        status = sheath_numerical_failure
+        message = 'No admissible root found; some starts or profile evaluations remain unresolved.'
+      else
+        status = sheath_no_physical_solution
+        message = 'All searched branches or converged candidates were excluded by physical conditions.'
+      end if
+      return
     end if
-    return
-  end if
-  roots = found(:n)
-  status = sheath_ok
-  message = ''
+    roots = found(:n)
+    status = sheath_ok
+    message = ''
+    if (unresolved) message = 'Admissible candidates found; some starts or profile evaluations remain unresolved.'
   end procedure find_field_roots
 
   subroutine field_branch_order(model, target_field_hat, order, count, status, message)
@@ -129,58 +130,70 @@ contains
     end select
   end subroutine field_branch_order
 
-  subroutine collect_field_branch_roots( &
-    params, branch, target_field_hat, unique_roots, unique_count, &
-    saw_nonphysical_profile, saw_numerical_profile_failure, status, message &
-    )
+  subroutine collect_field_branch_roots(params, branch, target_field_hat, unique_roots, unique_count, &
+      diagnostics, initial_guesses)
     type(zhao_params_type), intent(in) :: params
     character(len=1), intent(in) :: branch
     real(dp), intent(in) :: target_field_hat
-    type(zhao_field_root), intent(out) :: unique_roots(8)
+    type(zhao_field_root), allocatable, intent(out) :: unique_roots(:)
     integer, intent(out) :: unique_count
-    logical, intent(out) :: saw_nonphysical_profile, saw_numerical_profile_failure
-    integer(i32), intent(out) :: status
-    character(len=*), intent(out) :: message
+    type(zhao_field_search_diagnostics), intent(inout) :: diagnostics
+    type(zhao_field_result), intent(in), optional :: initial_guesses(:)
 
-    real(dp) :: guesses(3, 8), y(3), norm
+    real(dp) :: defaults(3, default_field_starts), y(3), norm, encoded(3)
+    real(dp), allocatable :: guesses(:, :)
     type(zhao_field_root) :: candidate_root
-    integer :: guess_count, guess_index, iterations, root_index
+    integer :: guess_count, default_count, guess_index, iterations, root_index, k, capacity
     integer(i32) :: profile_status
     logical :: success, compatible, duplicate_root
     character(len=512) :: profile_message
 
-    unique_roots = zhao_field_root()
+    k = index('ABC', branch)
     unique_count = 0
-    saw_nonphysical_profile = .false.
-    saw_numerical_profile_failure = .false.
-    status = sheath_no_physical_solution
-    message = ''
+    diagnostics%searched(k) = .true.
     compatible = (branch == 'C' .and. target_field_hat <= 0.0_dp) .or. &
-                 ((branch == 'A' .or. branch == 'B') .and. target_field_hat >= 0.0_dp)
-    if (.not. compatible) then
-      message = 'Zhao branch and boundary field signs are incompatible.'
+        ((branch == 'A' .or. branch == 'B') .and. target_field_hat >= 0.0_dp)
+    if (.not. compatible .or. ((branch == 'A' .or. branch == 'C') .and. params%u > 0.0_dp)) then
+      diagnostics%excluded(k) = .true.
       return
     end if
 
-    if ((branch == 'A' .or. branch == 'C') .and. params%u > 0.0_dp) then
-      saw_nonphysical_profile = .true.
-      message = 'Reflected drifting electrons cannot approach neutral zero-field infinity.'
-      return
+    capacity = default_field_starts
+    if (present(initial_guesses)) capacity = capacity + size(initial_guesses)
+    allocate (guesses(3, capacity), unique_roots(capacity))
+    guess_count = 0
+    ! Nearby physical solutions supplement the independent starts; they do not
+    ! select a preferred root or change the specified plasma/boundary conditions.
+    if (present(initial_guesses)) then
+      do guess_index = 1, size(initial_guesses)
+        if (.not. initial_guesses(guess_index)%valid .or. initial_guesses(guess_index)%branch /= branch) cycle
+        call encode_field_unknowns(params, branch, initial_guesses(guess_index)%boundary_potential_v, &
+            initial_guesses(guess_index)%minimum_potential_v, &
+            initial_guesses(guess_index)%ambient_electron_density_m3, encoded, success)
+        if (.not. success) cycle
+        guess_count = guess_count + 1
+        guesses(:, guess_count) = encoded
+      end do
     end if
-
-    call make_field_branch_guesses(params, branch, guesses, guess_count)
+    call make_field_branch_guesses(params, branch, target_field_hat, defaults, default_count)
+    guesses(:, guess_count + 1:guess_count + default_count) = defaults(:, :default_count)
+    guess_count = guess_count + default_count
     do guess_index = 1, guess_count
-      call newton_field_branch( &
-        params, branch, target_field_hat, guesses(:, guess_index), y, norm, iterations, success &
-        )
-      if (.not. success) cycle
+      diagnostics%starts(k) = diagnostics%starts(k) + 1
+      call newton_field_branch(params, branch, target_field_hat, guesses(:, guess_index), &
+          y, norm, iterations, success)
+      if (.not. success) then
+        diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1
+        cycle
+      end if
       candidate_root = zhao_field_root()
       candidate_root%branch = branch
-      call decode_field_unknowns( &
-        params, branch, y, candidate_root%phi0_v, candidate_root%phi_m_v, &
-        candidate_root%ambient_electron_density_m3, success &
-        )
-      if (.not. success) cycle
+      call decode_field_unknowns(params, branch, y, candidate_root%phi0_v, candidate_root%phi_m_v, &
+          candidate_root%ambient_electron_density_m3, success)
+      if (.not. success) then
+        diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1
+        cycle
+      end if
       if (target_field_hat == 0.0_dp .and. branch == 'A' .and. candidate_root%phi0_v < 0.0_dp .and. &
           candidate_root%phi0_v - candidate_root%phi_m_v < root_cluster_tolerance*params%t_phe_ev) then
         candidate_root%branch = 'C'
@@ -188,14 +201,12 @@ contains
       end if
       candidate_root%residual_norm = norm
       candidate_root%nonlinear_iterations = int(iterations, i32)
-      call validate_field_root_profile( &
-        params, candidate_root, target_field_hat, profile_status, profile_message &
-        )
+      call validate_field_root_profile(params, candidate_root, target_field_hat, profile_status, profile_message)
       if (profile_status == sheath_no_physical_solution) then
-        saw_nonphysical_profile = .true.
+        diagnostics%rejected(k) = diagnostics%rejected(k) + 1
         cycle
       else if (profile_status /= sheath_ok) then
-        saw_numerical_profile_failure = .true.
+        diagnostics%profile_failures(k) = diagnostics%profile_failures(k) + 1
         cycle
       end if
 
@@ -213,11 +224,6 @@ contains
         unique_roots(unique_count) = candidate_root
       end if
     end do
-    status = sheath_ok
-    if (unique_count == 0) then
-      status = sheath_numerical_failure
-      if (saw_nonphysical_profile) status = sheath_no_physical_solution
-    end if
   end subroutine collect_field_branch_roots
 
   pure logical function field_roots_equivalent(params, first, second) result(equivalent)
@@ -236,14 +242,14 @@ contains
     second_phi_m_hat = second%phi_m_v/params%t_phe_ev
     log_density_ratio = log(first%ambient_electron_density_m3/second%ambient_electron_density_m3)
     if (.not. all(ieee_is_finite([ &
-                                 first_phi0_hat, second_phi0_hat, first_phi_m_hat, second_phi_m_hat, &
-                                 log_density_ratio &
-                                 ]))) return
+        first_phi0_hat, second_phi0_hat, first_phi_m_hat, second_phi_m_hat, &
+        log_density_ratio &
+        ]))) return
     equivalent = abs(first_phi0_hat - second_phi0_hat) <= &
-      root_cluster_tolerance*max(1.0_dp, abs(first_phi0_hat), abs(second_phi0_hat)) .and. &
-      abs(first_phi_m_hat - second_phi_m_hat) <= &
-      root_cluster_tolerance*max(1.0_dp, abs(first_phi_m_hat), abs(second_phi_m_hat)) .and. &
-      abs(log_density_ratio) <= root_cluster_tolerance
+        root_cluster_tolerance*max(1.0_dp, abs(first_phi0_hat), abs(second_phi0_hat)) .and. &
+        abs(first_phi_m_hat - second_phi_m_hat) <= &
+        root_cluster_tolerance*max(1.0_dp, abs(first_phi_m_hat), abs(second_phi_m_hat)) .and. &
+        abs(log_density_ratio) <= root_cluster_tolerance
   end function field_roots_equivalent
 
 end submodule sheath_model_field_roots

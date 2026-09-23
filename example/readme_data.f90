@@ -80,7 +80,7 @@ program readme_data
     do j = 1, ny
       do i = 1, nx
         write (unit, '(es16.8,",",es16.8,4(",",i0))') &
-          x(i), ratio(j), types(i, j), unresolved(i, j), rejected(i, j), candidates(i, j)
+            x(i), ratio(j), types(i, j), unresolved(i, j), rejected(i, j), candidates(i, j)
       end do
     end do
     close (unit)
@@ -110,15 +110,15 @@ contains
     do k = 1, size(profile%z_m)
       if (mod(k - 1, 8) /= 0 .and. k /= turning .and. k /= size(profile%z_m)) cycle
       write (file, '(es18.10,3(",",es18.10))') profile%z_m(k), profile%potential_v(k), &
-        profile%electric_field_v_m(k), profile%density(k)%charge_c_m3
+          profile%electric_field_v_m(k), profile%density(k)%charge_c_m3
     end do
     close (file)
     write (unit, '(a,7(",",es18.10))') branch, alpha, profile%equilibrium%surface_potential_v, &
-      profile%equilibrium%minimum_potential_v, profile%equilibrium%ambient_electron_density_m3, &
-      profile%equilibrium%net_current_a_m2, profile%equilibrium%residual_norm, profile%turning_height_m
+        profile%equilibrium%minimum_potential_v, profile%equilibrium%ambient_electron_density_m3, &
+        profile%equilibrium%net_current_a_m2, profile%equilibrium%residual_norm, profile%turning_height_m
     print '(a,a,a,4es16.7)', 'Type ', branch, ' alpha, phi_H, phi_min, J_z: ', alpha, &
-      profile%equilibrium%surface_potential_v, profile%equilibrium%minimum_potential_v, &
-      profile%equilibrium%net_current_a_m2
+        profile%equilibrium%surface_potential_v, profile%equilibrium%minimum_potential_v, &
+        profile%equilibrium%net_current_a_m2
   end subroutine write_profile
 
   subroutine equilibrium_point(alpha, source_ratio, found, unknown, refused)
@@ -156,17 +156,25 @@ contains
     integer, intent(out) :: found, unknown, refused, count
     type(zhao_field_input) :: input
     type(zhao_field_result), allocatable :: roots(:)
+    type(zhao_field_search_diagnostics) :: diagnostics
     integer(i32) :: status
     integer :: k
     character(len=512) :: message
     input = zhao_field_input(electric_field_v_m=field, electron_drift_mps=0.0_dp)
     input%ion_drift_mps = 468.0e3_dp*sin(alpha_field*pi/180.0_dp)
     input%photoelectron_source_density_m3 = input%ion_density_m3*source_ratio*sin(alpha_field*pi/180.0_dp)
-    call solve_prescribed_field_candidates(input, roots, status, message)
+    call solve_prescribed_field_candidates(input, roots, status, message, diagnostics)
     found = 0
     unknown = 0
     refused = 0
     count = 0
+    do k = 1, 3
+      if (diagnostics%unconverged(k) > 0 .or. diagnostics%profile_failures(k) > 0 .or. &
+          (diagnostics%searched(k) .and. .not. diagnostics%excluded(k) .and. diagnostics%starts(k) == 0)) then
+        unknown = ibset(unknown, k - 1)
+      end if
+      if (diagnostics%excluded(k) .or. diagnostics%rejected(k) > 0) refused = ibset(refused, k - 1)
+    end do
     select case (status)
     case (sheath_ok)
       count = size(roots)
@@ -180,10 +188,8 @@ contains
           found = ibset(found, 2)
         end select
       end do
-    case (sheath_no_physical_solution)
-      refused = 7
-    case (sheath_numerical_failure)
-      unknown = 7
+    case (sheath_no_physical_solution, sheath_numerical_failure)
+      ! Keep the branch diagnostics even when no candidate was accepted.
     case default
       error stop 'Unexpected prescribed-field map status.'
     end select

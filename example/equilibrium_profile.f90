@@ -18,6 +18,6 @@ program equilibrium_profile
   print '(a)', 'z_m,potential_v,electric_field_v_m,charge_c_m3'
   do i = 1, size(profile%z_m)
     print '(es24.16,3(",",es24.16))', profile%z_m(i), profile%potential_v(i), &
-      profile%electric_field_v_m(i), profile%density(i)%charge_c_m3
+        profile%electric_field_v_m(i), profile%density(i)%charge_c_m3
   end do
 end program equilibrium_profile

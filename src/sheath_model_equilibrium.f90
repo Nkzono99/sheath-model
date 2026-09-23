@@ -4,8 +4,8 @@ module sheath_model_equilibrium
   use sheath_model_constants, only: dp, i32, pi, eps0, qe, electron_mass, proton_mass, lower_ascii
   use sheath_model_admissibility, only: validate_zhao_profile
   use sheath_model_core, only: zhao_params_type, try_solve_zhao_unknowns, &
-                               evaluate_zhao_density_hat, zhao_residuals_type_a, zhao_residuals_type_b, zhao_residuals_type_c, &
-                               swe_free_current_term
+      evaluate_zhao_density_hat, zhao_residuals_type_a, zhao_residuals_type_b, zhao_residuals_type_c, &
+      swe_free_current_term
   use sheath_model_constants, only: sheath_ok, sheath_invalid_argument, sheath_numerical_failure, sheath_no_physical_solution
   implicit none
   private
@@ -71,8 +71,8 @@ contains
     status = sheath_invalid_argument
     message = 'Equilibrium inputs must be finite.'
     if (.not. all(ieee_is_finite([input%sun_elevation_deg, input%ion_density_m3, &
-                                  input%photoelectron_reference_density_m3, input%electron_temperature_ev, &
-                input%photoelectron_temperature_ev, input%solar_wind_speed_mps, input%ion_mass_kg, input%electron_mass_kg]))) return
+        input%photoelectron_reference_density_m3, input%electron_temperature_ev, &
+        input%photoelectron_temperature_ev, input%solar_wind_speed_mps, input%ion_mass_kg, input%electron_mass_kg]))) return
     message = 'Densities, temperatures, wind speed, and masses must be positive; elevation must be in [0,90].'
     if (min(input%ion_density_m3, input%photoelectron_reference_density_m3, input%electron_temperature_ev, &
         input%photoelectron_temperature_ev, input%solar_wind_speed_mps, input%ion_mass_kg, input%electron_mass_kg) <= 0.0_dp) return
@@ -112,7 +112,7 @@ contains
     status = sheath_numerical_failure
     message = 'Parameter normalization is non-finite or underflowed.'
     if (.not. all(ieee_is_finite([p%v_swe_th_mps, p%v_phe_th_mps, p%cs_mps, p%mach, p%u, p%tau, &
-                                  p%lambda_d_phe_ref_m]))) return
+        p%lambda_d_phe_ref_m]))) return
     if (min(p%v_swe_th_mps, p%v_phe_th_mps, p%cs_mps, p%mach, p%tau, p%lambda_d_phe_ref_m) <= 0.0_dp) return
     status = sheath_ok
     message = ''
@@ -152,7 +152,7 @@ contains
       end if
       if (branch == 'B') phim = 0.0_dp
       call validate_zhao_profile(p, branch, phi0/p%t_phe_ev, phim/p%t_phe_ev, density/p%n_phe_ref_m3, &
-                                 minimum_e2, boundary_e2, status, message)
+          minimum_e2, boundary_e2, status, message)
       if (status == sheath_ok) exit
       if (status == sheath_no_physical_solution) nonphysical = .true.
       if (status == sheath_numerical_failure) unresolved_search = .true.
@@ -179,18 +179,18 @@ contains
     end select
     residual(1:2) = residual(1:2)/p%n_phe_ref_m3
     trial = zhao_equilibrium_result(.false., branch, phi0, phim, density, p%lambda_d_phe_ref_m, &
-                                    maxval(abs(residual)))
+        maxval(abs(residual)))
     cutoff = sqrt(max(0.0_dp, -phim/p%t_swe_ev)) - p%u
     flux_scale = p%v_phe_th_mps/(2.0_dp*sqrt(pi))
     trial%electron_inward_flux_m2_s = flux_scale*swe_free_current_term(p, density, cutoff)
     trial%ion_inward_flux_m2_s = p%n_swi_inf_m3*p%v_d_ion_mps
     trial%photoelectron_escape_flux_m2_s = flux_scale*p%n_phe0_m3*exp((phim - phi0)/p%t_phe_ev)
     trial%net_current_a_m2 = qe*(trial%electron_inward_flux_m2_s - trial%ion_inward_flux_m2_s - &
-                                 trial%photoelectron_escape_flux_m2_s)
+        trial%photoelectron_escape_flux_m2_s)
     status = sheath_numerical_failure
     message = 'Equilibrium flux or current evaluation is non-finite.'
     if (.not. all(ieee_is_finite([trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, &
-                                  trial%photoelectron_escape_flux_m2_s, trial%net_current_a_m2]))) return
+        trial%photoelectron_escape_flux_m2_s, trial%net_current_a_m2]))) return
     trial%valid = .true.
     output = trial
     status = sheath_ok
@@ -216,7 +216,7 @@ contains
     message = 'A valid equilibrium solution and finite potential are required.'
     if (.not. solution%valid) return
     if (.not. all(ieee_is_finite([potential_v, solution%surface_potential_v, solution%minimum_potential_v, &
-                                  solution%ambient_electron_density_m3]))) return
+        solution%ambient_electron_density_m3]))) return
     if (solution%ambient_electron_density_m3 <= 0.0_dp) return
     region = 'monotonic'
     upper = max(solution%surface_potential_v, 0.0_dp)
@@ -236,8 +236,8 @@ contains
     if (potential_v < solution%minimum_potential_v .or. potential_v > upper) return
     if (1.0_dp - 2.0_dp*potential_v/(p%t_swe_ev*p%mach**2) <= 0.0_dp) return
     call evaluate_zhao_density_hat(p, solution%branch, region, potential_v/p%t_phe_ev, &
-                                   solution%surface_potential_v/p%t_phe_ev, solution%minimum_potential_v/p%t_phe_ev, &
-                                   solution%ambient_electron_density_m3/p%n_phe_ref_m3, d(1), d(2), d(3), d(4), d(5))
+        solution%surface_potential_v/p%t_phe_ev, solution%minimum_potential_v/p%t_phe_ev, &
+        solution%ambient_electron_density_m3/p%n_phe_ref_m3, d(1), d(2), d(3), d(4), d(5))
     d = d*p%n_phe_ref_m3
     status = sheath_numerical_failure
     message = 'Density evaluation is non-finite or negative.'
@@ -339,7 +339,7 @@ contains
         if (.not. ieee_is_finite(e2(i)) .or. e2(i) <= 0.0_dp) return
         z(i) = 0.0_dp
         if (i > 1) z(i) = z(i - 1) + 0.5_dp*abs(phi(i) - phi(i - 1))* &
-                          (1.0_dp/sqrt(e2(i)) + 1.0_dp/sqrt(e2(i - 1)))
+            (1.0_dp/sqrt(e2(i)) + 1.0_dp/sqrt(e2(i - 1)))
         v(i) = phi(i)
         e(i) = sign(sqrt(e2(i)), phi0)
         total = i
@@ -379,8 +379,8 @@ contains
       character(len=*), intent(in) :: region
       real(dp), intent(out) :: values(5)
       call evaluate_zhao_density_hat(p, root%branch, region, phi_hat, phi0, phim, &
-                                     root%ambient_electron_density_m3/p%n_phe_ref_m3, &
-                                     values(1), values(2), values(3), values(4), values(5))
+          root%ambient_electron_density_m3/p%n_phe_ref_m3, &
+          values(1), values(2), values(3), values(4), values(5))
     end subroutine density_at
   end subroutine solve_profile
 end module sheath_model_equilibrium

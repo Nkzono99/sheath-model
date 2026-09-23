@@ -30,7 +30,7 @@ program test_sheath_model
     call ok('far-field density')
     call near(density%charge_c_m3, 0.0_dp, qe*equilibrium_input%ion_density_m3*1e-8_dp, 'charge neutrality')
     write (*, '(a,1x,a,3es25.16)') 'equilibrium', root%branch, root%surface_potential_v, &
-      root%minimum_potential_v, root%ambient_electron_density_m3
+        root%minimum_potential_v, root%ambient_electron_density_m3
     call solve_profile(equilibrium_input, options, profile, status, message)
     call ok('profile '//branches(branch_index))
     n = size(profile%z_m)
@@ -44,7 +44,7 @@ program test_sheath_model
       derivative = -(profile%potential_v(i + 1) - profile%potential_v(i - 1))/(profile%z_m(i + 1) - profile%z_m(i - 1))
       call near(profile%electric_field_v_m(i), derivative, 0.003_dp*max(1e-3_dp, abs(derivative)), 'E=-grad(phi)')
       derivative = (profile%electric_field_v_m(i + 1) - profile%electric_field_v_m(i - 1))/ &
-                   (profile%z_m(i + 1) - profile%z_m(i - 1))
+          (profile%z_m(i + 1) - profile%z_m(i - 1))
       midpoint = profile%density(i)%charge_c_m3/eps0
       call near(derivative, midpoint, 0.005_dp*max(1e-4_dp, abs(midpoint)), 'Poisson equation')
     end do
