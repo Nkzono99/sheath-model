@@ -19,6 +19,60 @@ v0.1.0 から解の存在域が変わります。特に正の内向き電子ド�
 完全反射・半無限上流の仮定と両立しないため不採用です。以下の A 枝の例は無ドリフト電子を明示します。
 導出、固定する量と解く量、複数解の扱いは [運動論モデル](docs/kinetic-model.md) に記載しています。
 
+## シース解と Type の範囲
+
+以下は **電子の法線ドリフトをゼロ** とした計算例です。
+共通条件は `n_i=8.7 cm⁻³`、`T_e=12 eV`、`T_pe=2.2 eV`、陽子イオン、
+`v_sw=468 km/s`、`v_i=v_sw sin(alpha)` です。`alpha` は太陽高度、上流の電位基準は 0 V です。
+
+### Type A/B/C の 1D プロファイル
+
+`J=0`、光電子参照密度 `n_pe,ref=64 cm⁻³` として解いた電位と電場です。
+光電子源密度は `n_pe,0=n_pe,ref sin(alpha)`。横軸は表面から上流へ向かう高さで、最初の 60 m を表示しています。
+各曲線は遠方の電位打ち切り `|phi|≈2.2×10⁻⁴ V` までを計算し、そこから先に人工的なゼロ電位の線は追加していません。
+
+![Type A/B/C の J=0 シース解。上段は電位、下段は電場。A は内部極小を持ち、B/C は単調。](docs/figures/sheath_profiles.png)
+
+| Type | 電位の形 | 太陽高度 | 表面電位 | 最小電位 |
+| --- | --- | --- | --- | --- |
+| A | 内部に極小を持つ非単調解 | 60° | 3.840 V | −0.332 V |
+| B | 正電位から上流の 0 へ単調減少 | 20° | 1.616 V | 0 V（上流） |
+| C | 負電位から上流の 0 へ単調増加 | 10° | −4.238 V | −4.238 V（表面） |
+
+A は負の表面電位も許します。上表はそのうち正の表面電位を持つ例です。
+[PDF](docs/figures/sheath_profiles.pdf) と [数値データ・解の残差](docs/figures/data/profile_metadata.csv) も利用できます。
+
+### 解が得られた範囲と Type
+
+縦軸は光電子源の強さ `r=n_pe,ref/n_i`（対数軸）、各パネルは **65 × 33 点** の計算です。
+
+- 左：`J=0`。太陽高度と `r` を変え、A/B/C をそれぞれ指定して物理解を探索します。
+- 右：`E_H` 指定。太陽高度を 20° に固定し、電場と `r` を変え、`solve_prescribed_field_candidates` で候補を取得します。電流は出力です。
+
+![J=0 と E_H 指定のシース解の Type マップ。複数の Type が見つかった点は組合せの色で表示。](docs/figures/sheath_type_maps.png)
+
+色は**この探索で得られた物理解の Type**です。A+B などは同じ条件で複数の Type が得られたことを表し、安定性による選択はしていません。
+左の A/B/C マーカーは上の 1D 例の位置です。
+灰色は物理条件による候補の棄却、薄灰色は数値探索が未解決で採用解が得られなかった点です。
+色付きの点でも、他の枝の探索が未解決の場合があります。有限個の初期値による結果であり、灰色領域も含めて解の不存在や全根の発見を保証しません。
+
+両パネルとも背景電子 Maxwell 分布の規格化は未知量です。電子ドリフトを正にすると A/C の半無限上流条件が成立しなくなるため、この図の範囲をそのまま適用できません。
+[PDF](docs/figures/sheath_type_maps.pdf)、[J=0 の格子データ](docs/figures/data/equilibrium_map.csv)、
+[E_H 指定の格子データ](docs/figures/data/field_map.csv)、[集計](docs/figures/data/summary.json) を保存しています。
+CSV の Type はビット値 `A=1, B=2, C=4` の和で表し、未解決・棄却の情報も別列に記録します。
+
+図は公開 Fortran API で再計算できます。NumPy と Matplotlib を用意し、リポジトリ直下で実行してください。
+以下の GNU Fortran / OpenMP の例は 4 コアを使用します。KUDPC では計算ノード割当内で実行します。
+
+```bash
+mkdir -p docs/figures/data
+OMP_NUM_THREADS=4 OMP_PROC_BIND=false fpm run --example readme_data --compiler gfortran --profile release --flag "-fopenmp" -- docs/figures/data 65 33
+python examples/plot_readme_figures.py
+```
+
+計算部分は [readme_data.f90](example/readme_data.f90)、描画部分は [plot_readme_figures.py](examples/plot_readme_figures.py) です。
+計算コマンドの末尾に `equilibrium` または `field` を付けると、そのカラーマップだけを再計算できます。
+
 ## Fortran / fpm
 
 Fortran 2008 対応コンパイラと fpm が必要です。
