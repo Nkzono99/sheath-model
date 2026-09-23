@@ -53,36 +53,45 @@ contains
       message = 'The internal minimum does not connect to zero field at infinity.'
       if (abs(upper_e2) > 1e-7_dp) return
     end if
+
     minimum_e2 = 0.0_dp
     do segment = 1, merge(2, 1, branch == 'A')
       do j = 0, 128
         fraction = real(j, dp)/128.0_dp
+
         if (branch == 'A') then
           side = 'lower'
           phi = phim + (phi0 - phim)*fraction
+
           if (segment == 2) then
             side = 'upper'
             phi = phim*(1.0_dp - fraction)
           end if
+
           e2 = -2.0_dp*integrate_zhao_rho(p, branch, side, phim, phi, phi0, phim, density)
+
           if (segment == 1 .and. j == 128) then
             boundary_e2 = e2
           end if
         else
           phi = phi0*(1.0_dp - fraction)
           e2 = 2.0_dp*integrate_zhao_rho(p, branch, 'monotonic', phi, 0.0_dp, phi0, phim, density)
+
           if (j == 0) then
             boundary_e2 = e2
           end if
         end if
+
         if (.not. ieee_is_finite(e2)) then
           status = SHEATH_NUMERICAL_FAILURE
           message = 'Profile field integral is non-finite.'
           return
         end if
+
         minimum_e2 = min(minimum_e2, e2)
       end do
     end do
+
     message = 'The algebraic root has no real connecting field profile.'
     if (minimum_e2 < -1e-8_dp*max(1.0_dp, abs(boundary_e2))) return
 
