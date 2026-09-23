@@ -65,7 +65,7 @@ program test_sheath_model
   end do
   equilibrium_input%sun_elevation_deg = 0.0_dp
   call solve_equilibrium(equilibrium_input, root, status, message)
-  call check(status == sheath_invalid_argument .and. .not. root%valid, 'zero-elevation degeneracy')
+  call check(status == SHEATH_INVALID_ARGUMENT .and. .not. root%valid, 'zero-elevation degeneracy')
   call solve_profile(equilibrium_input, options, profile, status, message)
   call check(.not. allocated(profile%z_m), 'failed profile clears old allocation')
   print *, 'All sheath model contract and physics checks passed.'
@@ -80,7 +80,7 @@ contains
   end subroutine check
   subroutine ok(label)
     character(len=*), intent(in) :: label
-    call check(status == sheath_ok, label)
+    call check(status == SHEATH_OK, label)
   end subroutine ok
   subroutine near(actual, wanted, tolerance, label)
     real(dp), intent(in) :: actual, wanted, tolerance

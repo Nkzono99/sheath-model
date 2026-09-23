@@ -19,7 +19,7 @@ program test_field_search
   base%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
   base%electric_field_v_m = 1.6_dp
   call solve_prescribed_field_candidates(base, reference, status, message, reference_diagnostics)
-  call check(status == sheath_ok, 'reference candidates')
+  call check(status == SHEATH_OK, 'reference candidates')
   call check(size(reference) >= 2, 'reference includes multiple branches')
   call check(sum(reference_diagnostics%roots_found) == size(reference), 'deduplicated root counts')
 
@@ -38,7 +38,7 @@ program test_field_search
       input%ion_drift_mps = base%ion_drift_mps*sqrt(temperature_scale)
       input%electric_field_v_m = base%electric_field_v_m*sqrt(density_scale*temperature_scale)
       call solve_prescribed_field_candidates(input, scaled, status, message, diagnostics)
-      call check(status == sheath_ok, 'scaled candidates')
+      call check(status == SHEATH_OK, 'scaled candidates')
       call compare_roots(reference, scaled, temperature_scale, density_scale)
       call check(all(diagnostics%starts == reference_diagnostics%starts), 'scale-invariant start count')
     end do
@@ -51,9 +51,9 @@ program test_field_search
     input = base
     input%electric_field_v_m = 1.6_dp + 0.005_dp*step
     call solve_prescribed_field_candidates(input, cold, status, message)
-    call check(status == sheath_ok, 'independent sweep')
+    call check(status == SHEATH_OK, 'independent sweep')
     call solve_prescribed_field_candidates(input, warm, status, message, diagnostics, previous)
-    call check(status == sheath_ok, 'seeded sweep')
+    call check(status == SHEATH_OK, 'seeded sweep')
     call compare_roots(cold, warm, 1.0_dp, 1.0_dp)
     call check(sum(diagnostics%starts) > sum(reference_diagnostics%starts), 'nearby roots add starts')
     call check(any(diagnostics%unconverged > 0), 'partial search remains visible with accepted roots')
@@ -70,10 +70,10 @@ program test_field_search
         0.5_dp*32.0_dp**(real(small_field_ratio_indices(i), dp)/128.0_dp)
     input%electric_field_v_m = small_fields(i) - 0.015625_dp
     call solve_prescribed_field_candidates(input, previous, status, message)
-    call check(status == sheath_ok, 'nearby small-field reference')
+    call check(status == SHEATH_OK, 'nearby small-field reference')
     input%electric_field_v_m = small_fields(i)
     call solve_prescribed_field_candidates(input, warm, status, message, diagnostics, previous)
-    call check(status == sheath_ok, 'small-field continuation')
+    call check(status == SHEATH_OK, 'small-field continuation')
     call check(any(warm%branch == 'A' .and. warm%minimum_potential_v < -1e-3_dp), 'shallow A branch recovered')
   end do
 
@@ -85,13 +85,13 @@ program test_field_search
       9.82784429_dp*input%ion_density_m3*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
   input%electric_field_v_m = 1.09375_dp
   call solve_prescribed_field_candidates(input, scaled, status, message, diagnostics)
-  call check(status == sheath_numerical_failure, 'mixed rejection and nonconvergence is unresolved')
+  call check(status == SHEATH_NUMERICAL_FAILURE, 'mixed rejection and nonconvergence is unresolved')
   call check(diagnostics%rejected(1) > 0 .and. diagnostics%unconverged(1) > 0, 'mixed search evidence retained')
   call check(.not. allocated(scaled), 'no accepted candidates in mixed search')
 
   input%branch = 'B'
   call solve_prescribed_field_candidates(input, scaled, status, message, diagnostics)
-  call check(status == sheath_no_physical_solution, 'fully resolved physical rejection stays distinct')
+  call check(status == SHEATH_NO_PHYSICAL_SOLUTION, 'fully resolved physical rejection stays distinct')
   call check(diagnostics%rejected(2) > 0 .and. diagnostics%unconverged(2) == 0, 'all-rejected search evidence')
   call check(.not. allocated(scaled), 'rejected candidates are not returned')
 
@@ -100,13 +100,13 @@ program test_field_search
   input%branch = 'B'
   input%electric_field_v_m = -0.1_dp
   call solve_prescribed_field(input, output, status, message, diagnostics)
-  call check(status == sheath_no_physical_solution, 'incompatible field excluded')
+  call check(status == SHEATH_NO_PHYSICAL_SOLUTION, 'incompatible field excluded')
   call check(diagnostics%excluded(2) .and. sum(diagnostics%starts) == 0, 'exclusion diagnostic')
   call check(.not. output%valid, 'failed output reset')
 
   input%electric_field_v_m = ieee_value(0.0_dp, ieee_quiet_nan)
   call solve_prescribed_field_candidates(input, scaled, status, message, diagnostics)
-  call check(status == sheath_invalid_argument .and. .not. allocated(scaled), 'invalid input reset')
+  call check(status == SHEATH_INVALID_ARGUMENT .and. .not. allocated(scaled), 'invalid input reset')
   call check(.not. any(diagnostics%searched) .and. sum(diagnostics%roots_found) == 0, 'diagnostics reset')
   print *, 'Field search diagnostics, similarity and continuation checks passed.'
 contains

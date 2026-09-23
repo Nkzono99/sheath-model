@@ -1,7 +1,8 @@
 ! SPDX-License-Identifier: MIT
 module sheath_model_admissibility
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use sheath_model_constants, only: dp, i32, sheath_ok, sheath_no_physical_solution, sheath_numerical_failure
+  use sheath_model_constants, only: dp, i32
+  use sheath_model_status, only: SHEATH_OK, SHEATH_NO_PHYSICAL_SOLUTION, SHEATH_NUMERICAL_FAILURE
   use sheath_model_core, only: zhao_params_type, integrate_zhao_rho, evaluate_zhao_rho_hat
   implicit none
   private
@@ -17,7 +18,7 @@ contains
     real(dp) :: phi, e2, upper_e2, rho, fraction
     integer :: j, segment
     character(len=9) :: side
-    status = sheath_no_physical_solution
+    status = SHEATH_NO_PHYSICAL_SOLUTION
     minimum_e2 = huge(1.0_dp)
     boundary_e2 = huge(1.0_dp)
     message = 'Inward electron drift with reflected slow electrons cannot approach neutral zero-field infinity.'
@@ -55,7 +56,7 @@ contains
           if (j == 0) boundary_e2 = e2
         end if
         if (.not. ieee_is_finite(e2)) then
-          status = sheath_numerical_failure
+          status = SHEATH_NUMERICAL_FAILURE
           message = 'Profile field integral is non-finite.'
           return
         end if
@@ -64,7 +65,7 @@ contains
     end do
     message = 'The algebraic root has no real connecting field profile.'
     if (minimum_e2 < -1e-8_dp*max(1.0_dp, abs(boundary_e2))) return
-    status = sheath_ok
+    status = SHEATH_OK
     message = ''
   end subroutine validate_zhao_profile
 end module sheath_model_admissibility

@@ -3,9 +3,9 @@
 ! Modified: standalone physical input/result; removed application coupling interfaces.
 module sheath_model_field
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use sheath_model_constants, only: dp, i32, eps0, pi, qe, electron_mass, proton_mass, lower_ascii, &
-      sheath_ok, sheath_invalid_argument, sheath_no_physical_solution, sheath_numerical_failure, &
-      sheath_ambiguous_solution
+  use sheath_model_constants, only: dp, i32, eps0, pi, qe, electron_mass, proton_mass, lower_ascii
+  use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NO_PHYSICAL_SOLUTION, SHEATH_NUMERICAL_FAILURE, &
+      SHEATH_AMBIGUOUS_SOLUTION
   use sheath_model_core, only: zhao_params_type, swe_free_current_term
   implicit none
   private
@@ -155,14 +155,14 @@ contains
     output = zhao_field_result()
     if (present(diagnostics)) diagnostics = zhao_field_search_diagnostics()
     call prepare_field_params(input, params, status, message)
-    if (status /= sheath_ok) return
+    if (status /= SHEATH_OK) return
     call solve_field_root(trim(lower_ascii(input%branch)), params, input%electric_field_v_m, root, status, message, &
         search, initial_guesses)
     if (present(diagnostics)) diagnostics = search
-    if (status /= sheath_ok) return
+    if (status /= SHEATH_OK) return
     search_message = message
     call compose_result(params, root, output, status, message)
-    if (status == sheath_ok) message = search_message
+    if (status == SHEATH_OK) message = search_message
   end subroutine solve_prescribed_field
 
   subroutine solve_prescribed_field_candidates(input, outputs, status, message, diagnostics, initial_guesses)
@@ -179,16 +179,16 @@ contains
     integer :: i
     if (present(diagnostics)) diagnostics = zhao_field_search_diagnostics()
     call prepare_field_params(input, params, status, message)
-    if (status /= sheath_ok) return
+    if (status /= SHEATH_OK) return
     call find_field_roots(trim(lower_ascii(input%branch)), params, input%electric_field_v_m, roots, status, message, &
         search, initial_guesses)
     if (present(diagnostics)) diagnostics = search
-    if (status /= sheath_ok) return
+    if (status /= SHEATH_OK) return
     search_message = message
     allocate (outputs(size(roots)))
     do i = 1, size(roots)
       call compose_result(params, roots(i), outputs(i), status, message)
-      if (status /= sheath_ok) then
+      if (status /= SHEATH_OK) then
         deallocate (outputs)
         return
       end if
@@ -205,7 +205,7 @@ contains
     type(zhao_field_result) :: trial
     real(dp) :: cutoff, flux_scale
     output = zhao_field_result()
-    status = sheath_ok
+    status = SHEATH_OK
     message = ''
     trial%branch = root%branch
     trial%boundary_potential_v = root%phi0_v
@@ -222,7 +222,7 @@ contains
         trial%photoelectron_escape_flux_m2_s)
     if (.not. all(ieee_is_finite([trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, &
         trial%photoelectron_escape_flux_m2_s, trial%net_current_a_m2]))) then
-      status = sheath_numerical_failure
+      status = SHEATH_NUMERICAL_FAILURE
       message = 'Prescribed-field flux or current evaluation is non-finite.'
       return
     end if
@@ -240,7 +240,7 @@ contains
     character(len=*), intent(out) :: message
 
     params = zhao_params_type()
-    status = sheath_invalid_argument
+    status = SHEATH_INVALID_ARGUMENT
     message = 'branch must be auto, A, B, or C.'
     select case (trim(lower_ascii(input%branch)))
     case ('auto', 'a', 'b', 'c')
@@ -271,13 +271,13 @@ contains
     params%u = params%v_d_electron_mps/params%v_swe_th_mps
     params%tau = params%t_swe_ev/params%t_phe_ev
     params%lambda_d_phe_ref_m = sqrt(eps0*params%t_phe_ev/(params%n_phe_ref_m3*qe))
-    status = sheath_numerical_failure
+    status = SHEATH_NUMERICAL_FAILURE
     message = 'Prescribed-field normalization produced non-finite or underflowed parameters.'
     if (.not. all(ieee_is_finite([params%v_swe_th_mps, params%v_phe_th_mps, params%cs_mps, &
         params%mach, params%u, params%tau, params%lambda_d_phe_ref_m]))) return
     if (min(params%v_swe_th_mps, params%v_phe_th_mps, params%cs_mps, params%mach, &
         params%tau, params%lambda_d_phe_ref_m) <= 0.0_dp) return
-    status = sheath_ok
+    status = SHEATH_OK
     message = ''
   end subroutine prepare_field_params
 end module sheath_model_field

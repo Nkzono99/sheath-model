@@ -115,7 +115,7 @@ contains
   end function integrate_type_a_field
   subroutine ok(label)
     character(len=*), intent(in) :: label
-    call check(status == sheath_ok, label)
+    call check(status == SHEATH_OK, label)
   end subroutine ok
   subroutine check(condition, label)
     logical, intent(in) :: condition

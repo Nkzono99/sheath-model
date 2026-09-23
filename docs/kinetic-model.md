@@ -69,8 +69,8 @@ E_H 指定では `electron_drift_mps=0` とすることで、無ドリフトの�
 有限高さの上流境界、衝突、異なる低速 VDF を導入する場合は別の境界モデルが必要です。
 
 経路検査は有限個の点での数値判定であり、任意のパラメータに対する存在定理ではありません。
-代数根が物理条件を満たさない場合は `sheath_no_physical_solution`、数値探索・積分の失敗は
-`sheath_numerical_failure` を返します。
+代数根が物理条件を満たさない場合は `SHEATH_NO_PHYSICAL_SOLUTION`、数値探索・積分の失敗は
+`SHEATH_NUMERICAL_FAILURE` を返します。
 
 ## 枝のトポロジーとゼロ電場
 

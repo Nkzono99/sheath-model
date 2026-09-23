@@ -55,24 +55,24 @@ program test_orbits
   end do
   input = zhao_equilibrium_input(branch='A')
   call solve_equilibrium(input, root, status, message)
-  if (status /= sheath_no_physical_solution .or. root%valid) error stop 'drifting A asymptotic obstruction'
+  if (status /= SHEATH_NO_PHYSICAL_SOLUTION .or. root%valid) error stop 'drifting A asymptotic obstruction'
   input%branch = 'auto'
   call solve_equilibrium(input, root, status, message)
-  if (status /= sheath_ok .or. root%branch /= 'B') error stop 'auto must skip inadmissible roots'
+  if (status /= SHEATH_OK .or. root%branch /= 'B') error stop 'auto must skip inadmissible roots'
   input = zhao_equilibrium_input(branch='A', electron_drift_mode='zero')
   call solve_equilibrium(input, root, status, message)
-  if (status /= sheath_ok) error stop 'A60 acceptance'
+  if (status /= SHEATH_OK) error stop 'A60 acceptance'
   input%sun_elevation_deg = 19.0_dp
   call solve_equilibrium(input, root, status, message)
-  if (status /= sheath_ok .or. root%surface_potential_v >= 0.0_dp) error stop 'negative surface A'
+  if (status /= SHEATH_OK .or. root%surface_potential_v >= 0.0_dp) error stop 'negative surface A'
   call solve_profile(input, zhao_profile_options(), profile, status, message)
-  if (status /= sheath_ok) then
+  if (status /= SHEATH_OK) then
     print *, trim(message)
     error stop 'accepted A profile'
   end if
   input = zhao_equilibrium_input(branch='C', sun_elevation_deg=1.0_dp, electron_drift_mode='zero')
   call solve_equilibrium(input, root, status, message)
-  if (status /= sheath_no_physical_solution .or. root%valid) error stop 'unphysical C accepted'
+  if (status /= SHEATH_NO_PHYSICAL_SOLUTION .or. root%valid) error stop 'unphysical C accepted'
   field_input = zhao_field_input()
   field_input%photoelectron_source_density_m3 = 64e6_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
   field_input%electron_drift_mps = 0.0_dp
@@ -80,7 +80,7 @@ program test_orbits
   do i = -1, 1
     field_input%electric_field_v_m = real(i, dp)*0.01_dp
     call solve_prescribed_field_candidates(field_input, candidates, status, message)
-    if (status /= sheath_ok) error stop 'field transition candidate search'
+    if (status /= SHEATH_OK) error stop 'field transition candidate search'
     if (size(candidates) /= 1) error stop 'transition duplicates must coalesce'
     if (candidates(1)%boundary_potential_v >= 0.0_dp) error stop 'transition is nonflat'
     if (i <= 0 .and. candidates(1)%branch /= 'C') error stop 'negative field C transition'

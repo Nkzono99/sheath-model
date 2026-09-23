@@ -6,7 +6,7 @@ module sheath_model_equilibrium
   use sheath_model_core, only: zhao_params_type, try_solve_zhao_unknowns, &
       evaluate_zhao_density_hat, zhao_residuals_type_a, zhao_residuals_type_b, zhao_residuals_type_c, &
       swe_free_current_term
-  use sheath_model_constants, only: sheath_ok, sheath_invalid_argument, sheath_numerical_failure, sheath_no_physical_solution
+  use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NUMERICAL_FAILURE, SHEATH_NO_PHYSICAL_SOLUTION
   implicit none
   private
   public :: zhao_equilibrium_input, zhao_equilibrium_result, zhao_density_result
@@ -68,7 +68,7 @@ contains
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     p = zhao_params_type()
-    status = sheath_invalid_argument
+    status = SHEATH_INVALID_ARGUMENT
     message = 'Equilibrium inputs must be finite.'
     if (.not. all(ieee_is_finite([input%sun_elevation_deg, input%ion_density_m3, &
         input%photoelectron_reference_density_m3, input%electron_temperature_ev, &
@@ -109,12 +109,12 @@ contains
     p%u = p%v_d_electron_mps/p%v_swe_th_mps
     p%tau = p%t_swe_ev/p%t_phe_ev
     p%lambda_d_phe_ref_m = sqrt(eps0*p%t_phe_ev/(p%n_phe_ref_m3*qe))
-    status = sheath_numerical_failure
+    status = SHEATH_NUMERICAL_FAILURE
     message = 'Parameter normalization is non-finite or underflowed.'
     if (.not. all(ieee_is_finite([p%v_swe_th_mps, p%v_phe_th_mps, p%cs_mps, p%mach, p%u, p%tau, &
         p%lambda_d_phe_ref_m]))) return
     if (min(p%v_swe_th_mps, p%v_phe_th_mps, p%cs_mps, p%mach, p%tau, p%lambda_d_phe_ref_m) <= 0.0_dp) return
-    status = sheath_ok
+    status = SHEATH_OK
     message = ''
   end subroutine prepare_params
 
@@ -134,7 +134,7 @@ contains
     logical :: success
     output = zhao_equilibrium_result()
     call prepare_params(input, p, status, message)
-    if (status /= sheath_ok) return
+    if (status /= SHEATH_OK) return
     order = ['A', 'B', 'C']
     if (input%sun_elevation_deg < 20.0_dp) order = ['C', 'A', 'B']
     count = 3
@@ -153,16 +153,16 @@ contains
       if (branch == 'B') phim = 0.0_dp
       call validate_zhao_profile(p, branch, phi0/p%t_phe_ev, phim/p%t_phe_ev, density/p%n_phe_ref_m3, &
           minimum_e2, boundary_e2, status, message)
-      if (status == sheath_ok) exit
-      if (status == sheath_no_physical_solution) nonphysical = .true.
-      if (status == sheath_numerical_failure) unresolved_search = .true.
+      if (status == SHEATH_OK) exit
+      if (status == SHEATH_NO_PHYSICAL_SOLUTION) nonphysical = .true.
+      if (status == SHEATH_NUMERICAL_FAILURE) unresolved_search = .true.
       success = .false.
     end do
     if (.not. success) then
-      status = sheath_numerical_failure
+      status = SHEATH_NUMERICAL_FAILURE
       message = 'Equilibrium root search did not converge for the requested branch.'
       if (nonphysical .and. .not. unresolved_search) then
-        status = sheath_no_physical_solution
+        status = SHEATH_NO_PHYSICAL_SOLUTION
         message = 'Algebraic equilibrium roots exist but have no real connecting sheath profile.'
       end if
       return
@@ -187,13 +187,13 @@ contains
     trial%photoelectron_escape_flux_m2_s = flux_scale*p%n_phe0_m3*exp((phim - phi0)/p%t_phe_ev)
     trial%net_current_a_m2 = qe*(trial%electron_inward_flux_m2_s - trial%ion_inward_flux_m2_s - &
         trial%photoelectron_escape_flux_m2_s)
-    status = sheath_numerical_failure
+    status = SHEATH_NUMERICAL_FAILURE
     message = 'Equilibrium flux or current evaluation is non-finite.'
     if (.not. all(ieee_is_finite([trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, &
         trial%photoelectron_escape_flux_m2_s, trial%net_current_a_m2]))) return
     trial%valid = .true.
     output = trial
-    status = sheath_ok
+    status = SHEATH_OK
     message = ''
   end subroutine solve_equilibrium
 
@@ -211,8 +211,8 @@ contains
     character(len=9) :: region
     output = zhao_density_result()
     call prepare_params(input, p, status, message)
-    if (status /= sheath_ok) return
-    status = sheath_invalid_argument
+    if (status /= SHEATH_OK) return
+    status = SHEATH_INVALID_ARGUMENT
     message = 'A valid equilibrium solution and finite potential are required.'
     if (.not. solution%valid) return
     if (.not. all(ieee_is_finite([potential_v, solution%surface_potential_v, solution%minimum_potential_v, &
@@ -239,11 +239,11 @@ contains
         solution%surface_potential_v/p%t_phe_ev, solution%minimum_potential_v/p%t_phe_ev, &
         solution%ambient_electron_density_m3/p%n_phe_ref_m3, d(1), d(2), d(3), d(4), d(5))
     d = d*p%n_phe_ref_m3
-    status = sheath_numerical_failure
+    status = SHEATH_NUMERICAL_FAILURE
     message = 'Density evaluation is non-finite or negative.'
     if (.not. all(ieee_is_finite(d)) .or. any(d < 0.0_dp)) return
     output = zhao_density_result(d(1), d(2), d(3), d(4), d(5), qe*(d(1) - sum(d(2:5))))
-    status = sheath_ok
+    status = SHEATH_OK
     message = ''
   end subroutine evaluate_density
   !> Semi-infinite first-integral reconstruction; never attach a forced zero tail.
@@ -261,21 +261,21 @@ contains
     integer :: n, i, segment, total, kept
     character(len=9) :: side
     call prepare_params(input, p, status, message)
-    if (status /= sheath_ok) return
-    status = sheath_invalid_argument
+    if (status /= SHEATH_OK) return
+    status = SHEATH_INVALID_ARGUMENT
     message = 'Profile requires at least 32 points per segment and finite positive distance/cutoff.'
     if (options%points_per_segment < 32) return
     if (.not. all(ieee_is_finite([options%max_distance_m, options%potential_cutoff_v]))) return
     if (min(options%max_distance_m, options%potential_cutoff_v) <= 0.0_dp) return
     call solve_equilibrium(input, root, status, message)
-    if (status /= sheath_ok) return
+    if (status /= SHEATH_OK) return
     n = options%points_per_segment
     allocate (phi(n), distance(n), rho(n), e2(n))
     allocate (z(2*n), v(2*n), e(2*n))
     phi0 = root%surface_potential_v/p%t_phe_ev
     phim = root%minimum_potential_v/p%t_phe_ev
     cutoff = min(options%potential_cutoff_v/p%t_phe_ev, 0.5_dp*abs(phim))
-    status = sheath_numerical_failure
+    status = SHEATH_NUMERICAL_FAILURE
     message = 'Profile first integral is non-finite or does not support a real electric field.'
     total = 0
     turn = 0.0_dp
@@ -351,7 +351,7 @@ contains
     if (.not. all(ieee_is_finite(z(1:total))) .or. .not. all(ieee_is_finite(e(1:total)))) return
     kept = count(z(1:total) <= options%max_distance_m)
     if (kept < 2) then
-      status = sheath_invalid_argument
+      status = SHEATH_INVALID_ARGUMENT
       message = 'max_distance_m contains fewer than two nodes; increase points_per_segment or distance.'
       return
     end if
@@ -368,10 +368,10 @@ contains
         if (i > n) side = 'upper'
       end if
       call evaluate_density(input, root, v(i), trial%density(i), status, message, side)
-      if (status /= sheath_ok) return
+      if (status /= SHEATH_OK) return
     end do
     output = trial
-    status = sheath_ok
+    status = SHEATH_OK
     message = ''
   contains
     subroutine density_at(phi_hat, region, values)

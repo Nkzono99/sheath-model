@@ -100,7 +100,7 @@ contains
     input = zhao_equilibrium_input(branch=branch, sun_elevation_deg=alpha, electron_drift_mode='zero')
     options = zhao_profile_options(points_per_segment=8000, max_distance_m=150.0_dp, potential_cutoff_v=2.2e-4_dp)
     call solve_profile(input, options, profile, status, message)
-    if (status /= sheath_ok) then
+    if (status /= SHEATH_OK) then
       print *, trim(message)
       error stop 'README representative profile failed.'
     end if
@@ -139,11 +139,11 @@ contains
       input%branch = branches(k)
       call solve_equilibrium(input, result, status, message)
       select case (status)
-      case (sheath_ok)
+      case (SHEATH_OK)
         found = ibset(found, k - 1)
-      case (sheath_no_physical_solution)
+      case (SHEATH_NO_PHYSICAL_SOLUTION)
         refused = ibset(refused, k - 1)
-      case (sheath_numerical_failure)
+      case (SHEATH_NUMERICAL_FAILURE)
         unknown = ibset(unknown, k - 1)
       case default
         error stop 'Unexpected equilibrium map status.'
@@ -176,7 +176,7 @@ contains
       if (diagnostics%excluded(k) .or. diagnostics%rejected(k) > 0) refused = ibset(refused, k - 1)
     end do
     select case (status)
-    case (sheath_ok)
+    case (SHEATH_OK)
       count = size(roots)
       do k = 1, count
         select case (roots(k)%branch)
@@ -188,7 +188,7 @@ contains
           found = ibset(found, 2)
         end select
       end do
-    case (sheath_no_physical_solution, sheath_numerical_failure)
+    case (SHEATH_NO_PHYSICAL_SOLUTION, SHEATH_NUMERICAL_FAILURE)
       ! Keep the branch diagnostics even when no candidate was accepted.
     case default
       error stop 'Unexpected prescribed-field map status.'

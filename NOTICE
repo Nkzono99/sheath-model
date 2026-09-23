@@ -3,6 +3,7 @@ Copyright (c) 2026 Jin Nakazono
 
 The Zhao numerical equations and prescribed-field root solver in
   src/internal/sheath_model_core.f90
+  src/internal/sheath_model_numerics.f90
   src/sheath_model_field.f90
   src/internal/sheath_model_field_*.f90
 are adapted from BEACH's src/physics/sheath/zhao/:

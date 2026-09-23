@@ -88,7 +88,7 @@ program sheath_example
   input%sun_elevation_deg = 60.0_dp
   input%electron_drift_mode = 'zero'
   call solve_equilibrium(input, solution, status, message)
-  if (status /= sheath_ok) then
+  if (status /= SHEATH_OK) then
     print *, trim(message)
     stop 1
   end if
@@ -157,6 +157,11 @@ pre-commit run --all-files
 対象は `src/`・`test/`・`example/` の `.f90`、インデントは2文字、行長の目安は132文字です。
 整形で変更されたファイルは確認して再度 stage し、コミットします。
 `build/` の生成物と `outputs/` の検証用 snapshot は対象外です。
+
+汎用数値処理は [sheath_model_numerics.f90](src/internal/sheath_model_numerics.f90)、
+大文字表記のステータス定数は [sheath_model_status.f90](src/internal/sheath_model_status.f90) にまとめています。
+物理残差・枝の初期値・解の採用条件はシースモデル側が担当します。
+submodule の実装も `module subroutine 名前(引数...)` と書き、引数の型と `intent` を明示します。
 
 ## ライセンス
 

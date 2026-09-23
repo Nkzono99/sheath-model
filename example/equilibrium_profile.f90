@@ -11,7 +11,7 @@ program equilibrium_profile
   input%electron_drift_mode = 'zero'
   input%sun_elevation_deg = 60.0_dp
   call solve_profile(input, options, profile, status, message)
-  if (status /= sheath_ok) then
+  if (status /= SHEATH_OK) then
     print *, trim(message)
     stop 1
   end if

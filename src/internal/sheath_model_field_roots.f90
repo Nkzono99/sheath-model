@@ -10,20 +10,38 @@ submodule(sheath_model_field) sheath_model_field_roots
 
 contains
 
-  module procedure solve_field_root
+  module subroutine solve_field_root(model, params, interface_field_v_m, root, status, message, diagnostics, initial_guesses)
+    character(len=*), intent(in) :: model
+    type(zhao_params_type), intent(in) :: params
+    real(dp), intent(in) :: interface_field_v_m
+    type(zhao_field_root), intent(out) :: root
+    integer(i32), intent(out) :: status
+    character(len=*), intent(out) :: message
+    type(zhao_field_search_diagnostics), intent(out) :: diagnostics
+    type(zhao_field_result), intent(in), optional :: initial_guesses(:)
+
     type(zhao_field_root), allocatable :: roots(:)
     root = zhao_field_root()
     call find_field_roots(model, params, interface_field_v_m, roots, status, message, diagnostics, initial_guesses)
-    if (status /= sheath_ok) return
+    if (status /= SHEATH_OK) return
     if (size(roots) == 1) then
       root = roots(1)
     else
-      status = sheath_ambiguous_solution
+      status = SHEATH_AMBIGUOUS_SOLUTION
       message = 'Multiple admissible roots found; use solve_prescribed_field_candidates to inspect them.'
     end if
-  end procedure solve_field_root
+  end subroutine solve_field_root
 
-  module procedure find_field_roots
+  module subroutine find_field_roots(model, params, interface_field_v_m, roots, status, message, diagnostics, initial_guesses)
+    character(len=*), intent(in) :: model
+    type(zhao_params_type), intent(in) :: params
+    real(dp), intent(in) :: interface_field_v_m
+    type(zhao_field_root), allocatable, intent(out) :: roots(:)
+    integer(i32), intent(out) :: status
+    character(len=*), intent(out) :: message
+    type(zhao_field_search_diagnostics), intent(out) :: diagnostics
+    type(zhao_field_result), intent(in), optional :: initial_guesses(:)
+
     character(len=1) :: order(3)
     type(zhao_field_root), allocatable :: found(:), candidates(:)
     type(zhao_field_root) :: flat
@@ -34,11 +52,11 @@ contains
     diagnostics = zhao_field_search_diagnostics()
     field_scale = params%t_phe_ev/params%lambda_d_phe_ref_m
     target = interface_field_v_m/field_scale
-    status = sheath_numerical_failure
+    status = SHEATH_NUMERICAL_FAILURE
     message = 'Invalid field normalization.'
     if (.not. ieee_is_finite(target) .or. field_scale <= 0.0_dp) return
     call field_branch_order(model, target, order, branch_count, status, message)
-    if (status /= sheath_ok) return
+    if (status /= SHEATH_OK) return
     capacity = default_field_starts
     if (present(initial_guesses)) capacity = capacity + size(initial_guesses)
     allocate (found(3*capacity + 1))
@@ -81,19 +99,19 @@ contains
         (diagnostics%searched .and. .not. diagnostics%excluded .and. diagnostics%starts == 0))
     if (n == 0) then
       if (unresolved) then
-        status = sheath_numerical_failure
+        status = SHEATH_NUMERICAL_FAILURE
         message = 'No admissible root found; some starts or profile evaluations remain unresolved.'
       else
-        status = sheath_no_physical_solution
+        status = SHEATH_NO_PHYSICAL_SOLUTION
         message = 'All searched branches or converged candidates were excluded by physical conditions.'
       end if
       return
     end if
     roots = found(:n)
-    status = sheath_ok
+    status = SHEATH_OK
     message = ''
     if (unresolved) message = 'Admissible candidates found; some starts or profile evaluations remain unresolved.'
-  end procedure find_field_roots
+  end subroutine find_field_roots
 
   subroutine field_branch_order(model, target_field_hat, order, count, status, message)
     character(len=*), intent(in) :: model
@@ -105,7 +123,7 @@ contains
 
     order = ' '
     count = 0
-    status = sheath_ok
+    status = SHEATH_OK
     message = ''
     select case (trim(model))
     case ('a')
@@ -125,7 +143,7 @@ contains
       end if
       count = 3
     case default
-      status = sheath_invalid_argument
+      status = SHEATH_INVALID_ARGUMENT
       message = 'unknown prescribed-field Zhao branch.'
     end select
   end subroutine field_branch_order
@@ -202,10 +220,10 @@ contains
       candidate_root%residual_norm = norm
       candidate_root%nonlinear_iterations = int(iterations, i32)
       call validate_field_root_profile(params, candidate_root, target_field_hat, profile_status, profile_message)
-      if (profile_status == sheath_no_physical_solution) then
+      if (profile_status == SHEATH_NO_PHYSICAL_SOLUTION) then
         diagnostics%rejected(k) = diagnostics%rejected(k) + 1
         cycle
-      else if (profile_status /= sheath_ok) then
+      else if (profile_status /= SHEATH_OK) then
         diagnostics%profile_failures(k) = diagnostics%profile_failures(k) + 1
         cycle
       end if

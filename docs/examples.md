@@ -145,7 +145,7 @@ fpm install --prefix ./install
 後者は標準のプロファイル設定を使うため、README の図とは遠方の打ち切りが異なります。
 
 E_H 指定の `solve_prescribed_field` は、検出した物理解が一つの場合に結果を返し、
-複数ある場合は `sheath_ambiguous_solution` を返します。安定性による選択は行いません。
+複数ある場合は `SHEATH_AMBIGUOUS_SOLUTION` を返します。安定性による選択は行いません。
 候補を比較したい場合は `solve_prescribed_field_candidates` を使ってください。
 ライブラリ自体はプロセス終了やファイル出力を行わず、ステータスと結果を返します。
 

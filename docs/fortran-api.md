@@ -26,7 +26,7 @@ B/C は `E_H²=(2/epsilon_0)*integral(phi_H..0, rho dphi)` です。
 A の上側領域では `E(infinity)=0` を満たす極小電位を求めます。
 
 型に値を設定して関数を呼ぶだけで、初期化や前回解の管理は不要です。結果は毎回上書きされます。
-成功は `status == sheath_ok` で判定し、失敗時は `result%valid=.false.` になります。
+成功は `status == SHEATH_OK` で判定し、失敗時は `result%valid=.false.` になります。
 
 ```fortran
 use sheath_model
@@ -41,14 +41,14 @@ character(len=256) :: message
 stationary_input%branch = 'A'
 stationary_input%electron_drift_mode = 'zero'
 call solve_equilibrium(stationary_input, stationary, status, message)
-if (status /= sheath_ok) stop 1
+if (status /= SHEATH_OK) stop 1
 
 field_input%branch = 'A'
 field_input%electron_drift_mps = 0.0_dp
 field_input%electric_field_v_m = 1.62_dp
 field_input%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
 call solve_prescribed_field(field_input, field_solution, status, message)
-if (status /= sheath_ok) stop 1
+if (status /= SHEATH_OK) stop 1
 ```
 
 ## J=0 の入力: `zhao_equilibrium_input`
@@ -99,7 +99,7 @@ Zhao のシース解に作用しないため、本 API の入力には含めて�
 `fixed_ambient` を同じ半無限条件へ追加すると一般に過剰決定になるため、別モードは設けていません。
 
 `solve_prescribed_field` は検出した物理解が一つの場合に結果を返します。
-複数ある場合は `sheath_ambiguous_solution` を返します。
+複数ある場合は `SHEATH_AMBIGUOUS_SOLUTION` を返します。
 
 `solve_prescribed_field_candidates(input, results, status, message)` は
 `type(zhao_field_result), allocatable :: results(:)` に発見した物理候補を返します。
@@ -121,7 +121,7 @@ type(zhao_field_result), allocatable :: previous(:), candidates(:)
 allocate(previous(0))
 call solve_prescribed_field_candidates(input, candidates, status, message, &
                                       diagnostics=diagnostics, initial_guesses=previous)
-if (status == sheath_ok) call move_alloc(candidates, previous)
+if (status == SHEATH_OK) call move_alloc(candidates, previous)
 ```
 
 次の呼び出しでは電場などを更新し、`previous` を再び渡せます。
@@ -152,12 +152,12 @@ if (status == sheath_ok) call move_alloc(candidates, previous)
 診断は成功・曖昧性・失敗のいずれでも返し、入力エラーでは初期状態に戻します。
 
 候補が一つもなく、非収束・評価失敗・開始できなかった探索が残っている場合は、
-棄却された根があっても **`sheath_numerical_failure`** を返します。
+棄却された根があっても **`SHEATH_NUMERICAL_FAILURE`** を返します。
 すべての対象枝が事前に除外されたか、試した全初期値が物理的棄却に至った場合は
-`sheath_no_physical_solution` です。有限探索による後者の判定も、全根の不存在証明ではありません。
+`SHEATH_NO_PHYSICAL_SOLUTION` です。有限探索による後者の判定も、全根の不存在証明ではありません。
 
-採用候補があれば候補列挙は `sheath_ok` として結果を返し、未解決の探索は診断と `message` に残します。
-単一解の関数は発見した候補が一つなら成功、複数なら `sheath_ambiguous_solution` です。
+採用候補があれば候補列挙は `SHEATH_OK` として結果を返し、未解決の探索は診断と `message` に残します。
+単一解の関数は発見した候補が一つなら成功、複数なら `SHEATH_AMBIGUOUS_SOLUTION` です。
 **成功や候補が一つという結果は、探索の完了や数学的な一意性の保証ではありません。**
 
 ## 結果
@@ -211,13 +211,18 @@ Python の B/C も同じ半無限条件の一次積分です。`n_profile_grid` 
 
 ## ステータス
 
+`SHEATH_*` は `integer(i32), parameter` の名前付き定数です。
+定義は `src/internal/sheath_model_status.f90` にまとめ、`use sheath_model` から公開します。
+コードと使用例は大文字表記に統一しています。Fortran は識別子の大文字・小文字を区別しないため、
+これは表記の規約であり、独立した enum 型ではありません。
+
 | 定数 | 値 | 意味 |
 | --- | --- | --- |
-| `sheath_ok` | 0 | 成功 |
-| `sheath_invalid_argument` | 1 | 不正な入力、設定、評価範囲 |
-| `sheath_no_physical_solution` | 2 | 物理条件による除外・棄却。E_H 探索では未解決の試行が残らない場合 |
-| `sheath_numerical_failure` | 3 | 収束失敗、非有限値、プロファイル積分失敗等 |
-| `sheath_ambiguous_solution` | 4 | 複数の物理解を検出した |
+| `SHEATH_OK` | 0 | 成功 |
+| `SHEATH_INVALID_ARGUMENT` | 1 | 不正な入力、設定、評価範囲 |
+| `SHEATH_NO_PHYSICAL_SOLUTION` | 2 | 物理条件による除外・棄却。E_H 探索では未解決の試行が残らない場合 |
+| `SHEATH_NUMERICAL_FAILURE` | 3 | 収束失敗、非有限値、プロファイル積分失敗等 |
+| `SHEATH_AMBIGUOUS_SOLUTION` | 4 | 複数の物理解を検出した |
 
 `message` は呼び出し側の文字列へ書き込みます（256 文字以上を推奨）。成功時にも縮退解の説明が入る場合があります。
 数値探索失敗は物理解の不存在を証明しません。ライブラリはログ出力・ファイル操作・プロセス終了を行いません。

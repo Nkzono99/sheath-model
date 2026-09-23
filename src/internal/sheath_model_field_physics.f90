@@ -11,7 +11,12 @@ submodule(sheath_model_field) sheath_model_field_physics
 
 contains
 
-  module procedure encode_field_unknowns
+  module subroutine encode_field_unknowns(params, branch, phi0_v, phi_m_v, density_m3, y, valid)
+    type(zhao_params_type), intent(in) :: params
+    character(len=1), intent(in) :: branch
+    real(dp), intent(in) :: phi0_v, phi_m_v, density_m3
+    real(dp), intent(out) :: y(3)
+    logical, intent(out) :: valid
 
     y = 0.0_dp
     valid = density_m3 > 0.0_dp .and. params%n_phe_ref_m3 > 0.0_dp .and. params%t_phe_ev > 0.0_dp
@@ -37,9 +42,14 @@ contains
       valid = .false.
     end select
     valid = valid .and. all(ieee_is_finite(y))
-  end procedure encode_field_unknowns
+  end subroutine encode_field_unknowns
 
-  module procedure decode_field_unknowns
+  module subroutine decode_field_unknowns(params, branch, y, phi0_v, phi_m_v, density_m3, valid)
+    type(zhao_params_type), intent(in) :: params
+    character(len=1), intent(in) :: branch
+    real(dp), intent(in) :: y(3)
+    real(dp), intent(out) :: phi0_v, phi_m_v, density_m3
+    logical, intent(out) :: valid
 
     phi0_v = 0.0_dp
     phi_m_v = 0.0_dp
@@ -79,9 +89,14 @@ contains
       valid = .false.
     end select
     valid = valid .and. all(ieee_is_finite([phi0_v, phi_m_v, density_m3]))
-  end procedure decode_field_unknowns
+  end subroutine decode_field_unknowns
 
-  module procedure evaluate_charge_residual
+  module subroutine evaluate_charge_residual(params, branch, target_field_hat, y, residual, valid)
+    type(zhao_params_type), intent(in) :: params
+    character(len=1), intent(in) :: branch
+    real(dp), intent(in) :: target_field_hat, y(3)
+    real(dp), intent(out) :: residual(3)
+    logical, intent(out) :: valid
 
     real(dp) :: phi0_v, phi_m_v, density_m3, phi0_hat, phi_m_hat, density_hat
     real(dp) :: raw(3), integral, field_squared, field_residual_scale
@@ -142,7 +157,7 @@ contains
       return
     end select
     valid = all(ieee_is_finite(residual))
-  end procedure evaluate_charge_residual
+  end subroutine evaluate_charge_residual
 
   subroutine integrate_field_rho_hat( &
       params, branch, side, lower_phi_hat, upper_phi_hat, phi0_hat, phi_m_hat, &
@@ -160,18 +175,23 @@ contains
     success = ieee_is_finite(integral)
   end subroutine integrate_field_rho_hat
 
-  module procedure validate_field_root_profile
+  module subroutine validate_field_root_profile(params, root, target_field_hat, status, message)
+    type(zhao_params_type), intent(in) :: params
+    type(zhao_field_root), intent(inout) :: root
+    real(dp), intent(in) :: target_field_hat
+    integer(i32), intent(out) :: status
+    character(len=*), intent(out) :: message
 
     real(dp) :: boundary_e2
     call validate_zhao_profile(params, root%branch, root%phi0_v/params%t_phe_ev, &
         root%phi_m_v/params%t_phe_ev, root%ambient_electron_density_m3/params%n_phe_ref_m3, &
         root%minimum_field_squared_hat, boundary_e2, status, message)
-    if (status /= sheath_ok) return
+    if (status /= SHEATH_OK) return
     if (abs(boundary_e2 - target_field_hat**2) > 1e-7_dp*max(1.0_dp, target_field_hat**2)) then
-      status = sheath_numerical_failure
+      status = SHEATH_NUMERICAL_FAILURE
       message = 'The profile does not reproduce the prescribed field.'
     end if
-  end procedure validate_field_root_profile
+  end subroutine validate_field_root_profile
 
   pure logical function ion_accessible(params, phi_hat) result(accessible)
     type(zhao_params_type), intent(in) :: params

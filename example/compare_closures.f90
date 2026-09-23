@@ -27,7 +27,7 @@ program compare_closures
   print *, field_input%electric_field_v_m, response%boundary_potential_v, response%net_current_a_m2
 contains
   subroutine require_success()
-    if (status /= sheath_ok) then
+    if (status /= SHEATH_OK) then
       print *, trim(message)
       stop 1
     end if

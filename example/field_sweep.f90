@@ -16,7 +16,7 @@ program field_sweep
   do step = 0, 4
     input%electric_field_v_m = 1.58_dp + 0.01_dp*step
     call solve_prescribed_field_candidates(input, candidates, status, message, diagnostics, previous)
-    if (status /= sheath_ok) then
+    if (status /= SHEATH_OK) then
       print *, 'Search status: ', status, trim(message)
       cycle
     end if

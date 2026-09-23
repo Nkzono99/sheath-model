@@ -28,16 +28,16 @@ program test_prescribed_field
   call ok('Type A reference')
 
   call solve_prescribed_field_candidates(input, candidates, status, message)
-  call check(status == sheath_ok .and. allocated(candidates), 'candidate enumeration')
+  call check(status == SHEATH_OK .and. allocated(candidates), 'candidate enumeration')
   call check(size(candidates) == 1 .and. all(candidates%valid), 'one admissible Type A candidate')
   call near(candidates(1)%boundary_potential_v, output%boundary_potential_v, 1e-10_dp, 'unique candidate potential')
 
   input%branch = 'auto'
   call solve_prescribed_field(input, output, status, message)
-  call check(status == sheath_ambiguous_solution, 'ambiguous roots must be explicit')
+  call check(status == SHEATH_AMBIGUOUS_SOLUTION, 'ambiguous roots must be explicit')
   call check(.not. output%valid .and. output%boundary_potential_v == 0.0_dp, 'failed result reset')
   call solve_prescribed_field_candidates(input, candidates, status, message)
-  call check(status == sheath_ok .and. allocated(candidates), 'ambiguous candidates remain inspectable')
+  call check(status == SHEATH_OK .and. allocated(candidates), 'ambiguous candidates remain inspectable')
   call check(size(candidates) == 2 .and. all(candidates%valid), 'two admissible candidates')
   call check(any(candidates%branch == 'A') .and. any(candidates%branch == 'B'), 'A and B candidates')
 
@@ -51,23 +51,23 @@ program test_prescribed_field
       1e-18_dp, 'C net current')
   input%branch = 'B'
   call solve_prescribed_field(input, output, status, message)
-  call check(status == sheath_no_physical_solution, 'explicit branch does not fall back')
+  call check(status == SHEATH_NO_PHYSICAL_SOLUTION, 'explicit branch does not fall back')
 
   input = zhao_field_input(photoelectron_source_density_m3=-1.0_dp)
   call solve_prescribed_field(input, output, status, message)
-  call check(status == sheath_invalid_argument, 'negative source density')
+  call check(status == SHEATH_INVALID_ARGUMENT, 'negative source density')
   input = zhao_field_input(electric_field_v_m=ieee_value(0.0_dp, ieee_quiet_nan))
   call solve_prescribed_field(input, output, status, message)
-  call check(status == sheath_invalid_argument, 'NaN field')
+  call check(status == SHEATH_INVALID_ARGUMENT, 'NaN field')
   input = zhao_field_input(ion_mass_kg=-1.0_dp)
   call solve_prescribed_field(input, output, status, message)
-  call check(status == sheath_invalid_argument, 'negative mass')
+  call check(status == SHEATH_INVALID_ARGUMENT, 'negative mass')
   input = zhao_field_input(photoelectron_temperature_ev=0.0_dp)
   call solve_prescribed_field(input, output, status, message)
-  call check(status == sheath_invalid_argument, 'zero temperature')
+  call check(status == SHEATH_INVALID_ARGUMENT, 'zero temperature')
   input = zhao_field_input(branch='invalid')
   call solve_prescribed_field(input, output, status, message)
-  call check(status == sheath_invalid_argument, 'unknown branch')
+  call check(status == SHEATH_INVALID_ARGUMENT, 'unknown branch')
   ! Calls are stateless; invalid input cannot poison a subsequent solution.
   input = zhao_field_input()
   call solve_prescribed_field(input, output, status, message)
@@ -84,7 +84,7 @@ contains
   end subroutine check
   subroutine ok(label)
     character(len=*), intent(in) :: label
-    call check(status == sheath_ok .and. output%valid, label)
+    call check(status == SHEATH_OK .and. output%valid, label)
   end subroutine ok
   subroutine near(actual, wanted, tolerance, label)
     real(dp), intent(in) :: actual, wanted, tolerance

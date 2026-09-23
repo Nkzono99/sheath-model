@@ -1,26 +1,15 @@
 ! SPDX-License-Identifier: Apache-2.0
 ! Adapted from BEACH (Jin Nakazono); see NOTICE and LICENSES/Apache-2.0.txt.
 ! Modified: standalone modules; status-returning public facade in sheath_model.
-!> Zhao 系シース数値モデルの core 実装。
+!> Zhao 系シースの物理量、残差、および枝ごとの初期値・探索。
 module sheath_model_core
   use sheath_model_orbits, only: electron_density, gauss_x, gauss_w
   use sheath_model_constants, only: dp
+  use sheath_model_numerics, only: solve_nonlinear_system, residual_norm, NONLINEAR_TOL
   use sheath_model_constants, only: pi, eps0, qe
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_quiet_nan
   implicit none
   private
-
-  real(dp), parameter :: nonlinear_tol = 1.0d-10
-  integer, parameter :: nonlinear_max_iter = 60
-  integer, parameter :: nonlinear_max_backtrack = 20
-
-  abstract interface
-    subroutine nonlinear_residual(x, f)
-      import :: dp
-      real(dp), intent(in) :: x(:)
-      real(dp), intent(out) :: f(:)
-    end subroutine nonlinear_residual
-  end interface
 
   type :: zhao_params_type
     real(dp) :: alpha_rad = 0.0d0
@@ -352,7 +341,7 @@ contains
     end if
     success = all(ieee_is_finite(x)) .and. all(ieee_is_finite(residual)) .and. &
         x(2) > 0.0_dp .and. residual_norm(residual) <= &
-        max(nonlinear_tol, 1024.0_dp*epsilon(1.0_dp)*residual_scale)
+        max(NONLINEAR_TOL, 1024.0_dp*epsilon(1.0_dp)*residual_scale)
   end subroutine try_solve_zhao_monotonic_scalar
 
   subroutine evaluate_monotonic_stationary_phi(p, branch, phi_v, residual_v, density_m3, success)
@@ -503,161 +492,5 @@ contains
     end do
     value = value/8.0_dp
   end function integrate_zhao_rho
-
-  subroutine solve_nonlinear_system(n, guesses, residual_fn, x_best, success)
-    integer, intent(in) :: n
-    real(dp), intent(in) :: guesses(:, :)
-    procedure(nonlinear_residual) :: residual_fn
-    real(dp), intent(out) :: x_best(n)
-    logical, intent(out) :: success
-
-    integer :: guess_idx
-    real(dp) :: x_trial(n), best_norm, trial_norm
-    logical :: trial_success
-
-    success = .false.
-    x_best = 0.0_dp
-    if (size(guesses, 1) /= n .or. size(guesses, 2) == 0) return
-    x_best = guesses(:, 1)
-    best_norm = huge(1.0d0)
-    do guess_idx = 1, size(guesses, 2)
-      call try_newton_solve(n, guesses(:, guess_idx), residual_fn, x_trial, trial_norm, trial_success)
-      if (trial_norm < best_norm) then
-        best_norm = trial_norm
-        x_best = x_trial
-      end if
-      if (trial_success .and. trial_norm < nonlinear_tol) then
-        success = .true.
-        x_best = x_trial
-        return
-      end if
-    end do
-
-    success = best_norm < nonlinear_tol
-  end subroutine solve_nonlinear_system
-
-  subroutine try_newton_solve(n, x0, residual_fn, x_out, final_norm, success)
-    integer, intent(in) :: n
-    real(dp), intent(in) :: x0(n)
-    procedure(nonlinear_residual) :: residual_fn
-    real(dp), intent(out) :: x_out(n)
-    real(dp), intent(out) :: final_norm
-    logical, intent(out) :: success
-
-    integer :: iter, backtrack
-    real(dp) :: x(n), f(n), jac(n, n), dx(n), x_trial(n), f_trial(n), step_scale, fnorm, trial_norm
-    logical :: linear_ok, improved
-
-    x = x0
-    call residual_fn(x, f)
-    fnorm = residual_norm(f)
-    do iter = 1, nonlinear_max_iter
-      if (fnorm < nonlinear_tol) exit
-      call numerical_jacobian(n, x, f, residual_fn, jac)
-      call solve_small_linear_system(n, jac, -f, dx, linear_ok)
-      if (.not. linear_ok) exit
-
-      step_scale = 1.0d0
-      improved = .false.
-      do backtrack = 1, nonlinear_max_backtrack
-        x_trial = x + step_scale*dx
-        call residual_fn(x_trial, f_trial)
-        trial_norm = residual_norm(f_trial)
-        if (trial_norm < fnorm) then
-          x = x_trial
-          f = f_trial
-          fnorm = trial_norm
-          improved = .true.
-          exit
-        end if
-        step_scale = 0.5d0*step_scale
-      end do
-      if (.not. improved) exit
-    end do
-
-    x_out = x
-    final_norm = fnorm
-    success = fnorm < nonlinear_tol
-  end subroutine try_newton_solve
-
-  subroutine numerical_jacobian(n, x, f0, residual_fn, jac)
-    integer, intent(in) :: n
-    real(dp), intent(in) :: x(n), f0(n)
-    procedure(nonlinear_residual) :: residual_fn
-    real(dp), intent(out) :: jac(n, n)
-
-    integer :: j
-    real(dp) :: h, xh(n), fh(n)
-
-    do j = 1, n
-      h = 1.0d-6*max(1.0d0, abs(x(j)))
-      xh = x
-      xh(j) = xh(j) + h
-      call residual_fn(xh, fh)
-      jac(:, j) = (fh - f0)/h
-    end do
-  end subroutine numerical_jacobian
-
-  subroutine solve_small_linear_system(n, a_in, b_in, x, ok)
-    integer, intent(in) :: n
-    real(dp), intent(in) :: a_in(n, n), b_in(n)
-    real(dp), intent(out) :: x(n)
-    logical, intent(out) :: ok
-
-    integer :: i, j, k, pivot_row
-    real(dp) :: a(n, n), b(n), factor, pivot_abs, tmp_row(n), tmp_val
-
-    a = a_in
-    b = b_in
-    ok = .true.
-
-    do k = 1, n
-      pivot_row = k
-      pivot_abs = abs(a(k, k))
-      do i = k + 1, n
-        if (abs(a(i, k)) > pivot_abs) then
-          pivot_abs = abs(a(i, k))
-          pivot_row = i
-        end if
-      end do
-      if (pivot_abs <= 1.0d-18) then
-        ok = .false.
-        x = 0.0d0
-        return
-      end if
-      if (pivot_row /= k) then
-        tmp_row = a(k, :)
-        a(k, :) = a(pivot_row, :)
-        a(pivot_row, :) = tmp_row
-        tmp_val = b(k)
-        b(k) = b(pivot_row)
-        b(pivot_row) = tmp_val
-      end if
-      do i = k + 1, n
-        factor = a(i, k)/a(k, k)
-        a(i, k:n) = a(i, k:n) - factor*a(k, k:n)
-        b(i) = b(i) - factor*b(k)
-      end do
-    end do
-
-    x = 0.0d0
-    do i = n, 1, -1
-      x(i) = b(i)
-      do j = i + 1, n
-        x(i) = x(i) - a(i, j)*x(j)
-      end do
-      x(i) = x(i)/a(i, i)
-    end do
-  end subroutine solve_small_linear_system
-
-  real(dp) function residual_norm(f) result(norm2)
-    real(dp), intent(in) :: f(:)
-
-    if (.not. all(ieee_is_finite(f))) then
-      norm2 = huge(1.0d0)
-      return
-    end if
-    norm2 = sqrt(sum(f*f))
-  end function residual_norm
 
 end module sheath_model_core
