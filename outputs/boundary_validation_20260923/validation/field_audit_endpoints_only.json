@@ -1,0 +1,220 @@
+{
+  "passed": true,
+  "roots_checked": 10,
+  "max_neutrality_error": 6.077147420795485e-13,
+  "max_field_squared_error": 1.987072637951556e-13,
+  "max_flux_relative_error": 4.745415150870259e-16,
+  "ambient_normalization_fractional_range": {
+    "A": 0.34610206799687937,
+    "B": 3.3308183443051886
+  },
+  "roots": [
+    {
+      "case": 0,
+      "branch": "B",
+      "E_H": 0.0,
+      "phi_H": 0.0,
+      "Ne": 17400000.0,
+      "neutrality_error": 0.0,
+      "field_squared_error": 0.0,
+      "upstream_integral_error": 0.0,
+      "flux_relative_error": 0.0,
+      "current_error": 0.0
+    },
+    {
+      "case": 1,
+      "branch": "C",
+      "E_H": -0.01,
+      "phi_H": -5.448151316026359,
+      "Ne": 6397527.152082559,
+      "neutrality_error": 5.3524285897441296e-17,
+      "field_squared_error": 4.663424594403276e-17,
+      "upstream_integral_error": 0.0,
+      "flux_relative_error": 2.0735842863537712e-16,
+      "current_error": 0.0
+    },
+    {
+      "case": 2,
+      "branch": "C",
+      "E_H": 0.0,
+      "phi_H": -5.445785809762306,
+      "Ne": 6397242.031927558,
+      "neutrality_error": 2.5140357086028174e-13,
+      "field_squared_error": 1.9872828538834815e-14,
+      "upstream_integral_error": 0.0,
+      "flux_relative_error": 4.146535940188749e-16,
+      "current_error": 1.2165673558982813e-16
+    },
+    {
+      "case": 3,
+      "branch": "A",
+      "E_H": 0.01,
+      "phi_H": -5.442159239982262,
+      "Ne": 6398000.725234904,
+      "neutrality_error": 2.0339228641027693e-15,
+      "field_squared_error": 1.6006483248218184e-15,
+      "upstream_integral_error": 1.19896003811933e-14,
+      "flux_relative_error": 0.0,
+      "current_error": 0.0
+    },
+    {
+      "case": 4,
+      "branch": "A",
+      "E_H": 1.4,
+      "phi_H": -0.7740081125782883,
+      "Ne": 7004624.187656953,
+      "neutrality_error": 1.0704857179488259e-16,
+      "field_squared_error": 6.797283824235653e-16,
+      "upstream_integral_error": 1.69300168795361e-16,
+      "flux_relative_error": 4.745415150870259e-16,
+      "current_error": 4.51815664116032e-16
+    },
+    {
+      "case": 4,
+      "branch": "B",
+      "E_H": 1.4,
+      "phi_H": 2.8148679367288416,
+      "Ne": 1981676.7842956968,
+      "neutrality_error": 6.077147420795485e-13,
+      "field_squared_error": 1.987072637951556e-13,
+      "upstream_integral_error": 0.0,
+      "flux_relative_error": 3.828441819487225e-16,
+      "current_error": 0.0
+    },
+    {
+      "case": 5,
+      "branch": "A",
+      "E_H": 1.6,
+      "phi_H": 3.393550813391979,
+      "Ne": 9428939.104545986,
+      "neutrality_error": 1.8412354348719806e-14,
+      "field_squared_error": 7.459310946700269e-15,
+      "upstream_integral_error": 1.4898024296552675e-14,
+      "flux_relative_error": 2.1162520673037197e-16,
+      "current_error": 2.8447047644656297e-16
+    },
+    {
+      "case": 5,
+      "branch": "B",
+      "E_H": 1.6,
+      "phi_H": 4.044213712042921,
+      "Ne": 8582282.16991152,
+      "neutrality_error": 2.772558009487459e-14,
+      "field_squared_error": 9.020562075079395e-15,
+      "upstream_integral_error": 0.0,
+      "flux_relative_error": 1.1157110891737777e-16,
+      "current_error": 4.98215246027203e-17
+    },
+    {
+      "case": 7,
+      "branch": "B",
+      "E_H": 1.4,
+      "phi_H": 2.809249549279132,
+      "Ne": 1592347.2130549317,
+      "neutrality_error": 0.0,
+      "field_squared_error": 1.2461687011098698e-15,
+      "upstream_integral_error": 0.0,
+      "flux_relative_error": 1.905471814371813e-16,
+      "current_error": 0.0
+    },
+    {
+      "case": 8,
+      "branch": "B",
+      "E_H": 1.6,
+      "phi_H": 3.9870911919881356,
+      "Ne": 6845990.0969902,
+      "neutrality_error": 1.4558605764104032e-14,
+      "field_squared_error": 4.2327252813834087e-14,
+      "upstream_integral_error": 0.0,
+      "flux_relative_error": 2.1742294991025337e-16,
+      "current_error": 8.997568646985178e-17
+    }
+  ],
+  "statuses": [
+    {
+      "case": "0",
+      "requested_branch": "auto",
+      "status": "0",
+      "count": "1",
+      "message": ""
+    },
+    {
+      "case": "1",
+      "requested_branch": "auto",
+      "status": "0",
+      "count": "1",
+      "message": ""
+    },
+    {
+      "case": "2",
+      "requested_branch": "auto",
+      "status": "0",
+      "count": "1",
+      "message": ""
+    },
+    {
+      "case": "3",
+      "requested_branch": "auto",
+      "status": "0",
+      "count": "1",
+      "message": ""
+    },
+    {
+      "case": "4",
+      "requested_branch": "auto",
+      "status": "0",
+      "count": "2",
+      "message": ""
+    },
+    {
+      "case": "5",
+      "requested_branch": "auto",
+      "status": "0",
+      "count": "2",
+      "message": ""
+    },
+    {
+      "case": "6",
+      "requested_branch": "auto",
+      "status": "3",
+      "count": "0",
+      "message": "No root converged in the finite multistart search."
+    },
+    {
+      "case": "7",
+      "requested_branch": "auto",
+      "status": "0",
+      "count": "1",
+      "message": ""
+    },
+    {
+      "case": "8",
+      "requested_branch": "auto",
+      "status": "0",
+      "count": "1",
+      "message": ""
+    },
+    {
+      "case": "9",
+      "requested_branch": "auto",
+      "status": "3",
+      "count": "0",
+      "message": "No root converged in the finite multistart search."
+    },
+    {
+      "case": "10",
+      "requested_branch": "A",
+      "status": "2",
+      "count": "0",
+      "message": "No admissible profile found among the converged roots or compatible branches."
+    },
+    {
+      "case": "11",
+      "requested_branch": "C",
+      "status": "2",
+      "count": "0",
+      "message": "No admissible profile found among the converged roots or compatible branches."
+    }
+  ],
+  "scope": "public Fortran candidates vs independent quadrature; finite-reservoir model not implemented"
+}

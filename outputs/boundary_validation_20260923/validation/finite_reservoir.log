@@ -1,0 +1,81 @@
+{
+  "passed": true,
+  "checks": {
+    "positive_drift": true,
+    "nonmonotonic_finite_profile": true,
+    "field_positive_in_near_upstream_samples": true,
+    "independently_checked_field_integrals": true,
+    "grid_doubling_converged": true,
+    "inverse_fixed_boundary_problem_recovered": true,
+    "recovered_boundary_potentials": true
+  },
+  "elapsed_seconds": 1.3438446139916778,
+  "assumptions": {
+    "domain": "finite H <= z <= L",
+    "potential_l_v": 0.0,
+    "electron_incident_vdf": "Ne exp(-(a-u)^2)/(sqrt(pi) vth), a>=0 at L",
+    "outgoing_boundary": "absorbed by external reservoir; no prescribed E_L or neutrality",
+    "ions": "cold inward beam prescribed at L",
+    "photoelectrons": "half Maxwell source at H",
+    "internal_electrons": "excluded",
+    "electron_drift_ratio": 0.19726960040476482
+  },
+  "construction": {
+    "increase_fraction": 0.01,
+    "fixed_electron_normalization_m3": 8002501.243827664,
+    "phi_h_v": 2.654426813943442,
+    "minimum_potential_v": -1.18972381158758,
+    "derived_fixed_electric_field_h_v_m": 1.6036598972032243,
+    "derived_fixed_length_m": 40.67770717919477,
+    "output_electric_field_l_v_m": -0.04928703401484534,
+    "rho_l_c_m3": -9.9751368812299e-15,
+    "ion_minus_electron_density_l_m3": -62259.907363184655
+  },
+  "trial_profiles": [
+    {
+      "increase_fraction": 0.01,
+      "electron_normalization_m3": 8002501.243827664,
+      "valid": true,
+      "lower_length_hat": 8.280600144178933,
+      "lower_endpoint_e2_hat": 1.0093928542703894,
+      "lower_minimum_e2_over_t2": 0.04212686042854428,
+      "lower_endpoint_charge_hat": -0.7477412661610202,
+      "upper_length_hat": 21.23262155758856,
+      "upper_endpoint_e2_hat": 0.0009534301045740797,
+      "upper_minimum_e2_over_t2": 0.0009487238843013554,
+      "upper_endpoint_charge_hat": -0.0009728110525497602,
+      "length_m": 40.67777049932954,
+      "electric_field_h_v_m": 1.6036599096774677,
+      "electric_field_l_v_m": -0.04928634238140667
+    }
+  ],
+  "convergence_relative_change_512_to_1024": {
+    "length_m": 2.1886974455788556e-08,
+    "electric_field_h_v_m": 2.850042918929567e-11,
+    "electric_field_l_v_m": 6.647419726998127e-07
+  },
+  "adaptive_endpoint_relative_errors": {
+    "lower": 3.800126574644519e-12,
+    "upper": 4.426504660524215e-07
+  },
+  "inverse_solve": {
+    "seed_phi_h_v": 2.627882545804008,
+    "seed_phim_v": -1.18972381158758,
+    "recovered_phi_h_v": 2.654426858471043,
+    "recovered_phim_v": -1.1897237483258225,
+    "normalized_EH_squared_and_L_residual_at_1024": [
+      -9.68968683068283e-10,
+      -1.951210486517141e-07
+    ],
+    "solver_reported_success": true,
+    "solver_message": "The solution converged.",
+    "unique_profile_evaluations": 11
+  },
+  "limitations": [
+    "This is a manufactured finite-domain example; its L and incoming Ne were chosen for a bounded existence check.",
+    "No measured BEACH matching-plane state or physical location of the outer reservoir was fitted.",
+    "Positive E^2 was checked numerically with grid refinement and independent endpoint/near-boundary quadrature, not proved for all parameters.",
+    "No neutrality or zero-field limit at infinity, infinite-domain convergence, or dynamical stability is claimed.",
+    "This demonstrates a different boundary problem can admit a positive-drift A-shaped profile; it does not select that model for production."
+  ]
+}

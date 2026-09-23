@@ -1,0 +1,18 @@
+test_a_to_b_density_limit (test_orbits.OrbitTests.test_a_to_b_density_limit) ... ok
+test_density_and_flux_against_adaptive_velocity_integrals (test_orbits.OrbitTests.test_density_and_flux_against_adaptive_velocity_integrals) ... ok
+test_negative_upstream_field_integral_independent_of_acceptance_guard (test_orbits.OrbitTests.test_negative_upstream_field_integral_independent_of_acceptance_guard) ... ok
+test_public_fluxes_are_position_independent (test_orbits.OrbitTests.test_public_fluxes_are_position_independent) ... ok
+test_reject_inadmissible_algebraic_roots (test_orbits.OrbitTests.test_reject_inadmissible_algebraic_roots) ... ok
+test_vdf_support_and_orbit_invariance (test_orbits.OrbitTests.test_vdf_support_and_orbit_invariance) ... ok
+test_zero_drift_positive_potential_cutoff (test_orbits.OrbitTests.test_zero_drift_positive_potential_cutoff) ... ok
+test_zero_drift_type_a_integral_is_regular (test_orbits.OrbitTests.test_zero_drift_type_a_integral_is_regular) ... ok
+test_defaults_use_surface_normal_drift (test_solver.ZhaoSolverTests.test_defaults_use_surface_normal_drift) ... ok
+test_nondrifting_type_c_reference_cases (test_solver.ZhaoSolverTests.test_nondrifting_type_c_reference_cases) ... ok
+test_swe_current_term_matches_direct_integral (test_solver.ZhaoSolverTests.test_swe_current_term_matches_direct_integral) ... ok
+test_type_c_photoelectron_density_keeps_erfc_cutoff (test_solver.ZhaoSolverTests.test_type_c_photoelectron_density_keeps_erfc_cutoff) ... ok
+test_zero_sun_elevation_normal_drift_raises_clear_error (test_solver.ZhaoSolverTests.test_zero_sun_elevation_normal_drift_raises_clear_error) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 1.255s
+
+OK
