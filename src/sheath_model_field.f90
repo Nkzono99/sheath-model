@@ -13,7 +13,6 @@ module sheath_model_field
 
   type :: zhao_field_input
     character(len=9) :: branch = 'auto'
-    character(len=16) :: root_selection = 'require_unique'
     real(dp) :: electric_field_v_m = 0.0_dp
     real(dp) :: ion_density_m3 = 8.7e6_dp
     real(dp) :: photoelectron_source_density_m3 = 0.0_dp
@@ -38,7 +37,6 @@ module sheath_model_field
     real(dp) :: residual_norm = huge(1.0_dp)
     real(dp) :: minimum_field_squared_hat = huge(1.0_dp)
     integer(i32) :: nonlinear_iterations = 0_i32
-    real(dp) :: field_energy_j_m2 = huge(1.0_dp)
   end type zhao_field_result
 
   type :: zhao_field_root
@@ -48,13 +46,12 @@ module sheath_model_field
     real(dp) :: ambient_electron_density_m3 = 0.0_dp
     real(dp) :: residual_norm = huge(1.0_dp)
     real(dp) :: minimum_field_squared_hat = huge(1.0_dp)
-    real(dp) :: field_energy_j_m2 = huge(1.0_dp)
     integer(i32) :: nonlinear_iterations = 0_i32
   end type zhao_field_root
 
   interface
-    module subroutine solve_field_root(model, root_selection, params, interface_field_v_m, root, status, message)
-      character(len=*), intent(in) :: model, root_selection
+    module subroutine solve_field_root(model, params, interface_field_v_m, root, status, message)
+      character(len=*), intent(in) :: model
       type(zhao_params_type), intent(in) :: params
       real(dp), intent(in) :: interface_field_v_m
       type(zhao_field_root), intent(out) :: root
@@ -121,13 +118,6 @@ module sheath_model_field
       character(len=*), intent(out) :: message
     end subroutine validate_field_root_profile
 
-    module subroutine evaluate_root_field_energy(params, root, status, message)
-      type(zhao_params_type), intent(in) :: params
-      type(zhao_field_root), intent(inout) :: root
-      integer(i32), intent(out) :: status
-      character(len=*), intent(out) :: message
-    end subroutine evaluate_root_field_energy
-
   end interface
 contains
 
@@ -142,8 +132,7 @@ contains
     output = zhao_field_result()
     call prepare_field_params(input, params, status, message)
     if (status /= sheath_ok) return
-    call solve_field_root(trim(lower_ascii(input%branch)), trim(lower_ascii(input%root_selection)), &
-                          params, input%electric_field_v_m, root, status, message)
+    call solve_field_root(trim(lower_ascii(input%branch)), params, input%electric_field_v_m, root, status, message)
     if (status /= sheath_ok) return
     call compose_result(params, root, output, status, message)
   end subroutine solve_prescribed_field
@@ -202,7 +191,6 @@ contains
     end if
     trial%residual_norm = root%residual_norm
     trial%minimum_field_squared_hat = root%minimum_field_squared_hat
-    trial%field_energy_j_m2 = root%field_energy_j_m2
     trial%nonlinear_iterations = root%nonlinear_iterations
     trial%valid = .true.
     output = trial
@@ -219,12 +207,6 @@ contains
     message = 'branch must be auto, A, B, or C.'
     select case (trim(lower_ascii(input%branch)))
     case ('auto', 'a', 'b', 'c')
-    case default
-      return
-    end select
-    message = 'root_selection must be require_unique or max_field_energy.'
-    select case (trim(lower_ascii(input%root_selection)))
-    case ('require_unique', 'max_field_energy')
     case default
       return
     end select

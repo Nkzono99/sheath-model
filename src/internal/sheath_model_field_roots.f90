@@ -7,7 +7,6 @@ submodule(sheath_model_field) sheath_model_field_roots
   implicit none
 
   real(dp), parameter :: root_cluster_tolerance = 1.0e-6_dp
-  real(dp), parameter :: energy_tie_tolerance = 1.0e-6_dp
 
 contains
 
@@ -18,11 +17,9 @@ contains
   if (status /= sheath_ok) return
   if (size(roots) == 1) then
     root = roots(1)
-  else if (trim(root_selection) == 'require_unique') then
+  else
     status = sheath_ambiguous_solution
     message = 'Multiple admissible roots found; use solve_prescribed_field_candidates to inspect them.'
-  else
-    call select_max_field_energy_root(roots, size(roots), root, status, message)
   end if
   end procedure solve_field_root
 
@@ -52,7 +49,6 @@ contains
       flat%ambient_electron_density_m3 = density
       flat%residual_norm = 0.0_dp
       flat%minimum_field_squared_hat = 0.0_dp
-      flat%field_energy_j_m2 = 0.0_dp
       n = 1
       found(n) = flat
     end if
@@ -93,10 +89,6 @@ contains
     end if
     return
   end if
-  do i = 1, n
-    call evaluate_root_field_energy(params, found(i), status, message)
-    if (status /= sheath_ok) return
-  end do
   roots = found(:n)
   status = sheath_ok
   message = ''
@@ -227,48 +219,6 @@ contains
       if (saw_nonphysical_profile) status = sheath_no_physical_solution
     end if
   end subroutine collect_field_branch_roots
-
-  subroutine select_max_field_energy_root(roots, root_count, root, status, message)
-    type(zhao_field_root), intent(in) :: roots(:)
-    integer, intent(in) :: root_count
-    type(zhao_field_root), intent(out) :: root
-    integer(i32), intent(out) :: status
-    character(len=*), intent(out) :: message
-
-    real(dp) :: energy_scale
-    integer :: candidate_index, best_index
-
-    root = zhao_field_root()
-    status = sheath_numerical_failure
-    message = ''
-    if (root_count < 1 .or. root_count > size(roots)) then
-      message = 'prescribed-field Zhao max-field-energy heuristic selection received an invalid candidate count.'
-      return
-    end if
-    best_index = 1
-    do candidate_index = 2, root_count
-      if (roots(candidate_index)%field_energy_j_m2 > &
-          roots(best_index)%field_energy_j_m2) best_index = candidate_index
-    end do
-    do candidate_index = 1, root_count
-      if (candidate_index == best_index) cycle
-      energy_scale = max( &
-                     abs(roots(best_index)%field_energy_j_m2), &
-                     abs(roots(candidate_index)%field_energy_j_m2), tiny(1.0_dp) &
-                     )
-      if (abs( &
-          roots(candidate_index)%field_energy_j_m2 - &
-          roots(best_index)%field_energy_j_m2 &
-          ) <= energy_tie_tolerance*energy_scale) then
-        status = sheath_ambiguous_solution
-        message = 'prescribed-field Zhao max-field-energy heuristic candidates are numerically tied.'
-        return
-      end if
-    end do
-    root = roots(best_index)
-    status = sheath_ok
-    message = ''
-  end subroutine select_max_field_energy_root
 
   pure logical function field_roots_equivalent(params, first, second) result(equivalent)
     type(zhao_params_type), intent(in) :: params

@@ -14,6 +14,9 @@ J=0 モデルは零電流条件を課します。E_H 指定モデルは電場を
 いずれも、名前付きの入力型と結果型を使う関数呼び出しです。初期化手順や内部状態はありません。
 入力・出力の単位と物理的な意味は [Fortran API](docs/fortran-api.md) を参照してください。
 
+光電子源には half-Maxwell 分布を境界条件として指定します。このライブラリは、計測された分布を
+平均エネルギーと流束から単一 Maxwell に近似する処理を持ちません。任意の計測分布を扱うモデルではありません。
+
 ソース版では、背景電子を上流 VDF から軌道保存に沿って写像し、代数根の物理プロファイルも検査します。
 v0.1.0 から解の存在域が変わります。特に正の内向き電子ドリフトを持つ A/C は、
 完全反射・半無限上流の仮定と両立しないため不採用です。以下の A 枝の例は無ドリフト電子を明示します。
@@ -114,7 +117,6 @@ character(len=256) :: message
 
 input%branch = 'A'
 input%electron_drift_mps = 0.0_dp
-input%root_selection = 'max_field_energy'
 input%electric_field_v_m = 1.62_dp
 input%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
 call solve_prescribed_field(input, result, status, message)
@@ -123,8 +125,8 @@ print *, result%boundary_potential_v, result%net_current_a_m2
 ```
 
 J=0 モデルも `call solve_equilibrium(input, result, status, message)` の形で呼び出します。
-`max_field_energy` は正の電場エネルギーが最大の候補を選ぶヒューリスティックで、安定性の判定ではありません。
-既定の `require_unique` は複数解を曖昧性として返し、`solve_prescribed_field_candidates` で候補を取得できます。
+E_H 指定モデルは、検出した物理解が一つの場合に結果を返します。複数ある場合は
+`sheath_ambiguous_solution` を返し、`solve_prescribed_field_candidates` で候補を取得できます。
 両方を比較する完全な例は [compare_closures.f90](example/compare_closures.f90) にあります。
 ライブラリ自体は `stop` / `error stop` やファイル出力を行いません。
 

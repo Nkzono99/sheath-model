@@ -6,7 +6,7 @@ See docs/kinetic-model.md for the reservoir closure and admissibility conditions
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import math
 from typing import Dict, Iterable, Literal
 
@@ -53,9 +53,6 @@ class ZhaoParams:
     n_type_a_grid: int = 8000
     profile_phi_tol_hat: float = 1.0e-3
     type_a_phi_m_eps_hat: float = 1.0e-5
-    # Experimental convergence fallback for "full" ion-drift runs.
-    # Disabled by default because it changes the branch equations.
-    allow_type_c_normal_ion_fallback: bool = False
 
     @property
     def alpha_rad(self) -> float:
@@ -282,7 +279,6 @@ class ZhaoSheathSolver:
     ) -> Dict[str, float | str]:
         p = self.p
         self._validate_params_for_branch(branch)
-        note = ""
         if branch == "A":
             guesses = (
                 [np.array(guess, dtype=float)]
@@ -324,25 +320,9 @@ class ZhaoSheathSolver:
                     np.array([-15.0, 8.5e6]),
                 ]
             )
-            try:
-                phi0_V, n_swe_inf_m3 = self._try_root_guesses(
-                    self._residuals_type_c, guesses
-                )
-            except RuntimeError:
-                if (
-                    not p.allow_type_c_normal_ion_fallback
-                    or p.ion_drift_mode == "normal"
-                ):
-                    raise
-                p2 = replace(
-                    p, ion_drift_mode="normal", allow_type_c_normal_ion_fallback=False
-                )
-                alt = ZhaoSheathSolver(p2).solve_unknowns("C", guess)
-                alt["note"] = (
-                    "Type C root did not converge with ion_drift_mode='full'; retried with ion_drift_mode='normal' "
-                    "(v_sw*sin(alpha)) for the ion term."
-                )
-                return alt
+            phi0_V, n_swe_inf_m3 = self._try_root_guesses(
+                self._residuals_type_c, guesses
+            )
             phi_m_V = phi0_V
         else:
             raise ValueError(f"unknown branch: {branch}")
@@ -360,7 +340,6 @@ class ZhaoSheathSolver:
                 float(phi_m_V / p.T_phe_eV) if math.isfinite(phi_m_V) else math.nan
             ),
             "n_swe_inf_hat": float(n_swe_inf_m3 / p.n_phe_ref_m3),
-            "note": note,
             "electron_drift_mode": p.electron_drift_mode,
             "ion_drift_mode": p.ion_drift_mode,
             "v_d_electron_mps": p.v_d_electron_mps,
@@ -637,20 +616,6 @@ class ZhaoSheathSolver:
     ) -> Dict[str, np.ndarray | float | str]:
         p = self.p
         uk = self.solve_unknowns(branch, guess_unknowns)
-
-        # If solve_unknowns returned a fallback solution from a modified parameter set,
-        # continue with that same parameterization for the profile construction.
-        if (
-            uk.get("ion_drift_mode") != p.ion_drift_mode
-            or uk.get("electron_drift_mode") != p.electron_drift_mode
-        ):
-            p2 = replace(
-                p,
-                ion_drift_mode=str(uk["ion_drift_mode"]),
-                electron_drift_mode=str(uk["electron_drift_mode"]),
-                allow_type_c_normal_ion_fallback=False,
-            )
-            return ZhaoSheathSolver(p2).solve_profile(branch, guess_unknowns)
 
         if branch == "A":
             return self._build_type_a_profile(uk)

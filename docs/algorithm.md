@@ -67,10 +67,10 @@ are nonuniform and may stop before zmax_hat; no artificial zero-potential tail i
 
 ## Multiple solutions and numerical limits
 
-`require_unique` is the default field-root policy. Candidate enumeration lets callers
-inspect all roots found by the finite multistart search. `max_field_energy` selects
-the largest positive electrostatic field energy per area. This is a heuristic;
-no dynamical or thermodynamic stability follows from it.
+The prescribed-field solve returns a solution only when the finite multistart
+search finds one admissible root. Multiple roots produce an ambiguity status;
+candidate enumeration lets callers inspect their potentials, densities, and fluxes.
+No stability ranking or automatic change of the input drift is performed.
 
 The former Type A integral with a removable `1/u` singularity has been replaced by
 quadrature of the same charge density as Poisson's equation. It is regular at u=0.
