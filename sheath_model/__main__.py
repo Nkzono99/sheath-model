@@ -12,7 +12,7 @@ def main() -> None:
     parser.add_argument("--branch", choices=["A", "B", "C", "auto"], default="auto")
     parser.add_argument("--alpha", type=float, default=60.0)
     parser.add_argument("--zmax-hat", type=float, default=80.0)
-    parser.add_argument("--electron-drift-mode", choices=["full", "normal"], default="full")
+    parser.add_argument("--electron-drift-mode", choices=["full", "normal", "zero"], default="full")
     parser.add_argument("--ion-drift-mode", choices=["full", "normal"], default="full")
     args = parser.parse_args()
 

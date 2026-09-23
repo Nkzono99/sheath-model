@@ -9,7 +9,7 @@ module sheath_model_field
   use sheath_model_core, only: zhao_params_type, swe_free_current_term
   implicit none
   private
-  public :: zhao_field_input, zhao_field_result, solve_prescribed_field
+  public :: zhao_field_input, zhao_field_result, solve_prescribed_field, solve_prescribed_field_candidates
 
   type :: zhao_field_input
     character(len=9) :: branch = 'auto'
@@ -37,8 +37,8 @@ module sheath_model_field
     real(dp) :: net_current_a_m2 = 0.0_dp
     real(dp) :: residual_norm = huge(1.0_dp)
     real(dp) :: minimum_field_squared_hat = huge(1.0_dp)
-    real(dp) :: potential_energy_j_m2 = huge(1.0_dp)
     integer(i32) :: nonlinear_iterations = 0_i32
+    real(dp) :: field_energy_j_m2 = huge(1.0_dp)
   end type zhao_field_result
 
   type :: zhao_field_root
@@ -48,7 +48,7 @@ module sheath_model_field
     real(dp) :: ambient_electron_density_m3 = 0.0_dp
     real(dp) :: residual_norm = huge(1.0_dp)
     real(dp) :: minimum_field_squared_hat = huge(1.0_dp)
-    real(dp) :: potential_energy_j_m2 = huge(1.0_dp)
+    real(dp) :: field_energy_j_m2 = huge(1.0_dp)
     integer(i32) :: nonlinear_iterations = 0_i32
   end type zhao_field_root
 
@@ -61,6 +61,15 @@ module sheath_model_field
       integer(i32), intent(out) :: status
       character(len=*), intent(out) :: message
     end subroutine solve_field_root
+
+    module subroutine find_field_roots(model, params, interface_field_v_m, roots, status, message)
+      character(len=*), intent(in) :: model
+      type(zhao_params_type), intent(in) :: params
+      real(dp), intent(in) :: interface_field_v_m
+      type(zhao_field_root), allocatable, intent(out) :: roots(:)
+      integer(i32), intent(out) :: status
+      character(len=*), intent(out) :: message
+    end subroutine find_field_roots
 
     module subroutine make_field_branch_guesses(params, branch, guesses, count)
       type(zhao_params_type), intent(in) :: params
@@ -112,12 +121,12 @@ module sheath_model_field
       character(len=*), intent(out) :: message
     end subroutine validate_field_root_profile
 
-    module subroutine evaluate_root_potential_energy(params, root, status, message)
+    module subroutine evaluate_root_field_energy(params, root, status, message)
       type(zhao_params_type), intent(in) :: params
       type(zhao_field_root), intent(inout) :: root
       integer(i32), intent(out) :: status
       character(len=*), intent(out) :: message
-    end subroutine evaluate_root_potential_energy
+    end subroutine evaluate_root_field_energy
 
   end interface
 contains
@@ -130,16 +139,48 @@ contains
     character(len=*), intent(out) :: message
     type(zhao_params_type) :: params
     type(zhao_field_root) :: root
-    type(zhao_field_result) :: trial
-    real(dp) :: cutoff, flux_scale
-
     output = zhao_field_result()
     call prepare_field_params(input, params, status, message)
     if (status /= sheath_ok) return
     call solve_field_root(trim(lower_ascii(input%branch)), trim(lower_ascii(input%root_selection)), &
                           params, input%electric_field_v_m, root, status, message)
     if (status /= sheath_ok) return
+    call compose_result(params, root, output, status, message)
+  end subroutine solve_prescribed_field
 
+  subroutine solve_prescribed_field_candidates(input, outputs, status, message)
+    type(zhao_field_input), intent(in) :: input
+    type(zhao_field_result), allocatable, intent(out) :: outputs(:)
+    integer(i32), intent(out) :: status
+    character(len=*), intent(out) :: message
+    type(zhao_params_type) :: params
+    type(zhao_field_root), allocatable :: roots(:)
+    integer :: i
+    call prepare_field_params(input, params, status, message)
+    if (status /= sheath_ok) return
+    call find_field_roots(trim(lower_ascii(input%branch)), params, input%electric_field_v_m, roots, status, message)
+    if (status /= sheath_ok) return
+    allocate (outputs(size(roots)))
+    do i = 1, size(roots)
+      call compose_result(params, roots(i), outputs(i), status, message)
+      if (status /= sheath_ok) then
+        deallocate (outputs)
+        return
+      end if
+    end do
+  end subroutine solve_prescribed_field_candidates
+
+  subroutine compose_result(params, root, output, status, message)
+    type(zhao_params_type), intent(in) :: params
+    type(zhao_field_root), intent(in) :: root
+    type(zhao_field_result), intent(out) :: output
+    integer(i32), intent(out) :: status
+    character(len=*), intent(out) :: message
+    type(zhao_field_result) :: trial
+    real(dp) :: cutoff, flux_scale
+    output = zhao_field_result()
+    status = sheath_ok
+    message = ''
     trial%branch = root%branch
     trial%boundary_potential_v = root%phi0_v
     trial%minimum_potential_v = min(0.0_dp, root%phi0_v)
@@ -161,11 +202,11 @@ contains
     end if
     trial%residual_norm = root%residual_norm
     trial%minimum_field_squared_hat = root%minimum_field_squared_hat
-    trial%potential_energy_j_m2 = root%potential_energy_j_m2
+    trial%field_energy_j_m2 = root%field_energy_j_m2
     trial%nonlinear_iterations = root%nonlinear_iterations
     trial%valid = .true.
     output = trial
-  end subroutine solve_prescribed_field
+  end subroutine compose_result
 
   subroutine prepare_field_params(input, params, status, message)
     type(zhao_field_input), intent(in) :: input
@@ -181,9 +222,9 @@ contains
     case default
       return
     end select
-    message = 'root_selection must be require_unique or minimum_energy.'
+    message = 'root_selection must be require_unique or max_field_energy.'
     select case (trim(lower_ascii(input%root_selection)))
-    case ('require_unique', 'minimum_energy')
+    case ('require_unique', 'max_field_energy')
     case default
       return
     end select

@@ -10,13 +10,15 @@ program compare_closures
   character(len=256) :: message
 
   equilibrium_input%branch = 'A'
+  equilibrium_input%electron_drift_mode = 'zero'
   call solve_equilibrium(equilibrium_input, equilibrium, status, message)
   call require_success()
   print *, 'Zhao J=0: phi0 [V], J_z [A/m^2]'
   print *, equilibrium%surface_potential_v, equilibrium%net_current_a_m2
 
   field_input%branch = 'A'
-  field_input%root_selection = 'minimum_energy'
+  field_input%electron_drift_mps = 0.0_dp
+  field_input%root_selection = 'max_field_energy'
   field_input%electric_field_v_m = 1.62_dp
   field_input%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
   field_input%photoelectron_temperature_ev = 2.2_dp

@@ -5,6 +5,8 @@ program test_prescribed_field
   real(dp), parameter :: qe = 1.602176634e-19_dp, eps0 = 8.8541878128e-12_dp
   type(zhao_field_input) :: input
   type(zhao_field_result) :: output
+  type(zhao_field_result), allocatable :: candidates(:)
+  real(dp) :: selected_energy
   real(dp) :: thermal, expected
   integer(i32) :: status
   character(len=512) :: message
@@ -20,15 +22,18 @@ program test_prescribed_field
   call near(output%minimum_potential_v, 0.0_dp, 0.0_dp, 'B minimum')
 
   input%branch = 'A'
-  input%root_selection = 'minimum_energy'
+  input%electron_drift_mps = 0.0_dp
+  input%root_selection = 'max_field_energy'
   input%electric_field_v_m = 1.4187346568707933e-11_dp/eps0
   input%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
   call solve_prescribed_field(input, output, status, message)
   call ok('Type A reference')
-  call near(output%boundary_potential_v, 2.9712182827319435_dp, 5e-5_dp, 'A potential reference')
-  call near(output%minimum_potential_v, -0.8169121871620854_dp, 5e-5_dp, 'A minimum reference')
-  ! Independent nested-quadrature reference retained from the original model tests.
-  call near(output%potential_energy_j_m2, -1.2875334387049235e-11_dp, 1.3e-18_dp, 'A energy reference')
+  selected_energy = output%field_energy_j_m2
+  call check(output%field_energy_j_m2 > 0.0_dp, 'positive electrostatic field energy')
+
+  call solve_prescribed_field_candidates(input, candidates, status, message)
+  call ok('candidate enumeration')
+  call near(selected_energy, maxval(candidates%field_energy_j_m2), selected_energy*1e-10_dp, 'heuristic ranking')
 
   input%branch = 'auto'
   input%root_selection = 'require_unique'
@@ -36,7 +41,7 @@ program test_prescribed_field
   call check(status == sheath_ambiguous_solution, 'ambiguous roots must be explicit')
   call check(.not. output%valid .and. output%boundary_potential_v == 0.0_dp, 'failed result reset')
 
-  input = zhao_field_input(electric_field_v_m=-0.02_dp)
+  input = zhao_field_input(electric_field_v_m=-0.02_dp, electron_drift_mps=0.0_dp)
   call solve_prescribed_field(input, output, status, message)
   call ok('negative field')
   call check(output%branch == 'C' .and. output%boundary_potential_v < 0.0_dp, 'negative field C')

@@ -3,13 +3,14 @@
 ! Modified: standalone modules; status-returning public facade in sheath_model.
 !> Zhao 系シース数値モデルの core 実装。
 module sheath_model_core
+  use sheath_model_orbits, only: electron_density, gauss_x, gauss_w
   use sheath_model_constants, only: dp
   use sheath_model_constants, only: pi, eps0, qe
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_quiet_nan
   implicit none
   private
 
-  real(dp), parameter :: nonlinear_tol = 1.0d-5
+  real(dp), parameter :: nonlinear_tol = 1.0d-10
   integer, parameter :: nonlinear_max_iter = 60
   integer, parameter :: nonlinear_max_backtrack = 20
 
@@ -49,7 +50,7 @@ module sheath_model_core
   public :: zhao_residuals_type_b
   public :: zhao_residuals_type_c
   public :: swe_free_current_term
-  public :: type_a_e2_sum_at_infinity
+  public :: type_a_e2_sum_at_infinity, integrate_zhao_rho
 
 contains
 
@@ -79,7 +80,7 @@ contains
     real(dp), intent(in) :: phi_hat, phi0_hat, phi_m_hat, n_swe_inf_hat
     real(dp), intent(out) :: n_swi_hat, n_swe_f_hat, n_swe_r_hat, n_phe_f_hat, n_phe_c_hat
 
-    real(dp) :: arg_ion, s_swe, s_phe, source_density_hat
+    real(dp) :: arg_ion, s_phe, source_density_hat, free, reflected, barrier
 
     source_density_hat = p%n_phe0_m3/p%n_phe_ref_m3
     arg_ion = 1.0d0 - 2.0d0*phi_hat/(p%tau*p%mach*p%mach)
@@ -91,32 +92,30 @@ contains
     if (arg_ion <= 0.0_dp) return
     n_swi_hat = (p%n_swi_inf_m3/p%n_phe_ref_m3)*arg_ion**(-0.5d0)
 
+    barrier = min(0.0_dp, phi0_hat)/p%tau
+    if (branch == 'A') barrier = phi_m_hat/p%tau
+    call electron_density(phi_hat/p%tau, barrier, p%u, free, reflected)
+    n_swe_f_hat = n_swe_inf_hat*free
+    n_swe_r_hat = n_swe_inf_hat*reflected
     select case (branch)
     case ('A')
-      s_swe = sqrt(max(0.0d0, (phi_hat - phi_m_hat)/p%tau))
       s_phe = sqrt(max(0.0d0, phi_hat - phi_m_hat))
-      n_swe_f_hat = 0.5d0*n_swe_inf_hat*exp(phi_hat/p%tau)*(1.0d0 - erf(s_swe - p%u))
       n_phe_f_hat = 0.5d0*source_density_hat*exp(phi_hat - phi0_hat)*(1.0d0 - erf(s_phe))
       if (trim(side) == 'lower') then
         n_swe_r_hat = 0.0d0
         n_phe_c_hat = source_density_hat*exp(phi_hat - phi0_hat)*erf(s_phe)
       else if (trim(side) == 'upper') then
-        n_swe_r_hat = n_swe_inf_hat*exp(phi_hat/p%tau)*(erf(s_swe - p%u) + erf(p%u))
         n_phe_c_hat = 0.0d0
       else
         return
       end if
     case ('B')
       s_phe = sqrt(max(0.0d0, phi_hat))
-      n_swe_f_hat = 0.5d0*n_swe_inf_hat*exp(phi_hat/p%tau)*(1.0d0 + erf(p%u))
       n_swe_r_hat = 0.0d0
       n_phe_f_hat = 0.5d0*source_density_hat*exp(phi_hat - phi0_hat)*(1.0d0 - erf(s_phe))
       n_phe_c_hat = source_density_hat*exp(phi_hat - phi0_hat)*erf(s_phe)
     case ('C')
-      s_swe = sqrt(max(0.0d0, (phi_hat - phi0_hat)/p%tau))
       s_phe = sqrt(max(0.0d0, phi_hat - phi0_hat))
-      n_swe_f_hat = 0.5d0*n_swe_inf_hat*exp(phi_hat/p%tau)*(1.0d0 - erf(s_swe - p%u))
-      n_swe_r_hat = n_swe_inf_hat*exp(phi_hat/p%tau)*(erf(s_swe - p%u) + erf(p%u))
       n_phe_f_hat = 0.5d0*source_density_hat*exp(phi_hat - phi0_hat)*erfc(s_phe)
       n_phe_c_hat = 0.0d0
     case default
@@ -124,7 +123,7 @@ contains
     end select
   end subroutine evaluate_zhao_density_hat
 
-  !> Zhao の零電流定常根を fail-closed な status 付きで探索する。
+  !> 指定枝の代数根を探索する。物理解の判定と auto 選択は公開窓口で行う。
   subroutine try_solve_zhao_unknowns(model, p, phi0_v, phi_m_v, n_swe_inf_m3, branch, success)
     character(len=*), intent(in) :: model
     type(zhao_params_type), intent(in) :: p
@@ -133,8 +132,6 @@ contains
     logical, intent(out) :: success
 
     real(dp) :: x3(3), x2(2)
-    character(len=1), dimension(3) :: order
-    integer :: i
 
     phi0_v = 0.0_dp
     phi_m_v = 0.0_dp
@@ -170,50 +167,7 @@ contains
         branch = 'C'
       end if
       return
-    case ('zhao_auto')
-      if (p%alpha_rad*180.0d0/pi < 20.0d0) then
-        order = ['C', 'A', 'B']
-      else
-        order = ['A', 'B', 'C']
-      end if
-    case default
-      return
     end select
-
-    do i = 1, size(order)
-      select case (order(i))
-      case ('A')
-        call try_solve_zhao_branch_a(p, x3, success)
-        if (success) then
-          phi0_v = x3(1)
-          phi_m_v = x3(2)
-          n_swe_inf_m3 = x3(3)
-          branch = 'A'
-          success = .true.
-          return
-        end if
-      case ('B')
-        call try_solve_zhao_branch_b(p, x2, success)
-        if (success) then
-          phi0_v = x2(1)
-          phi_m_v = x2(1)
-          n_swe_inf_m3 = x2(2)
-          branch = 'B'
-          success = .true.
-          return
-        end if
-      case ('C')
-        call try_solve_zhao_branch_c(p, x2, success)
-        if (success) then
-          phi0_v = x2(1)
-          phi_m_v = x2(1)
-          n_swe_inf_m3 = x2(2)
-          branch = 'C'
-          success = .true.
-          return
-        end if
-      end select
-    end do
 
   end subroutine try_solve_zhao_unknowns
 
@@ -222,11 +176,14 @@ contains
     real(dp), intent(out) :: x(3)
     logical, intent(out) :: success
 
-    real(dp) :: guesses(3, 3)
+    real(dp) :: guesses(3, 6)
 
-    guesses(:, 1) = [3.6d0, -0.5d0, 8.2d6]
-    guesses(:, 2) = [2.8d0, -0.3d0, 8.0d6]
-    guesses(:, 3) = [4.5d0, -0.8d0, 8.4d6]
+    guesses(:, 1) = [1.6_dp*p%t_phe_ev, -0.3_dp*p%t_phe_ev, 0.9_dp*p%n_swi_inf_m3]
+    guesses(:, 2) = [0.5_dp*p%t_phe_ev, -0.5_dp*p%t_phe_ev, 0.9_dp*p%n_swi_inf_m3]
+    guesses(:, 3) = [-0.2_dp*p%t_phe_ev, -0.8_dp*p%t_phe_ev, 0.9_dp*p%n_swi_inf_m3]
+    guesses(:, 4) = [-p%t_phe_ev, -2.0_dp*p%t_phe_ev, p%n_swi_inf_m3]
+    guesses(:, 5) = [3.0_dp*p%t_phe_ev, -0.1_dp*p%t_phe_ev, p%n_swi_inf_m3]
+    guesses(:, 6) = [-3.0_dp*p%t_phe_ev, -4.0_dp*p%t_phe_ev, p%n_swi_inf_m3]
     call solve_nonlinear_system(3, guesses, residual_a, x, success)
 
   contains
@@ -236,6 +193,7 @@ contains
       real(dp), intent(out) :: fa(:)
 
       call zhao_residuals_type_a(p, xa, fa)
+      fa(1:2) = fa(1:2)/p%n_phe_ref_m3
     end subroutine residual_a
 
   end subroutine try_solve_zhao_branch_a
@@ -261,6 +219,7 @@ contains
       real(dp), intent(out) :: fb(:)
 
       call zhao_residuals_type_b(p, xb, fb)
+      fb(1:2) = fb(1:2)/p%n_phe_ref_m3
     end subroutine residual_b
 
   end subroutine try_solve_zhao_branch_b
@@ -288,6 +247,7 @@ contains
       real(dp), intent(out) :: fc(:)
 
       call zhao_residuals_type_c(p, xc, fc)
+      fc(1:2) = fc(1:2)/p%n_phe_ref_m3
     end subroutine residual_c
 
   end subroutine try_solve_zhao_branch_c
@@ -447,7 +407,7 @@ contains
     phi0_v = x(1)
     phi_m_v = x(2)
     n_swe_inf_m3 = x(3)
-    if (phi0_v <= 0.0d0 .or. phi_m_v >= 0.0d0 .or. phi_m_v >= phi0_v .or. n_swe_inf_m3 <= 0.0d0) then
+    if (phi_m_v >= 0.0d0 .or. phi_m_v >= phi0_v .or. n_swe_inf_m3 <= 0.0d0) then
       f = 1.0d6
       return
     end if
@@ -519,45 +479,30 @@ contains
     type(zhao_params_type), intent(in) :: p
     real(dp), intent(in) :: phi0_v, phi_m_v, n_swe_inf_m3
 
-    real(dp) :: phi, s_swe, s_phe, e2_swe_f, e2_swe_r, e2_phe_f, e2_swi, arg_phi, arg_m
-
-    if (abs(p%u) <= 1.0d-12) then
-      e2_sum = 1.0d30
-      return
-    end if
-
-    phi = 0.0d0
-    s_swe = sqrt(max(0.0d0, (phi - phi_m_v)/p%t_swe_ev))
-    s_phe = sqrt(max(0.0d0, (phi - phi_m_v)/p%t_phe_ev))
-
-    e2_swe_f = (p%t_swe_ev/p%t_phe_ev)*(n_swe_inf_m3/p%n_phe_ref_m3)*( &
-               exp(phi/p%t_swe_ev)*(1.0d0 - erf(s_swe - p%u)) - &
-               exp(phi_m_v/p%t_swe_ev)*(1.0d0 - erf(-p%u)) + &
-               (1.0d0/(sqrt(pi)*p%u))*exp(phi_m_v/p%t_swe_ev - p%u*p%u)*(exp(2.0d0*p%u*s_swe) - 1.0d0) &
-               )
-
-    e2_swe_r = 2.0d0*(p%t_swe_ev/p%t_phe_ev)*(n_swe_inf_m3/p%n_phe_ref_m3)*( &
-               exp(phi/p%t_swe_ev)*(erf(s_swe - p%u) + erf(p%u)) - &
-               (1.0d0/(sqrt(pi)*p%u))*exp(phi_m_v/p%t_swe_ev - p%u*p%u)*(exp(2.0d0*p%u*s_swe) - 1.0d0) &
-               )
-
-    e2_phe_f = (p%n_phe0_m3/p%n_phe_ref_m3)*( &
-               exp((phi - phi0_v)/p%t_phe_ev)*(1.0d0 - erf(s_phe)) - &
-               exp((phi_m_v - phi0_v)/p%t_phe_ev)*(1.0d0 - 2.0d0*s_phe/sqrt(pi)) &
-               )
-
-    arg_phi = 1.0d0 - 2.0d0*phi/(p%t_swe_ev*p%mach*p%mach)
-    arg_m = 1.0d0 - 2.0d0*phi_m_v/(p%t_swe_ev*p%mach*p%mach)
-    if (arg_phi <= 0.0d0 .or. arg_m <= 0.0d0) then
-      e2_sum = 1.0d30
-      return
-    end if
-
-    e2_swi = 2.0d0*(p%t_swe_ev/p%t_phe_ev)*(p%n_swi_inf_m3/p%n_phe_ref_m3)*p%mach*p%mach*( &
-             sqrt(arg_phi) - sqrt(arg_m) &
-             )
-    e2_sum = e2_swe_f + e2_swe_r + e2_phe_f + e2_swi
+    ! Integrate the same orbit densities used in Poisson's equation. No 1/u term.
+    e2_sum = -2.0_dp*integrate_zhao_rho(p, 'A', 'upper', phi_m_v/p%t_phe_ev, 0.0_dp, &
+                                        phi0_v/p%t_phe_ev, phi_m_v/p%t_phe_ev, n_swe_inf_m3/p%n_phe_ref_m3)
   end function type_a_e2_sum_at_infinity
+
+  real(dp) function integrate_zhao_rho(p, branch, side, lo, hi, phi0, phim, density) result(value)
+    type(zhao_params_type), intent(in) :: p
+    character(len=1), intent(in) :: branch
+    character(len=*), intent(in) :: side
+    real(dp), intent(in) :: lo, hi, phi0, phim, density
+    real(dp) :: t, phi, rho
+    integer :: panel, j
+    value = 0.0_dp
+    if (lo == hi) return
+    do panel = 0, 3
+      do j = 1, 16
+        t = (real(panel, dp) + 0.5_dp*(1.0_dp + gauss_x(j)))/4.0_dp
+        phi = lo + (hi - lo)*sin(0.5_dp*pi*t)**2
+        call evaluate_zhao_rho_hat(p, branch, side, phi, phi0, phim, density, rho)
+        value = value + gauss_w(j)*rho*(hi - lo)*0.5_dp*pi*sin(pi*t)
+      end do
+    end do
+    value = value/8.0_dp
+  end function integrate_zhao_rho
 
   subroutine solve_nonlinear_system(n, guesses, residual_fn, x_best, success)
     integer, intent(in) :: n

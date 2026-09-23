@@ -8,6 +8,7 @@ from sheath_model import ZhaoParams, ZhaoSheathSolver
 def main() -> None:
     # Dayside
     params = ZhaoParams(
+        electron_drift_mode="zero",
         n_swi_inf_cm3=5,
         T_swe_eV=10,
         T_phe_eV=2.2,
@@ -24,6 +25,7 @@ def main() -> None:
 
     # Low Sun elevation / Type C
     params_c = ZhaoParams(
+        electron_drift_mode="zero",
         n_swi_inf_cm3=5,
         T_swe_eV=10,
         T_phe_eV=2.2,

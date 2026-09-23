@@ -1,0 +1,76 @@
+{
+  "fixed_inputs": {
+    "ion_density_m3": 8700000.0,
+    "electron_temperature_ev": 12.0,
+    "photoelectron_temperature_ev": 2.2,
+    "solar_wind_speed_mps": 468000.0,
+    "electron_drift_mode": "zero",
+    "ion_drift_mode": "normal",
+    "profile_photoelectron_reference_density_m3": 64000000.0,
+    "field_map_sun_elevation_deg": 20.0
+  },
+  "profiles": [
+    {
+      "type": "A",
+      "alpha_deg": 60.0,
+      "surface_potential_v": 3.8401890937,
+      "minimum_potential_v": -0.33165814284,
+      "surface_field_v_m": 1.6237638182,
+      "current_a_m2": 2.4251697097e-21,
+      "last_saved_height_m": 110.41136263
+    },
+    {
+      "type": "B",
+      "alpha_deg": 20.0,
+      "surface_potential_v": 1.6159581059,
+      "minimum_potential_v": 0.0,
+      "surface_field_v_m": 0.60892440141,
+      "current_a_m2": -2.3469384287e-22,
+      "last_saved_height_m": 13.003509121
+    },
+    {
+      "type": "C",
+      "alpha_deg": 10.0,
+      "surface_potential_v": -4.2377557204,
+      "minimum_potential_v": -4.2377557204,
+      "surface_field_v_m": -0.32781461544,
+      "current_a_m2": 0.0,
+      "last_saved_height_m": 103.88042217
+    }
+  ],
+  "maps": {
+    "equilibrium": {
+      "grid": [
+        257,
+        129
+      ],
+      "displayed_category_counts": {
+        "B": 232,
+        "A + B": 19539,
+        "C": 11622,
+        "B + C": 468,
+        "A + B + C": 2,
+        "No root resolved": 1290
+      },
+      "cells_with_unresolved_search": 33028,
+      "maximum_candidates_reported": 3
+    },
+    "field": {
+      "grid": [
+        257,
+        129
+      ],
+      "displayed_category_counts": {
+        "Candidates rejected": 10,
+        "A": 1406,
+        "B": 204,
+        "A + B": 1841,
+        "C": 16422,
+        "B + C": 44,
+        "No root resolved": 13226
+      },
+      "cells_with_unresolved_search": 13226,
+      "maximum_candidates_reported": 3
+    }
+  }
+}
