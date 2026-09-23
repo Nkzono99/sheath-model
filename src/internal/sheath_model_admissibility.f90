@@ -13,6 +13,9 @@ module sheath_model_admissibility
 
 contains
 
+  !> Check that an algebraic root connects to a neutral, zero-field upstream state with a real field profile.
+  !! phi0 and phim are potentials / T_pe [eV]; density is electron normalization / p%n_phe_ref_m3.
+  !! Returns sampled minimum_e2 and boundary_e2 in units of (T_pe/lambda_D)^2, plus status and message.
   subroutine validate_zhao_profile( &
       p, branch, phi0, phim, density, &
       minimum_e2, boundary_e2, &

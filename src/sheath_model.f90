@@ -1,5 +1,8 @@
 ! SPDX-License-Identifier: MIT
 !> Standalone Zhao sheath models: J=0 equilibrium and prescribed E_H.
+!! Public quantities use SI units except temperatures [eV] and solar elevation [degrees].
+!! The potential reference is zero at infinity; +z points from the boundary toward upstream.
+!! Check status against SHEATH_OK before using results; message provides diagnostic details.
 module sheath_model
   use sheath_model_constants, only: dp, i32
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, &

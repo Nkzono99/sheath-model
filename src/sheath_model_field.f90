@@ -17,7 +17,8 @@ module sheath_model_field
 
   integer, parameter :: default_field_starts = 16
 
-  ! Entries are ordered A, B, C. Counts describe starts, not distinct roots.
+  !> Search diagnostics for branches A, B and C, stored in that array order.
+  !! Counters except roots_found describe initial guesses, not distinct roots; success need not resolve every start.
   type :: zhao_field_search_diagnostics
     logical :: searched(3) = .false.
     logical :: excluded(3) = .false.
@@ -28,6 +29,8 @@ module sheath_model_field
     integer(i32) :: roots_found(3) = 0
   end type zhao_field_search_diagnostics
 
+  !> Plasma inputs and prescribed normal field E_H [V/m]; branch selects A/B/C/auto.
+  !! Other quantities use SI units except temperatures [eV]; field is positive outward, drift positive inward.
   type :: zhao_field_input
     character(len=9) :: branch = 'auto'
     real(dp) :: electric_field_v_m = 0.0_dp
@@ -41,6 +44,9 @@ module sheath_model_field
     real(dp) :: electron_mass_kg = electron_mass
   end type zhao_field_input
 
+  !> Accepted prescribed-field root with potentials, densities, particle fluxes and current in SI units.
+  !! valid marks success; residual_norm and minimum_field_squared_hat are dimensionless.
+  !! ambient_electron_density_m3 is the Maxwellian normalization, not total upstream density.
   type :: zhao_field_result
     logical :: valid = .false.
     character(len=1) :: branch = ' '
@@ -171,7 +177,10 @@ module sheath_model_field
 
 contains
 
-  !> Prescribe E_H and solve neutrality/Sagdeev conditions; current is an output.
+  !> Solve neutrality/Sagdeev conditions at input's prescribed E_H and return the sole admissible candidate found.
+  !! output includes the resulting current; multiple candidates return SHEATH_AMBIGUOUS_SOLUTION.
+  !! Optional diagnostics reports search outcomes; initial_guesses supplements the default starts with nearby solutions.
+  !! status/message describe success or failure; a successful finite search does not prove global uniqueness.
   subroutine solve_prescribed_field( &
       input, output, &
       status, message, &
@@ -213,6 +222,10 @@ contains
     end if
   end subroutine solve_prescribed_field
 
+  !> Find admissible roots at input's prescribed E_H and allocate outputs with the candidates found.
+  !! status/message describe the outcome; on failure outputs is unallocated. Candidate order has no ranking meaning.
+  !! Optional diagnostics reports unresolved starts even on success; the search need not find every root.
+  !! initial_guesses supplements default starts and must be a different variable from outputs.
   subroutine solve_prescribed_field_candidates( &
       input, outputs, &
       status, message, &

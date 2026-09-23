@@ -11,6 +11,8 @@ module sheath_model_core
   implicit none
   private
 
+  !> Internal plasma parameters and derived scales, prepared by the public model wrappers.
+  !! Physical fields use their suffix units; mach, u and tau are dimensionless ratios.
   type :: zhao_params_type
     real(dp) :: alpha_rad = 0.0d0
     real(dp) :: n_swi_inf_m3 = 0.0d0
@@ -43,6 +45,8 @@ module sheath_model_core
 
 contains
 
+  !> Return net charge density rho_hat = rho/(qe*p%n_phe_ref_m3) on the selected branch and side.
+  !! Potentials are divided by T_pe [eV], and n_swe_inf_hat is electron normalization / p%n_phe_ref_m3.
   subroutine evaluate_zhao_rho_hat(p, branch, side, phi_hat, phi0_hat, phi_m_hat, n_swe_inf_hat, rho_hat)
     type(zhao_params_type), intent(in) :: p
     character(len=1), intent(in) :: branch
@@ -59,6 +63,9 @@ contains
     rho_hat = n_swi_hat - n_swe_f_hat - n_swe_r_hat - n_phe_f_hat - n_phe_c_hat
   end subroutine evaluate_zhao_rho_hat
 
+  !> Return ion, free/reflected electron, and free/captured photoelectron densities / p%n_phe_ref_m3.
+  !! Potentials are divided by T_pe [eV]; n_swe_inf_hat uses the same density normalization as the outputs.
+  !! branch is A/B/C; Type A requires side='lower' or 'upper'. A blocked ion beam produces NaN densities.
   subroutine evaluate_zhao_density_hat( &
       p, branch, side, phi_hat, phi0_hat, phi_m_hat, n_swe_inf_hat, &
       n_swi_hat, n_swe_f_hat, n_swe_r_hat, n_phe_f_hat, n_phe_c_hat &
@@ -113,6 +120,8 @@ contains
   end subroutine evaluate_zhao_density_hat
 
   !> 指定枝の代数根を探索する。物理解の判定と auto 選択は公開窓口で行う。
+  !! model は zhao_a/zhao_b/zhao_c。電位 [V]、電子規格化密度 [m^-3]、枝と収束成否を返す。
+  !! B/C の phi_m_v は phi0_v と同値の仮置き値で、B の物理的な最小電位 0 V は公開窓口で設定する。
   subroutine try_solve_zhao_unknowns(model, p, phi0_v, phi_m_v, n_swe_inf_m3, branch, success)
     character(len=*), intent(in) :: model
     type(zhao_params_type), intent(in) :: p
@@ -394,6 +403,9 @@ contains
     success = .true.
   end subroutine evaluate_monotonic_stationary_phi
 
+  !> Evaluate Type-A neutrality, zero-current, and upstream field-squared residuals.
+  !! x = [surface potential (V), minimum potential (V), electron normalization (m^-3)].
+  !! f(1:2) have density units [m^-3]; f(3) is normalized E^2. Invalid trial states receive a penalty.
   subroutine zhao_residuals_type_a(p, x, f)
     type(zhao_params_type), intent(in) :: p
     real(dp), intent(in) :: x(:)
@@ -420,6 +432,8 @@ contains
     f(3) = type_a_e2_sum_at_infinity(p, phi0_v, phi_m_v, n_swe_inf_m3)
   end subroutine zhao_residuals_type_a
 
+  !> Evaluate Type-B neutrality and zero-current residuals f(1:2) in density units [m^-3].
+  !! x = [positive surface potential (V), electron normalization (m^-3)]; invalid trials receive a penalty.
   subroutine zhao_residuals_type_b(p, x, f)
     type(zhao_params_type), intent(in) :: p
     real(dp), intent(in) :: x(:)
@@ -440,6 +454,8 @@ contains
     f(2) = p%n_phe0_m3*exp(-phi0_v/p%t_phe_ev) - swe_free_current_term(p, n_swe_inf_m3, -p%u) + ion_term
   end subroutine zhao_residuals_type_b
 
+  !> Evaluate Type-C neutrality and zero-current residuals f(1:2) in density units [m^-3].
+  !! x = [negative surface potential (V), electron normalization (m^-3)]; invalid trials receive a penalty.
   subroutine zhao_residuals_type_c(p, x, f)
     type(zhao_params_type), intent(in) :: p
     real(dp), intent(in) :: x(:)
@@ -464,6 +480,8 @@ contains
     f(2) = p%n_phe0_m3 - swe_free_current_term(p, n_swe_inf_m3, a_swe) + ion_term
   end subroutine zhao_residuals_type_c
 
+  !> Return the incoming-electron flux term in density units [m^-3] for normalization n_swe_inf_m3.
+  !! a_swe is the thermal-speed cutoff minus p%u; multiply term by p%v_phe_th_mps/(2*sqrt(pi)) for flux.
   real(dp) function swe_free_current_term(p, n_swe_inf_m3, a_swe) result(term)
     type(zhao_params_type), intent(in) :: p
     real(dp), intent(in) :: n_swe_inf_m3, a_swe
@@ -472,6 +490,8 @@ contains
         sqrt(pi)*(p%v_d_electron_mps/p%v_phe_th_mps)*erfc(a_swe))
   end function swe_free_current_term
 
+  !> Return normalized upstream E^2 from the Type-A upper segment; a connecting root requires zero.
+  !! Inputs are boundary/minimum potentials [V] and upstream electron normalization [m^-3].
   real(dp) function type_a_e2_sum_at_infinity(p, phi0_v, phi_m_v, n_swe_inf_m3) result(e2_sum)
     type(zhao_params_type), intent(in) :: p
     real(dp), intent(in) :: phi0_v, phi_m_v, n_swe_inf_m3
@@ -481,6 +501,9 @@ contains
         phi0_v/p%t_phe_ev, phi_m_v/p%t_phe_ev, n_swe_inf_m3/p%n_phe_ref_m3)
   end function type_a_e2_sum_at_infinity
 
+  !> Integrate dimensionless charge density over potential from lo to hi on the selected branch and side.
+  !! lo, hi, phi0 and phim are potentials / T_pe [eV]; density is electron normalization / p%n_phe_ref_m3.
+  !! The result is dimensionless and changes sign when the integration bounds are reversed.
   real(dp) function integrate_zhao_rho(p, branch, side, lo, hi, phi0, phim, density) result(value)
     type(zhao_params_type), intent(in) :: p
     character(len=1), intent(in) :: branch

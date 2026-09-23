@@ -16,6 +16,8 @@ module sheath_model_equilibrium
   public :: solve_equilibrium, evaluate_density, solve_profile
   public :: zhao_profile_options, zhao_profile_result
 
+  !> Plasma and illumination inputs for the J=0 closure; units are given by the component suffixes.
+  !! branch selects A/B/C/auto; normal drift projects the wind speed along the surface normal.
   type :: zhao_equilibrium_input
     character(len=9) :: branch = 'auto'
     real(dp) :: sun_elevation_deg = 60.0_dp
@@ -30,6 +32,8 @@ module sheath_model_equilibrium
     character(len=6) :: ion_drift_mode = 'normal'
   end type zhao_equilibrium_input
 
+  !> Accepted J=0 root, fluxes and current in SI units, with dimensionless residual_norm.
+  !! valid marks success; ambient_electron_density_m3 is the Maxwellian normalization, not total upstream density.
   type :: zhao_equilibrium_result
     logical :: valid = .false.
     character(len=1) :: branch = ' '
@@ -44,6 +48,7 @@ module sheath_model_equilibrium
     real(dp) :: net_current_a_m2 = 0.0_dp ! Conventional electric current along +z
   end type zhao_equilibrium_result
 
+  !> Local species number densities [m^-3] and net charge density [C/m^3].
   type :: zhao_density_result
     real(dp) :: ion_m3 = 0.0_dp
     real(dp) :: electron_free_m3 = 0.0_dp
@@ -53,12 +58,15 @@ module sheath_model_equilibrium
     real(dp) :: charge_c_m3 = 0.0_dp
   end type zhao_density_result
 
+  !> Profile sampling controls: points per monotonic segment, maximum height [m], and potential cutoff [V].
   type :: zhao_profile_options
     integer :: points_per_segment = 4000
     real(dp) :: max_distance_m = 100.0_dp
     real(dp) :: potential_cutoff_v = 2.2e-3_dp
   end type zhao_profile_options
 
+  !> J=0 equilibrium and sampled height [m], potential [V], field [V/m], and local densities.
+  !! All arrays share the same node order; turning_height_m is -1 for branches without an internal minimum.
   type :: zhao_profile_result
     type(zhao_equilibrium_result) :: equilibrium
     real(dp) :: turning_height_m = -1.0_dp ! A only; -1 means no internal minimum
@@ -140,6 +148,9 @@ contains
     message = ''
   end subroutine prepare_params
 
+  !> Solve the J=0 closure for the plasma inputs and return a physically admissible equilibrium.
+  !! branch='auto' returns the first admissible branch in the model's search order.
+  !! status/message report the outcome; output%valid is false on failure. Physical outputs use SI units.
   subroutine solve_equilibrium(input, output, status, message)
     type(zhao_equilibrium_input), intent(in) :: input
     type(zhao_equilibrium_result), intent(out) :: output
@@ -234,7 +245,10 @@ contains
     message = ''
   end subroutine solve_equilibrium
 
-  !> Evaluate a local state at a potential, choosing lower/upper explicitly for A.
+  !> Return species densities [m^-3] and charge density [C/m^3] at potential_v [V].
+  !! Pass a valid equilibrium solution and the same input used to obtain it.
+  !! Type A requires side='lower' (surface to minimum) or 'upper' (minimum to upstream); B/C may omit it.
+  !! status/message report invalid potentials or failed density evaluations.
   subroutine evaluate_density( &
       input, solution, potential_v, &
       output, status, message, &
@@ -300,7 +314,9 @@ contains
     message = ''
   end subroutine evaluate_density
 
-  !> Semi-infinite first-integral reconstruction; never attach a forced zero tail.
+  !> Solve the J=0 equilibrium and reconstruct its 1D profile using the Poisson first integral.
+  !! options controls sampling and truncation of the semi-infinite domain; no forced zero tail is attached.
+  !! On SHEATH_OK, output contains allocated arrays in SI units; otherwise inspect status and message.
   subroutine solve_profile(input, options, output, status, message)
     type(zhao_equilibrium_input), intent(in) :: input
     type(zhao_profile_options), intent(in) :: options

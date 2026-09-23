@@ -7,11 +7,13 @@ module sheath_model_orbits
   private
 
   public :: electron_density, gauss_x, gauss_w
+  !> Abscissae of the 16-point Gauss-Legendre quadrature on [-1,1].
   real(dp), parameter :: gauss_x(16) = [ &
       -0.9894009349916499_dp, -0.9445750230732326_dp, -0.8656312023878318_dp, -0.7554044083550030_dp, &
       -0.6178762444026438_dp, -0.4580167776572274_dp, -0.2816035507792589_dp, -0.0950125098376374_dp, &
       0.0950125098376374_dp, 0.2816035507792589_dp, 0.4580167776572274_dp, 0.6178762444026438_dp, &
       0.7554044083550030_dp, 0.8656312023878318_dp, 0.9445750230732326_dp, 0.9894009349916499_dp]
+  !> Dimensionless quadrature weights corresponding to gauss_x; their sum is two.
   real(dp), parameter :: gauss_w(16) = [ &
       0.0271524594117541_dp, 0.0622535239386479_dp, 0.0951585116824928_dp, 0.1246289712555339_dp, &
       0.1495959888165767_dp, 0.1691565193950025_dp, 0.1826034150449236_dp, 0.1894506104550685_dp, &
@@ -20,6 +22,8 @@ module sheath_model_orbits
 
 contains
 
+  !> Return free and reflected electron densities divided by the upstream Maxwellian normalization.
+  !! psi and barrier are local and minimum potentials divided by T_e [eV]; u is inward drift / thermal speed.
   pure subroutine electron_density(psi, barrier, u, free, reflected)
     real(dp), intent(in) :: psi, barrier, u
     real(dp), intent(out) :: free, reflected

@@ -12,6 +12,7 @@ module sheath_model_numerics
 
   public :: solve_nonlinear_system, try_guarded_newton_solve, residual_norm, NONLINEAR_TOL
 
+  !> Absolute Euclidean residual tolerance used by solve_nonlinear_system.
   real(dp), parameter :: NONLINEAR_TOL = 1.0d-10
   integer, parameter :: NONLINEAR_MAX_ITER = 60
   integer, parameter :: NONLINEAR_MAX_BACKTRACK = 20
@@ -36,7 +37,9 @@ module sheath_model_numerics
 
 contains
 
-  ! Forward differences and Euclidean norm for unconstrained residual callbacks.
+  !> Solve residual_fn(x,f)=0 for n unknowns, trying the columns of guesses in order.
+  !! Uses forward-difference Newton steps and backtracking with the Euclidean residual norm.
+  !! Returns the first converged x_best, or the best trial when success is false.
   subroutine solve_nonlinear_system(n, guesses, residual_fn, x_best, success)
     integer, intent(in) :: n
     real(dp), intent(in) :: guesses(:, :)
@@ -191,6 +194,7 @@ contains
     end do
   end subroutine solve_small_linear_system
 
+  !> Return the Euclidean norm of f, or huge() if any component is non-finite.
   real(dp) function residual_norm(f) result(norm2)
     real(dp), intent(in) :: f(:)
 
@@ -202,7 +206,10 @@ contains
     norm2 = sqrt(sum(f*f))
   end function residual_norm
 
-  ! Central differences (one-sided at domain limits) and maximum residual norm.
+  !> Solve n residual equations from y0 with a callback residual_fn(y,f,valid) that marks valid states.
+  !! Uses central differences, one-sided differences at domain limits, and backtracking.
+  !! Returns y_out, maximum absolute residual final_norm, iteration count, and convergence flag success.
+  !! An invalid initial state returns y0, huge() residual, zero iterations, and success=false.
   subroutine try_guarded_newton_solve( &
       n, y0, residual_fn, &
       y_out, final_norm, iterations, &

@@ -5,17 +5,24 @@ module sheath_model_constants
 
   private
 
+  !> Kind parameters for 64-bit reals (dp) and 32-bit integers (i32).
   integer, parameter, public :: dp = real64, i32 = int32
+  !> Circle constant pi (dimensionless).
   real(dp), parameter, public :: pi = acos(-1.0_dp)
+  !> Vacuum permittivity [F/m].
   real(dp), parameter, public :: eps0 = 8.8541878128e-12_dp
+  !> Positive elementary charge [C].
   real(dp), parameter, public :: qe = 1.602176634e-19_dp
+  !> Electron rest mass [kg].
   real(dp), parameter, public :: electron_mass = 9.1093837015e-31_dp
+  !> Proton rest mass [kg]; default ion mass for both sheath models.
   real(dp), parameter, public :: proton_mass = 1.67262192369e-27_dp
 
   public :: lower_ascii
 
 contains
 
+  !> Return value with ASCII A-Z converted to a-z, preserving length and all other characters.
   pure function lower_ascii(value) result(lower)
     character(len=*), intent(in) :: value
     character(len=len(value)) :: lower
