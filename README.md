@@ -44,7 +44,8 @@ A は負の表面電位も許します。上表はそのうち正の表面電位
 
 ### 解が得られた範囲と Type
 
-縦軸は光電子源の強さ `r=n_pe,ref/n_i`（対数軸）、各パネルは **65 × 33 点** の計算です。
+縦軸は光電子源の強さ `r=n_pe,ref/n_i`（対数軸）、各パネルは **257 × 129 点** の計算です。
+太陽高度は 0.34375° 間隔、指定電場は 0.015625 V/m 間隔、`r` は 0.5〜16 を対数等間隔で走査します。
 
 - 左：`J=0`。太陽高度と `r` を変え、A/B/C をそれぞれ指定して物理解を探索します。
 - 右：`E_H` 指定。太陽高度を 20° に固定し、電場と `r` を変え、`solve_prescribed_field_candidates` で候補を取得します。電流は出力です。
@@ -62,11 +63,11 @@ A は負の表面電位も許します。上表はそのうち正の表面電位
 CSV の Type はビット値 `A=1, B=2, C=4` の和で表し、未解決・棄却の情報も別列に記録します。
 
 図は公開 Fortran API で再計算できます。NumPy と Matplotlib を用意し、リポジトリ直下で実行してください。
-以下の GNU Fortran / OpenMP の例は 4 コアを使用します。KUDPC では計算ノード割当内で実行します。
+以下の GNU Fortran / OpenMP の例は 16 コアを使用します。KUDPC では計算ノード割当内で実行します。
 
 ```bash
 mkdir -p docs/figures/data
-OMP_NUM_THREADS=4 OMP_PROC_BIND=false fpm run --example readme_data --compiler gfortran --profile release --flag "-fopenmp" -- docs/figures/data 65 33
+OMP_NUM_THREADS=16 OMP_PROC_BIND=false fpm run --example readme_data --compiler gfortran --profile release --flag "-fopenmp" -- docs/figures/data 257 129
 python examples/plot_readme_figures.py
 ```
 

@@ -12,8 +12,8 @@ program readme_data
   real(dp), parameter :: pi = acos(-1.0_dp), alpha_field = 20.0_dp
 
   directory = 'docs/figures/data'
-  nx = 65
-  ny = 33
+  nx = 257
+  ny = 129
   first_map = 1
   last_map = 2
   if (command_argument_count() >= 1) call get_command_argument(1, directory)
@@ -57,7 +57,8 @@ program readme_data
     end do
     do j = 1, ny
       ! Each solve is independent. Without OpenMP this remains a serial example.
-      !$omp parallel do default(none) shared(kind, nx, j, x, ratio, types, unresolved, rejected, candidates) private(i)
+      !$omp parallel do default(none) shared(kind, nx, j, x, ratio, types, unresolved, rejected, candidates) private(i) &
+      !$omp& schedule(dynamic, 1)
       do i = 1, nx
         if (kind == 1) then
           call equilibrium_point(x(i), ratio(j), types(i, j), unresolved(i, j), rejected(i, j))

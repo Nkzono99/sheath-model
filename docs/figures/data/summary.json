@@ -41,34 +41,35 @@
   "maps": {
     "equilibrium": {
       "grid": [
-        65,
-        33
+        257,
+        129
       ],
       "displayed_category_counts": {
-        "B": 17,
-        "A + B": 1254,
-        "C": 746,
-        "B + C": 29,
-        "No root resolved": 99
+        "B": 232,
+        "A + B": 19539,
+        "C": 11622,
+        "B + C": 468,
+        "A + B + C": 2,
+        "No root resolved": 1290
       },
-      "cells_with_unresolved_search": 2135,
-      "maximum_candidates_reported": 2
+      "cells_with_unresolved_search": 33028,
+      "maximum_candidates_reported": 3
     },
     "field": {
       "grid": [
-        65,
-        33
+        257,
+        129
       ],
       "displayed_category_counts": {
-        "Candidates rejected": 1,
-        "A": 91,
-        "B": 19,
-        "A + B": 115,
-        "C": 1034,
-        "B + C": 11,
-        "No root resolved": 874
+        "Candidates rejected": 10,
+        "A": 1406,
+        "B": 204,
+        "A + B": 1841,
+        "C": 16422,
+        "B + C": 44,
+        "No root resolved": 13226
       },
-      "cells_with_unresolved_search": 874,
+      "cells_with_unresolved_search": 13226,
       "maximum_candidates_reported": 3
     }
   }
