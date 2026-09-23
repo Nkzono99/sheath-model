@@ -1,372 +1,86 @@
 # Algorithm notes
 
-This document summarizes the numerical formulation implemented in `sheath_model/solver.py` for the Zhao et al. semianalytic lunar photoelectron sheath model.
+The current model transports the upstream electron distribution along collisionless
+orbits. It retains Zhao's cold-ion, photoelectron and A/B/C population topology,
+but replaces the locally shifted Maxwellian expressions used in v0.1.0.
+The derivation, closure and limits are detailed in [kinetic-model.md](kinetic-model.md).
+Fortran inputs and units are listed in [fortran-api.md](fortran-api.md).
 
-## Scope
+## Upstream distribution and local moments
 
-The implementation solves the three sheath branches discussed in the Zhao model:
+Let `psi = phi/T_e`, `u = v_d/v_th`, and `v_th = sqrt(2 e T_e/m_e)`.
+The incoming upstream distribution is proportional to `exp(-(a-u)^2)` for
+`a = |v_infinity|/v_th >= 0`. Energy conservation gives
 
-- **Type A**: non-monotonic potential with an internal minimum
-- **Type B**: monotonic positive-potential branch
-- **Type C**: monotonic negative-potential branch
-
-The code assumes a 1D sheath normal to the surface and includes three particle populations:
-
-- cold solar-wind ions
-- drifting Maxwellian solar-wind electrons
-- Maxwellian photoelectrons
-
-## Model Assumptions From Zhao et al.
-
-The semi-analytic model in Zhao et al. is not a general lunar charging model; it is a specific 1-D sheath model with several built-in assumptions.
-
-### Geometry and dimensionality
-
-- The sheath is treated as **1-D** along the direction normal to the surface.
-- The lunar surface is treated as a **flat illuminated plane**.
-- The model targets the **vertical sheath structure** only; horizontal structure and topography are not included.
-
-### Particle populations
-
-- Only three charged populations are included:
-  - solar-wind ions
-  - solar-wind electrons
-  - photoelectrons emitted from the surface
-- Solar-wind ions are treated as a **cold beam**.
-- Solar-wind electrons are modeled as a **drifting Maxwellian**.
-- Photoelectrons emitted from the surface are modeled as a **stationary Maxwellian**.
-
-### Photoelectron source model
-
-- The photoelectrons considered in the semi-analytic model are only those emitted from the **lunar surface**.
-- Photoelectrons generated from **lofted dust grains** are neglected.
-- The surface photoelectron density is parameterized as
-
-```math
-n_{\mathrm{phe},0} = n_{\mathrm{phe},\mathrm{ref}} \sin\alpha
+```text
+w^2 = a^2 + psi
+f_local(w) = N_e/(sqrt(pi) v_th) exp(-(sqrt(w^2-psi)-u)^2)
 ```
 
-where `alpha` is the Sun elevation angle and `n_phe_ref` is the normal-incidence reference density.
-
-### Dynamical assumptions
-
-- The sheath is assumed to be in **steady state**.
-- Particle motion is treated through **energy conservation along the sheath-normal direction**.
-- The branch topology is fixed by the Zhao classification:
-  - Type A: non-monotonic with an internal minimum
-  - Type B: monotonic positive
-  - Type C: monotonic negative
-
-### Boundary and closure conditions
-
-- The potential at infinity is taken as the reference:
-
-```math
-\phi(\infty)=0.
-```
-
-- The total charge density at infinity is assumed to vanish:
-
-```math
-n_{\mathrm{swe}}(\infty)+n_{\mathrm{phe}}(\infty)-n_{\mathrm{swi}}(\infty)=0.
-```
-
-- The net current at infinity is assumed to vanish in steady state.
-- For Type A, the electric field at infinity is additionally required to vanish in order to determine the potential minimum `phi_m`.
-
-### What is not included
-
-- Surface topography
-- Multi-dimensional electric-field structure
-- Dust charging / dust-emitted photoelectrons
-- Non-Maxwellian photoelectron distribution in the semi-analytic model
-- Time-dependent sheath evolution
-
-## Common definitions
-
-The implementation uses the photoelectron temperature as the potential scale.
-
-- `phi_hat = phi / T_phe_eV`
-- `z_hat = z / lambda_D_phe_ref`
-- `tau = T_swe / T_phe`
-- `u = v_{d,z} / v_th_swe`
-- `M = v_i_inf / c_s`
-
-By default, the 1-D solver uses the **solar-wind component normal to the surface**
-
-- `v_{d,z} = v_sw sin(alpha)`
-
-rather than the full bulk speed, because the sheath equations are written along the sheath normal.
-
-With this choice, the exact limit `alpha = 0` gives `v_{d,z} = 0` and `M = 0`, so the Zhao ion-density model becomes degenerate. In practice, Type C should be evaluated for small but nonzero Sun elevation angles such as the `5^\circ` and `10^\circ` cases shown in the paper, unless a legacy full-drift approximation is requested explicitly.
-
-The normalized Poisson equation is written as
-
-```math
-\frac{d^2 \hat\phi}{d\hat z^2} = -\hat\rho(\hat\phi)
-```
-
-with charge density
-
-```math
-\hat\rho = \hat n_{\mathrm{swi}}
-          - \hat n_{\mathrm{swe,f}}
-          - \hat n_{\mathrm{swe,r}}
-          - \hat n_{\mathrm{phe,f}}
-          - \hat n_{\mathrm{phe,c}}.
-```
-
-The exact branch-dependent expressions for the density components are implemented in branch-specific helper functions.
-
-## Solver structure
-
-The numerical algorithm has two stages.
-
-1. **Solve branch unknowns**
-   - Type A: solve for `(phi0, phi_m, n_swe_inf)`
-   - Type B/C: solve for `(phi0, n_swe_inf)`
-
-2. **Reconstruct the profile**
-   - Type A: reconstruct `phi(z)` using the first integral of Poisson's equation
-   - Type B/C: solve a two-point boundary value problem for `phi(z)` and `E(z)`
-
-The nonlinear unknowns are solved with `scipy.optimize.root(method="hybr")`.
-
-## Type A
-
-## Physical picture
-
-Type A has a non-monotonic potential profile.
-
-- The potential starts at the surface value `phi0`
-- It decreases to an internal minimum `phi_m`
-- It then recovers toward `0 V` as `z -> infinity`
-
-Because of this turning point, the particle populations differ below and above the minimum.
-
-## Unknowns
-
-The Type A branch solves three unknowns:
-
-- `phi0`
-- `phi_m`
-- `n_swe_inf`
-
-These are obtained from three nonlinear conditions:
-
-1. far-field charge neutrality
-2. zero net current at infinity
-3. vanishing electric field at infinity
-
-## Density treatment
-
-The implementation treats the two subdomains separately.
-
-### Lower branch: surface -> `z_m`
-
-Included populations:
-
-- solar-wind ions
-- free solar-wind electrons
-- free photoelectrons
-- captured photoelectrons
-
-Excluded population:
-
-- reflected solar-wind electrons
-
-### Upper branch: `z_m` -> infinity
-
-Included populations:
-
-- solar-wind ions
-- free solar-wind electrons
-- reflected solar-wind electrons
-- free photoelectrons
-
-Excluded population:
-
-- captured photoelectrons
-
-This split is essential. If the same populations are used on both sides of the minimum, the Type A profile becomes unphysical.
-
-## Profile reconstruction
-
-Type A is not reconstructed with a simple finite-domain Dirichlet BVP. Instead, the code uses the first integral of Poisson's equation:
-
-```math
-\hat E^2(\hat\phi) = -2 \int_{\hat\phi_m}^{\hat\phi} \hat\rho(\psi)\, d\psi
-```
-
-and then maps potential to distance through
-
-```math
-\hat z(\hat\phi) = \int \frac{d\hat\phi}{|\hat E(\hat\phi)|}.
-```
-
-This is done separately on the lower and upper branches and then concatenated.
-
-## Turning-point handling
-
-A naive discretization around `phi = phi_m` produces an artificial plateau because `E(phi_m) = 0` and `1 / |E|` becomes singular at the first upper-branch grid point.
-
-To avoid this, the implementation uses:
-
-- an **asymptotic launch** near `phi_m`
-- **midpoint integration** away from the minimum
-
-Near the minimum,
-
-```math
-z - z_m \approx \sqrt{\frac{2(\phi - \phi_m)}{-\rho(\phi_m)}}
-```
-
-is used to start the upper branch smoothly.
-
-This was added specifically to remove the artificial flat segment that appears if the first interval is integrated by a direct endpoint-based trapezoidal rule.
-
-## Type B
-
-## Physical picture
-
-Type B is a monotonic positive-potential branch.
-
-- `phi(0) = phi0 > 0`
-- `phi(z)` decays monotonically toward `0`
-
-No internal turning point is present.
-
-## Unknowns
-
-Type B solves two unknowns:
-
-- `phi0`
-- `n_swe_inf`
-
-These are obtained from:
-
-1. far-field charge neutrality
-2. zero net current at infinity
-
-## Profile reconstruction
-
-Once the branch unknowns are known, the code solves the first-order system
-
-```math
-\frac{d\hat\phi}{d\hat z} = \hat E,
-\qquad
-\frac{d\hat E}{d\hat z} = -\hat\rho(\hat\phi)
-```
-
-with the boundary conditions
-
-```math
-\hat\phi(0) = \hat\phi_0,
-\qquad
-\hat\phi(\hat z_{\max}) = 0.
-```
-
-This is solved using `scipy.integrate.solve_bvp`.
-
-## Type C
-
-## Physical picture
-
-Type C is a monotonic negative-potential branch.
-
-- `phi(0) = phi0 < 0`
-- `phi(z)` recovers monotonically toward `0`
-
-Like Type B, it has no internal minimum.
-
-## Unknowns
-
-Type C also solves two unknowns:
-
-- `phi0`
-- `n_swe_inf`
-
-from:
-
-1. far-field charge neutrality
-2. zero net current at infinity
-
-## Profile reconstruction
-
-The profile is computed by the same BVP formulation used for Type B:
-
-```math
-\frac{d\hat\phi}{d\hat z} = \hat E,
-\qquad
-\frac{d\hat E}{d\hat z} = -\hat\rho(\hat\phi)
-```
-
-with
-
-```math
-\hat\phi(0) = \hat\phi_0,
-\qquad
-\hat\phi(\hat z_{\max}) = 0.
-```
-
-## Density treatment
-
-Type C still uses the paper's free-photoelectron expression from Eq. (8), specialized with the surface minimum `phi_m = phi0`.
-
-- reflected solar-wind electrons are present
-- captured photoelectrons are absent
-- free photoelectrons retain the `erfc(sqrt(phi - phi0))` cutoff implied by the lower-velocity bound
-
-## Numerical notes
-
-### 1. Type A is treated differently on purpose
-
-Type A should not be handled with the same finite-domain Dirichlet strategy used for Type B/C. A forced condition like `phi(z_max) = 0` on a non-monotonic branch tends to create a spurious flat profile followed by a sharp return to zero near the outer boundary.
-
-### 2. No artificial zero-potential tail
-
-The current implementation does not append a constant `phi = 0` tail to Type A after the physically integrated profile ends. Returning such an artificial tail makes the profile look flat even when the true solution is still recovering.
-
-### 3. `zmax_hat` has different roles
-
-- For **Type B/C**, `zmax_hat` is the outer boundary of the BVP.
-- For **Type A**, the reconstructed profile is returned up to the range reached by the first-integral integration, rather than padded to `zmax_hat` with a fake tail.
-
-### 4. Tightening the Type A outer tolerance
-
-The parameter `type_a_phi_tol_hat` controls how close the Type A reconstruction approaches `phi = 0` before stopping. Smaller values produce a longer tail and allow the recovery toward `0 V` to be followed more closely.
-
-### 5. Legacy Type C fallback is optional
-
-An experimental `allow_type_c_normal_ion_fallback` switch remains available for legacy runs that force the full ion drift into the Type C algebra and fail to converge. It is disabled by default because it changes the branch equations away from the paper-consistent 1-D normal-drift form.
-
-## Recommended outputs
-
-The solver returns dictionaries containing branch-dependent fields such as:
-
-- `branch`
-- `z_hat`
-- `phi_hat`
-- `z_m_hat` and `phi_m_hat` for Type A
-- dimensional quantities such as `phi0_V`, `phi_m_V`
-
-This is intended to support both plotting and regression testing.
-
-## Suggested future extensions
-
-- add regression tests against digitized figures from the paper
-- expose branch equations in a separate `equations.py`
-- add a notebook comparing Type A/B/C across solar zenith angle
-- document the exact correspondence between code expressions and equation numbers in the paper
-
-## Fortran library
-
-The independent Fortran implementation is described in [Fortran API](fortran-api.md).
-`solve_equilibrium` imposes zero net current; `solve_prescribed_field` accepts
-the normal field E_H in V/m and leaves the current unconstrained. Both return
-physical potentials, densities, particle fluxes, and the outward conventional
-current `J_z = e (Gamma_e,in - Gamma_i,in - Gamma_pe,escape)`.
-
-Fortran also exposes local densities and profiles for the zero-current solution.
-Its B/C profiles use the first integral with zero field at infinity, whereas
-this Python implementation retains its finite-interval Dirichlet BVP.
+Only accessible velocities are populated. Passing electrons have
+`w >= sqrt((phi-phi_min)/T_e)`; reflected electrons occupy both directions below
+that threshold on A's upper side and on C. B uses `phi_min=0`, so its incoming
+velocity cutoff is nonzero for positive potentials. At zero drift,
+`n_e/N_e = exp(psi) erfc(sqrt(psi))/2` on B.
+
+Both implementations integrate the same local distribution for density. They use
+an endpoint transformation `w=lower+(upper-lower)t^2` and composite Gauss quadrature.
+Velocity tails are truncated ten thermal widths beyond the drift or cutoff.
+The passing flux is evaluated by the equivalent upstream integral, using
+`w dw = a da`, and is constant along each orbit population. Python VDF diagnostics
+sample this distribution directly; flux diagnostics use its analytic moments.
+
+## Root equations
+
+J=0 imposes upstream neutrality and zero net current. A additionally imposes a
+zero field at infinity when integrating from its internal minimum. Prescribed-field
+solves replace the zero-current equation with the prescribed boundary field.
+The upstream electron normalization N_e is a solved unknown in both cases.
+
+Type A permits `phi_min < min(phi_H,0)`; it is not restricted to positive surface
+potentials. Unknown transformations for the field solve use a positive gap
+`phi_H-phi_min` and a negative minimum. E_H=0 is searched normally; a flat solution
+is added as one candidate when its density is positive. The A/C endpoint is
+coalesced into C when the minimum reaches the boundary.
+
+## Acceptance and profiles
+
+Roots must have accessible cold ions and a real connecting first integral of
+Poisson's equation. Fortran shares the same acceptance routine between J=0 and
+prescribed-field solves. Python also checks physical admissibility before returning
+algebraic unknowns. Auto selection skips inadmissible roots.
+
+An additional asymptotic obstruction applies to A/C with `u>0`: reflected slow
+electrons create a positive density correction proportional to
+`u |psi| log(1/|psi|)` near neutral infinity. The resulting E squared becomes
+negative arbitrarily near that endpoint. Such roots are rejected even if a finite
+sampling grid misses the negative interval. The nondrifting model is selected
+explicitly with `electron_drift_mode='zero'` in J=0 or `electron_drift_mps=0` in the
+field API; there is no silent drift substitution.
+
+Both implementations reconstruct all profiles from the semi-infinite first integral.
+The old Python B/C finite-interval BVP has been removed: its trial iterates can leave
+the accessible potential interval after introducing the kinetic cutoffs. The
+Python parameter `n_profile_grid` controls the potential grid for B/C, and
+`profile_phi_tol_hat` controls the upstream cutoff on all branches. Returned positions
+are nonuniform and may stop before zmax_hat; no artificial zero-potential tail is added.
+
+## Multiple solutions and numerical limits
+
+`require_unique` is the default field-root policy. Candidate enumeration lets callers
+inspect all roots found by the finite multistart search. `max_field_energy` selects
+the largest positive electrostatic field energy per area. This is a heuristic;
+no dynamical or thermodynamic stability follows from it.
+
+The former Type A integral with a removable `1/u` singularity has been replaced by
+quadrature of the same charge density as Poisson's equation. It is regular at u=0.
+All root existence statements are limited by finite numerical search and integration
+tolerances. Numerical failure is not proof that no physical solution exists.
+
+## Validation
+
+Tests compare velocity moments against independent adaptive or Simpson integration,
+check the zero-drift B expression and A-to-B limit, conserve passing flux at multiple
+positions, reject inadmissible algebraic roots, verify negative-surface A profiles,
+and follow the field response through a nonflat E_H=0 transition. Profile checks also
+compare E with minus the potential gradient and its derivative with charge density.

@@ -8,6 +8,7 @@ program equilibrium_profile
   integer :: i
   character(len=256) :: message
   input%branch = 'A'
+  input%electron_drift_mode = 'zero'
   input%sun_elevation_deg = 60.0_dp
   call solve_profile(input, options, profile, status, message)
   if (status /= sheath_ok) then

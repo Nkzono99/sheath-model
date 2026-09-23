@@ -20,7 +20,7 @@ contains
   guesses = 0.0_dp
   select case (branch)
   case ('A')
-    count = 5
+    count = 8
     call encode_field_unknowns(params, branch, 3.6_dp, -0.5_dp, 8.2e6_dp, guesses(:, 1), valid)
     call encode_field_unknowns(params, branch, 2.8_dp, -0.3_dp, 8.0e6_dp, guesses(:, 2), valid)
     call encode_field_unknowns(params, branch, 4.5_dp, -0.8_dp, 8.4e6_dp, guesses(:, 3), valid)
@@ -32,6 +32,12 @@ contains
       params, branch, 0.8_dp*params%t_phe_ev, -0.1_dp*params%t_phe_ev, &
       params%n_swi_inf_m3, guesses(:, 5), valid &
       )
+    call encode_field_unknowns(params, branch, -0.2_dp*params%t_phe_ev, -0.8_dp*params%t_phe_ev, &
+                               0.9_dp*params%n_swi_inf_m3, guesses(:, 6), valid)
+    call encode_field_unknowns(params, branch, -params%t_phe_ev, -2.0_dp*params%t_phe_ev, &
+                               params%n_swi_inf_m3, guesses(:, 7), valid)
+    call encode_field_unknowns(params, branch, -3.0_dp*params%t_phe_ev, -4.0_dp*params%t_phe_ev, &
+                               params%n_swi_inf_m3, guesses(:, 8), valid)
   case ('B')
     count = 7
     call encode_field_unknowns(params, branch, 1.3_dp, 1.3_dp, 7.0e6_dp, guesses(:, 1), valid)

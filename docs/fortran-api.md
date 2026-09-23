@@ -1,5 +1,8 @@
 # Fortran API
 
+この文書は軌道保存・物理解判定を修正したソース版の API です（v0.1.0 とは解の存在域が変わります）。
+詳細な導出と適用範囲は [運動論モデル](kinetic-model.md) を参照してください。
+
 `use sheath_model` が公開窓口です。`src/internal/` は実装詳細です。
 実数は `real(dp)`（real64）、ステータスは `integer(i32)`（int32）を使います。
 単位は SI、温度のみ eV。上流の `phi(infinity)=0 V` を電位基準とし、+z は境界から上流へ向かいます。
@@ -14,6 +17,8 @@
 
 両方とも平面・一次元・半無限領域の定常シースです。冷たいイオンビーム、ドリフト Maxwell 電子、Maxwell 光電子源を仮定します。
 J=0 は上流準中性・零電流条件から解き、A は極小から上流の電場条件も満たします。
+両モデルとも、代数根に加えてイオン到達条件・実数電場の接続・上流漸近条件を検査します。
+背景電子の内向きドリフトが正で反射低速集団を持つ A/C は、半無限上流条件に接続できないため不採用です。
 E_H 指定では零電流式を電場条件に置き換え、正味電流を出力します。
 A の電場条件は `E_H²=-(2/epsilon_0)*integral(phi_m..phi_H, rho_lower dphi)`、
 B/C は `E_H²=(2/epsilon_0)*integral(phi_H..0, rho dphi)` です。
@@ -33,11 +38,13 @@ integer(i32) :: status
 character(len=256) :: message
 
 stationary_input%branch = 'A'
+stationary_input%electron_drift_mode = 'zero'
 call solve_equilibrium(stationary_input, stationary, status, message)
 if (status /= sheath_ok) stop 1
 
 field_input%branch = 'A'
-field_input%root_selection = 'minimum_energy'
+field_input%electron_drift_mps = 0.0_dp
+field_input%root_selection = 'max_field_energy'
 field_input%electric_field_v_m = 1.62_dp
 field_input%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
 call solve_prescribed_field(field_input, field_solution, status, message)
@@ -57,11 +64,12 @@ if (status /= sheath_ok) stop 1
 | `solar_wind_speed_mps` | 468e3 | 全太陽風速度、正 |
 | `ion_mass_kg` | 1.67262192369e-27 | イオン質量、正 |
 | `electron_mass_kg` | 9.1093837015e-31 | 電子質量、正 |
-| `electron_drift_mode`, `ion_drift_mode` | `'normal'` | normal: `v_sw sin(alpha)`、full: 全速度を使用 |
+| `electron_drift_mode` | `'normal'` | normal: `v_sw sin(alpha)`、full: 全速度、zero: 無ドリフト背景電子 |
+| `ion_drift_mode` | `'normal'` | normal: `v_sw sin(alpha)`、full: 全速度 |
 
 すべての数値は有限値が必要です。光電子源密度は `n_phe0=n_phe_ref sin(alpha)`。
 法線イオン速度ゼロはモデルが未定義なので入力エラーです。
-`auto` は高度 20 度未満で C→A→B、それ以外では A→B→C の順に代数解を探索し、最初に収束した枝を返します。
+`auto` は高度 20 度未満で C→A→B、それ以外では A→B→C の順に探索し、プロファイルの物理条件も満たす最初の枝を返します。
 
 ## E_H 指定の入力: `zhao_field_input`
 
@@ -87,13 +95,25 @@ BEACH の `zhao_online` と同じく、背景電子・イオンの外向き流�
 BEACH の共通インタフェースにある `electron_outward_flux_m2_s` と `ion_outward_flux_m2_s` は
 Zhao のシース解に作用しないため、本 API の入力には含めていません。
 
+この API は上流イオン状態と光電子源を固定し、背景電子 Maxwell 分布の規格化を準中性から解きます。
+背景電子 VDF の規格化を固定した応答ではなく、E_H の変更に伴い規格化密度も変わり得ます。
+`fixed_ambient` を同じ半無限条件へ追加すると一般に過剰決定になるため、別モードは設けていません。
+
 根の選択方針は二つです。
 
 - `require_unique`: 検出された物理解が一意なら採用。複数なら `sheath_ambiguous_solution`。
-- `minimum_energy`: 検出された候補から `-(epsilon_0/2)*integral(E² dz)` が最小の解を選択。同順位や探索不確定はステータスで返す。
+- `max_field_energy`: 正の電場エネルギー `+(epsilon_0/2)*integral(E² dz)` が最大の候補を選択。数値的な同順位は曖昧性を返す。
+
+後者はヒューリスティックであり、安定性を意味しません。
+
+`solve_prescribed_field_candidates(input, results, status, message)` は
+`type(zhao_field_result), allocatable :: results(:)` に発見した物理候補を返します。
+`root_selection` による選択は行いません。失敗時は配列を未確保に戻します。
+ゼロ電場でも非平坦解を探索し、平坦解は正の電子規格化密度を持つ場合だけ候補に加えます。
+A の極小が境界へ合流したゼロ電場端点は C として一度だけ返します。
 
 複数の物理解を扱うための指定であり、有限個の初期値による探索で全パラメータ域の存在・一意性を保証するものではありません。
-明示した枝から別の枝への自動切替は行いません。
+探索は指定枝に限定します。ただし A/C のゼロ電場端点は共通の C 表現にまとめます。
 
 ## 結果
 
@@ -103,7 +123,7 @@ Zhao のシース解に作用しないため、本 API の入力には含めて�
 | --- | --- | --- |
 | `valid`, `branch` | — | 成功状態と採用枝 |
 | `minimum_potential_v` | V | 領域全体の最小電位。A は内部極小、B は遠方の 0、C は境界値 |
-| `ambient_electron_density_m3` | m⁻³ | 上流 Maxwell 電子集団の規格化密度 |
+| `ambient_electron_density_m3` | m⁻³ | 上流 Maxwell 電子集団の規格化密度 N_e（実際の上流総電子密度ではない） |
 | `electron_inward_flux_m2_s` | m⁻² s⁻¹ | 境界に到達する電子流束 |
 | `ion_inward_flux_m2_s` | m⁻² s⁻¹ | 冷たいイオン流束 n_i u_i |
 | `photoelectron_escape_flux_m2_s` | m⁻² s⁻¹ | 戻り光電子を除いた上流到達流束 |
@@ -115,9 +135,9 @@ J=0 モデルの電流は数値誤差の範囲でゼロ、E_H 指定モデルで
 
 `zhao_equilibrium_result` は追加で `surface_potential_v`（表面電位）と `debye_length_m`（光電子参照密度・温度による Debye 長）を持ちます。
 `zhao_field_result` は追加で `boundary_potential_v`（指定電場の位置の電位）、`nonlinear_iterations`（反復数）、
-`minimum_field_squared_hat`（確認した経路上の最小無次元電場二乗）、`potential_energy_j_m2`（根選択用の上記エネルギー指標）を持ちます。
+`minimum_field_squared_hat`（確認した経路上の最小無次元電場二乗）、`field_energy_j_m2`（正の静電場エネルギー）を持ちます。
 E_H 側は密度を n_i、電位を T_pe、長さを `sqrt(epsilon_0 T_pe/(n_i e))` で規格化します。
-エネルギー指標は minimum_energy の場合に計算し、未計算時は `huge()`。残差・最小電場二乗も未計算時は `huge()` です。
+成功した候補の電場エネルギーは選択方針によらず計算します。エネルギー・残差・最小電場二乗は未計算時に `huge()` です。
 数値ゼロと失敗を区別するため、必ず `status` を確認してください。
 
 ## J=0 解の密度・プロファイル
@@ -139,8 +159,10 @@ A は `side='lower'`（表面〜極小）または `'upper'`（極小〜上流�
 `equilibrium` は J=0 解、`turning_height_m` は A の極小高度（B/C は -1）。
 高さは 0 から厳密に増加し、A の極小点は一度だけ格納します。遠方に人工的なゼロ電位の尾部は追加しません。
 実際の返却範囲は `z_m(size(z_m))` で確認してください。高さ上限内に 2 点未満しかない場合は入力エラーです。
-失敗時は配列を未確保に戻します。実数の電場を構成できない代数解はプロファイルとして成功扱いしません。
-Python の B/C は有限区間 Dirichlet BVP のため、特に端近傍の値はこの半無限解と異なります。
+失敗時は配列を未確保に戻します。実数の電場を構成できない代数解は `solve_equilibrium` の時点で不採用です。
+負の表面電位を持つ A でも lower は `[phi_m,phi0]`、upper は `[phi_m,0]` です。
+Python の B/C も同じ半無限条件の一次積分です。`n_profile_grid` は B/C の電位格子の点数に使い、
+`profile_phi_tol_hat` は全枝で遠方の打ち切りに使います。返却する格子は非一様で、`zmax_hat` まで必ず到達するとは限りません。
 
 ## ステータス
 

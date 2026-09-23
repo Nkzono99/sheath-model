@@ -2,10 +2,11 @@
 module sheath_model_equilibrium
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use sheath_model_constants, only: dp, i32, pi, eps0, qe, electron_mass, proton_mass, lower_ascii
+  use sheath_model_admissibility, only: validate_zhao_profile
   use sheath_model_core, only: zhao_params_type, try_solve_zhao_unknowns, &
                                evaluate_zhao_density_hat, zhao_residuals_type_a, zhao_residuals_type_b, zhao_residuals_type_c, &
                                swe_free_current_term
-  use sheath_model_constants, only: sheath_ok, sheath_invalid_argument, sheath_numerical_failure
+  use sheath_model_constants, only: sheath_ok, sheath_invalid_argument, sheath_numerical_failure, sheath_no_physical_solution
   implicit none
   private
   public :: zhao_equilibrium_input, zhao_equilibrium_result, zhao_density_result
@@ -82,8 +83,9 @@ contains
     case default
       return
     end select
-    message = 'Drift modes must be normal or full.'
-    if (input%electron_drift_mode /= 'normal' .and. input%electron_drift_mode /= 'full') return
+    message = 'Electron drift mode must be normal, full, or zero; ion mode normal or full.'
+    if (input%electron_drift_mode /= 'normal' .and. input%electron_drift_mode /= 'full' .and. &
+        input%electron_drift_mode /= 'zero') return
     if (input%ion_drift_mode /= 'normal' .and. input%ion_drift_mode /= 'full') return
     p%alpha_rad = input%sun_elevation_deg*pi/180.0_dp
     p%n_swi_inf_m3 = input%ion_density_m3
@@ -96,6 +98,7 @@ contains
     p%v_d_electron_mps = input%solar_wind_speed_mps
     p%v_d_ion_mps = input%solar_wind_speed_mps
     if (input%electron_drift_mode == 'normal') p%v_d_electron_mps = p%v_d_electron_mps*sin(p%alpha_rad)
+    if (input%electron_drift_mode == 'zero') p%v_d_electron_mps = 0.0_dp
     if (input%ion_drift_mode == 'normal') p%v_d_ion_mps = p%v_d_ion_mps*sin(p%alpha_rad)
     message = 'Zero normal ion drift is degenerate; use a positive elevation or explicit full ion drift.'
     if (p%v_d_ion_mps <= 0.0_dp) return
@@ -123,19 +126,47 @@ contains
     type(zhao_params_type) :: p
     type(zhao_equilibrium_result) :: trial
     real(dp) :: phi0, phim, density, residual(3)
-    real(dp) :: cutoff, flux_scale
+    real(dp) :: cutoff, flux_scale, minimum_e2, boundary_e2
+    character(len=1) :: order(3)
+    integer :: attempt, count
+    logical :: nonphysical, unresolved_search
     character(len=1) :: branch
     logical :: success
     output = zhao_equilibrium_result()
     call prepare_params(input, p, status, message)
     if (status /= sheath_ok) return
-    call try_solve_zhao_unknowns('zhao_'//trim(lower_ascii(input%branch)), p, phi0, phim, density, branch, success)
-    status = sheath_numerical_failure
-    message = 'Equilibrium root search did not converge for the requested branch.'
-    if (.not. success) return
-    if (.not. all(ieee_is_finite([phi0, phim, density]))) return
-    message = 'The root blocks the cold ion beam.'
-    if (1.0_dp - 2.0_dp*max(0.0_dp, phi0)/(p%t_swe_ev*p%mach**2) <= 0.0_dp) return
+    order = ['A', 'B', 'C']
+    if (input%sun_elevation_deg < 20.0_dp) order = ['C', 'A', 'B']
+    count = 3
+    if (trim(lower_ascii(input%branch)) /= 'auto') then
+      order(1) = input%branch(1:1)
+      count = 1
+    end if
+    nonphysical = .false.
+    unresolved_search = .false.
+    do attempt = 1, count
+      call try_solve_zhao_unknowns('zhao_'//lower_ascii(order(attempt)), p, phi0, phim, density, branch, success)
+      if (.not. success) then
+        unresolved_search = .true.
+        cycle
+      end if
+      if (branch == 'B') phim = 0.0_dp
+      call validate_zhao_profile(p, branch, phi0/p%t_phe_ev, phim/p%t_phe_ev, density/p%n_phe_ref_m3, &
+                                 minimum_e2, boundary_e2, status, message)
+      if (status == sheath_ok) exit
+      if (status == sheath_no_physical_solution) nonphysical = .true.
+      if (status == sheath_numerical_failure) unresolved_search = .true.
+      success = .false.
+    end do
+    if (.not. success) then
+      status = sheath_numerical_failure
+      message = 'Equilibrium root search did not converge for the requested branch.'
+      if (nonphysical .and. .not. unresolved_search) then
+        status = sheath_no_physical_solution
+        message = 'Algebraic equilibrium roots exist but have no real connecting sheath profile.'
+      end if
+      return
+    end if
     residual = 0.0_dp
     select case (branch)
     case ('A')
@@ -156,6 +187,7 @@ contains
     trial%photoelectron_escape_flux_m2_s = flux_scale*p%n_phe0_m3*exp((phim - phi0)/p%t_phe_ev)
     trial%net_current_a_m2 = qe*(trial%electron_inward_flux_m2_s - trial%ion_inward_flux_m2_s - &
                                  trial%photoelectron_escape_flux_m2_s)
+    status = sheath_numerical_failure
     message = 'Equilibrium flux or current evaluation is non-finite.'
     if (.not. all(ieee_is_finite([trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, &
                                   trial%photoelectron_escape_flux_m2_s, trial%net_current_a_m2]))) return
@@ -194,6 +226,7 @@ contains
       if (.not. present(side)) return
       region = lower_ascii(side)
       if (region /= 'lower' .and. region /= 'upper') return
+      upper = solution%surface_potential_v
       if (region == 'upper') upper = 0.0_dp
     case ('B', 'C')
     case default

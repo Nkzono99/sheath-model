@@ -15,5 +15,9 @@ library with physical inputs and results. Application-specific array contracts,
 boundary response adapters, continuation/restart state, inactive outflow moments,
 and population-fraction coupling have been removed. Process termination has
 been replaced with status results. Particle flux and current outputs were added.
+Subsequent corrections transport upstream electrons along energy-conserving
+orbits, share physical profile validation between closures, extend the branch
+search to negative surface potentials and nonflat zero-field endpoints, and
+label field-energy ranking explicitly as a heuristic.
 
 Other files retain the MIT license in LICENSE unless marked otherwise.

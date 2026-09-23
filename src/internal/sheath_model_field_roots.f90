@@ -6,112 +6,101 @@
 submodule(sheath_model_field) sheath_model_field_roots
   implicit none
 
-  real(dp), parameter :: zero_field_tolerance_hat = 1.0e-12_dp
   real(dp), parameter :: root_cluster_tolerance = 1.0e-6_dp
   real(dp), parameter :: energy_tie_tolerance = 1.0e-6_dp
 
 contains
 
   module procedure solve_field_root
-
-  character(len=1) :: order(3), candidate
-  type(zhao_field_root) :: trial_root, successful_root, successful_roots(3)
-  real(dp) :: field_scale, target_field_hat, degenerate_density_m3
-  integer :: candidate_count, candidate_index, successful_count
-  logical :: saw_numerical_failure, saw_ambiguous_solution
-
+  type(zhao_field_root), allocatable :: roots(:)
   root = zhao_field_root()
-  status = sheath_no_physical_solution
-  message = ''
-  field_scale = params%t_phe_ev/params%lambda_d_phe_ref_m
-  target_field_hat = interface_field_v_m/field_scale
-  if (.not. all(ieee_is_finite([field_scale, target_field_hat])) .or. field_scale <= 0.0_dp) then
-    status = sheath_numerical_failure
-    message = 'prescribed-field Zhao field normalization is invalid.'
-    return
-  end if
-
-  call field_branch_order(model, target_field_hat, order, candidate_count, status, message)
+  call find_field_roots(model, params, interface_field_v_m, roots, status, message)
   if (status /= sheath_ok) return
-  if (abs(target_field_hat) <= zero_field_tolerance_hat) then
-    if (trim(model) /= 'auto' .and. trim(model) /= 'b') then
-      status = sheath_no_physical_solution
-      message = 'requested Zhao branch does not contain the zero-field state.'
-      return
-    end if
-    degenerate_density_m3 = ( &
-                            2.0_dp*params%n_swi_inf_m3 - params%n_phe0_m3 &
-                            )/(1.0_dp + erf(params%u))
-    if (.not. ieee_is_finite(degenerate_density_m3) .or. degenerate_density_m3 <= 0.0_dp) then
-      status = sheath_no_physical_solution
-      message = 'zero-field Zhao-B state has no positive ambient electron density.'
-      return
-    end if
-    root%branch = 'B'
-    root%ambient_electron_density_m3 = degenerate_density_m3
-    root%residual_norm = 0.0_dp
-    root%minimum_field_squared_hat = 0.0_dp
-    root%potential_energy_j_m2 = 0.0_dp
-    root%nonlinear_iterations = 0_i32
-    status = sheath_ok
-    message = 'zero-field degenerate Zhao-B state'
-    return
-  end if
-
-  saw_numerical_failure = .false.
-  saw_ambiguous_solution = .false.
-  successful_count = 0
-  successful_root = zhao_field_root()
-  do candidate_index = 1, candidate_count
-    candidate = order(candidate_index)
-    call solve_one_field_branch( &
-      params, candidate, target_field_hat, root_selection, trial_root, status, message &
-      )
-    if (status == sheath_ok) then
-      successful_count = successful_count + 1
-      successful_roots(successful_count) = trial_root
-      if (successful_count == 1) successful_root = trial_root
-    end if
-    if (status == sheath_numerical_failure) saw_numerical_failure = .true.
-    if (status == sheath_ambiguous_solution) saw_ambiguous_solution = .true.
-  end do
-  if (saw_ambiguous_solution) then
+  if (size(roots) == 1) then
+    root = roots(1)
+  else if (trim(root_selection) == 'require_unique') then
     status = sheath_ambiguous_solution
-    message = 'prescribed-field Zhao branch search found multiple roots within one branch.'
-    return
-  end if
-  if (successful_count == 1 .and. saw_numerical_failure .and. trim(model) == 'auto') then
-    status = sheath_numerical_failure
-    message = 'prescribed-field Zhao auto selection could not certify a unique branch.'
-    return
-  else if (successful_count == 1) then
-    root = successful_root
-    status = sheath_ok
-    message = ''
-    return
-  else if (successful_count > 1) then
-    if (saw_numerical_failure .and. trim(model) == 'auto' .and. &
-        trim(root_selection) == 'minimum_energy') then
-      status = sheath_numerical_failure
-      message = 'prescribed-field Zhao minimum-energy selection could not certify every candidate branch.'
-    else if (trim(root_selection) == 'minimum_energy') then
-      call select_minimum_energy_root( &
-        params, successful_roots, successful_count, root, status, message &
-        )
-    else
-      status = sheath_ambiguous_solution
-      message = 'prescribed-field Zhao auto selection is ambiguous across multiple physical branches.'
-    end if
-    return
-  end if
-  if (saw_numerical_failure) then
-    status = sheath_numerical_failure
-    message = 'prescribed-field Zhao branch search did not converge.'
+    message = 'Multiple admissible roots found; use solve_prescribed_field_candidates to inspect them.'
   else
-    status = sheath_no_physical_solution
-    message = 'no Zhao branch satisfies the prescribed boundary field.'
+    call select_max_field_energy_root(roots, size(roots), root, status, message)
   end if
   end procedure solve_field_root
+
+  module procedure find_field_roots
+  character(len=1) :: order(3)
+  type(zhao_field_root) :: found(25), candidates(8), flat
+  real(dp) :: field_scale, target, density
+  integer :: branch_count, i, j, k, count, n
+  logical :: nonphysical, failed_profile, duplicate, saw_nonphysical, saw_failure, unresolved_search
+  field_scale = params%t_phe_ev/params%lambda_d_phe_ref_m
+  target = interface_field_v_m/field_scale
+  status = sheath_numerical_failure
+  message = 'Invalid field normalization.'
+  if (.not. ieee_is_finite(target) .or. field_scale <= 0.0_dp) return
+  call field_branch_order(model, target, order, branch_count, status, message)
+  if (status /= sheath_ok) return
+  n = 0
+  saw_nonphysical = .false.
+  saw_failure = .false.
+  unresolved_search = .false.
+  ! The flat state is one candidate, never a shortcut around the non-flat search.
+  if (interface_field_v_m == 0.0_dp .and. (model == 'auto' .or. model == 'b')) then
+    density = (2.0_dp*params%n_swi_inf_m3 - params%n_phe0_m3)/(1.0_dp + erf(params%u))
+    if (density > 0.0_dp .and. ieee_is_finite(density)) then
+      flat = zhao_field_root()
+      flat%branch = 'B'
+      flat%ambient_electron_density_m3 = density
+      flat%residual_norm = 0.0_dp
+      flat%minimum_field_squared_hat = 0.0_dp
+      flat%field_energy_j_m2 = 0.0_dp
+      n = 1
+      found(n) = flat
+    end if
+  end if
+  do i = 1, branch_count
+    call collect_field_branch_roots(params, order(i), target, candidates, count, &
+                                    nonphysical, failed_profile, status, message)
+    saw_nonphysical = saw_nonphysical .or. nonphysical .or. status == sheath_no_physical_solution
+    saw_failure = saw_failure .or. failed_profile
+    unresolved_search = unresolved_search .or. status == sheath_numerical_failure
+    if (status /= sheath_ok) cycle
+    do j = 1, count
+      duplicate = .false.
+      do k = 1, n
+        duplicate = field_roots_equivalent(params, candidates(j), found(k))
+        if (interface_field_v_m == 0.0_dp .and. found(k)%phi0_v == 0.0_dp) then
+          duplicate = duplicate .or. max(abs(candidates(j)%phi0_v), abs(candidates(j)%phi_m_v)) &
+                      < 1e-4_dp*params%t_phe_ev
+        end if
+        if (duplicate) exit
+      end do
+      if (duplicate) cycle
+      n = n + 1
+      found(n) = candidates(j)
+    end do
+  end do
+  if (saw_failure) then
+    status = sheath_numerical_failure
+    message = 'A candidate profile integral could not be evaluated.'
+    return
+  end if
+  if (n == 0) then
+    status = sheath_numerical_failure
+    message = 'No root converged in the finite multistart search.'
+    if (saw_nonphysical .and. .not. unresolved_search) then
+      status = sheath_no_physical_solution
+      message = 'No admissible profile found among the converged roots or compatible branches.'
+    end if
+    return
+  end if
+  do i = 1, n
+    call evaluate_root_field_energy(params, found(i), status, message)
+    if (status /= sheath_ok) return
+  end do
+  roots = found(:n)
+  status = sheath_ok
+  message = ''
+  end procedure find_field_roots
 
   subroutine field_branch_order(model, target_field_hat, order, count, status, message)
     character(len=*), intent(in) :: model
@@ -136,7 +125,7 @@ contains
       order(1) = 'C'
       count = 1
     case ('auto')
-      if (target_field_hat > 0.0_dp) then
+      if (target_field_hat >= 0.0_dp) then
         order = ['A', 'B', 'C']
       else
         order = ['C', 'A', 'B']
@@ -147,53 +136,6 @@ contains
       message = 'unknown prescribed-field Zhao branch.'
     end select
   end subroutine field_branch_order
-
-  subroutine solve_one_field_branch(params, branch, target_field_hat, root_selection, root, status, message)
-    type(zhao_params_type), intent(in) :: params
-    character(len=1), intent(in) :: branch
-    character(len=*), intent(in) :: root_selection
-    real(dp), intent(in) :: target_field_hat
-    type(zhao_field_root), intent(out) :: root
-    integer(i32), intent(out) :: status
-    character(len=*), intent(out) :: message
-
-    type(zhao_field_root) :: unique_roots(8)
-    integer :: unique_count
-    logical :: saw_nonphysical_profile, saw_numerical_profile_failure
-
-    root = zhao_field_root()
-    root%branch = branch
-    call collect_field_branch_roots( &
-      params, branch, target_field_hat, unique_roots, unique_count, &
-      saw_nonphysical_profile, saw_numerical_profile_failure, status, message &
-      )
-    if (status /= sheath_ok) return
-    if (unique_count > 1) then
-      if (trim(root_selection) == 'minimum_energy') then
-        call select_minimum_energy_root(params, unique_roots, unique_count, root, status, message)
-      else
-        status = sheath_ambiguous_solution
-        message = 'prescribed-field Zhao solve found multiple roots in the requested branch.'
-      end if
-    else if (saw_numerical_profile_failure) then
-      status = sheath_numerical_failure
-      message = 'prescribed-field Zhao root profile could not be certified numerically.'
-    else if (unique_count == 1) then
-      root = unique_roots(1)
-      if (trim(root_selection) == 'minimum_energy') then
-        call evaluate_root_potential_energy(params, root, status, message)
-      else
-        status = sheath_ok
-        message = ''
-      end if
-    else if (saw_nonphysical_profile) then
-      status = sheath_no_physical_solution
-      message = 'prescribed-field Zhao endpoint root has no real connecting field profile.'
-    else
-      status = sheath_numerical_failure
-      message = 'prescribed-field Zhao Newton solve did not converge.'
-    end if
-  end subroutine solve_one_field_branch
 
   subroutine collect_field_branch_roots( &
     params, branch, target_field_hat, unique_roots, unique_count, &
@@ -221,10 +163,16 @@ contains
     saw_numerical_profile_failure = .false.
     status = sheath_no_physical_solution
     message = ''
-    compatible = (branch == 'C' .and. target_field_hat < 0.0_dp) .or. &
-                 ((branch == 'A' .or. branch == 'B') .and. target_field_hat > 0.0_dp)
+    compatible = (branch == 'C' .and. target_field_hat <= 0.0_dp) .or. &
+                 ((branch == 'A' .or. branch == 'B') .and. target_field_hat >= 0.0_dp)
     if (.not. compatible) then
       message = 'Zhao branch and boundary field signs are incompatible.'
+      return
+    end if
+
+    if ((branch == 'A' .or. branch == 'C') .and. params%u > 0.0_dp) then
+      saw_nonphysical_profile = .true.
+      message = 'Reflected drifting electrons cannot approach neutral zero-field infinity.'
       return
     end if
 
@@ -241,6 +189,11 @@ contains
         candidate_root%ambient_electron_density_m3, success &
         )
       if (.not. success) cycle
+      if (target_field_hat == 0.0_dp .and. branch == 'A' .and. candidate_root%phi0_v < 0.0_dp .and. &
+          candidate_root%phi0_v - candidate_root%phi_m_v < root_cluster_tolerance*params%t_phe_ev) then
+        candidate_root%branch = 'C'
+        candidate_root%phi0_v = candidate_root%phi_m_v
+      end if
       candidate_root%residual_norm = norm
       candidate_root%nonlinear_iterations = int(iterations, i32)
       call validate_field_root_profile( &
@@ -269,56 +222,53 @@ contains
       end if
     end do
     status = sheath_ok
+    if (unique_count == 0) then
+      status = sheath_numerical_failure
+      if (saw_nonphysical_profile) status = sheath_no_physical_solution
+    end if
   end subroutine collect_field_branch_roots
 
-  subroutine select_minimum_energy_root(params, roots, root_count, root, status, message)
-    type(zhao_params_type), intent(in) :: params
+  subroutine select_max_field_energy_root(roots, root_count, root, status, message)
     type(zhao_field_root), intent(in) :: roots(:)
     integer, intent(in) :: root_count
     type(zhao_field_root), intent(out) :: root
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
 
-    type(zhao_field_root) :: candidates(size(roots))
     real(dp) :: energy_scale
     integer :: candidate_index, best_index
 
     root = zhao_field_root()
-    candidates = roots
     status = sheath_numerical_failure
     message = ''
     if (root_count < 1 .or. root_count > size(roots)) then
-      message = 'prescribed-field Zhao minimum-energy selection received an invalid candidate count.'
+      message = 'prescribed-field Zhao max-field-energy heuristic selection received an invalid candidate count.'
       return
     end if
-    do candidate_index = 1, root_count
-      call evaluate_root_potential_energy(params, candidates(candidate_index), status, message)
-      if (status /= sheath_ok) return
-    end do
     best_index = 1
     do candidate_index = 2, root_count
-      if (candidates(candidate_index)%potential_energy_j_m2 < &
-          candidates(best_index)%potential_energy_j_m2) best_index = candidate_index
+      if (roots(candidate_index)%field_energy_j_m2 > &
+          roots(best_index)%field_energy_j_m2) best_index = candidate_index
     end do
     do candidate_index = 1, root_count
       if (candidate_index == best_index) cycle
       energy_scale = max( &
-                     abs(candidates(best_index)%potential_energy_j_m2), &
-                     abs(candidates(candidate_index)%potential_energy_j_m2), tiny(1.0_dp) &
+                     abs(roots(best_index)%field_energy_j_m2), &
+                     abs(roots(candidate_index)%field_energy_j_m2), tiny(1.0_dp) &
                      )
       if (abs( &
-          candidates(candidate_index)%potential_energy_j_m2 - &
-          candidates(best_index)%potential_energy_j_m2 &
+          roots(candidate_index)%field_energy_j_m2 - &
+          roots(best_index)%field_energy_j_m2 &
           ) <= energy_tie_tolerance*energy_scale) then
         status = sheath_ambiguous_solution
-        message = 'prescribed-field Zhao minimum-energy candidates are numerically tied.'
+        message = 'prescribed-field Zhao max-field-energy heuristic candidates are numerically tied.'
         return
       end if
     end do
-    root = candidates(best_index)
+    root = roots(best_index)
     status = sheath_ok
     message = ''
-  end subroutine select_minimum_energy_root
+  end subroutine select_max_field_energy_root
 
   pure logical function field_roots_equivalent(params, first, second) result(equivalent)
     type(zhao_params_type), intent(in) :: params

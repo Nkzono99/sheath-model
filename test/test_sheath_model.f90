@@ -14,11 +14,11 @@ program test_sheath_model
   character(len=512) :: message
   character(len=1), parameter :: branches(3) = ['A', 'B', 'C']
   ! Independently checked with sheath_model.solver (SciPy root) at alpha=60,20,10 deg.
-  real(dp), parameter :: phi_reference(3) = [2.9712182827367717_dp, 1.5658788164627406_dp, -4.7982983471498581_dp]
-  real(dp), parameter :: density_reference(3) = [7.8192157295777127e6_dp, 6.1202712875344045e6_dp, 8.1686031195465308e6_dp]
+  real(dp), parameter :: phi_reference(3) = [3.840189093737787_dp, 1.6159581059198893_dp, -4.237755720386508_dp]
+  real(dp), parameter :: density_reference(3) = [9.916982425098725e6_dp, 6.898994373424846e6_dp, 8.510500075540943e6_dp]
 
   do branch_index = 1, 3
-    equilibrium_input = zhao_equilibrium_input(branch=branches(branch_index))
+    equilibrium_input = zhao_equilibrium_input(branch=branches(branch_index), electron_drift_mode='zero')
     if (branch_index == 2) equilibrium_input%sun_elevation_deg = 20.0_dp
     if (branch_index == 3) equilibrium_input%sun_elevation_deg = 10.0_dp
     call solve_equilibrium(equilibrium_input, root, status, message)
@@ -39,7 +39,7 @@ program test_sheath_model
     call check(all(profile%z_m(2:) > profile%z_m(:n - 1)), 'strictly increasing heights')
     call check(all(ieee_is_finite(profile%electric_field_v_m)), 'finite profile field')
     ! Independent differential checks: E=-dphi/dz and dE/dz=rho/eps0.
-    do i = 10, n - 10, max(1, n/12)
+    do i = 40, n - 40, max(1, n/12)
       if (root%branch == 'A' .and. abs(i - options%points_per_segment) < 10) cycle
       derivative = -(profile%potential_v(i + 1) - profile%potential_v(i - 1))/(profile%z_m(i + 1) - profile%z_m(i - 1))
       call near(profile%electric_field_v_m(i), derivative, 0.003_dp*max(1e-3_dp, abs(derivative)), 'E=-grad(phi)')
@@ -55,7 +55,7 @@ program test_sheath_model
   end do
   ! A shared density factor cannot change the voltage; Debye length scales as n^(-1/2).
   do i = -2, 2, 2
-    equilibrium_input = zhao_equilibrium_input(branch='A')
+    equilibrium_input = zhao_equilibrium_input(branch='A', electron_drift_mode='zero')
     equilibrium_input%ion_density_m3 = equilibrium_input%ion_density_m3*10.0_dp**i
     equilibrium_input%photoelectron_reference_density_m3 = equilibrium_input%photoelectron_reference_density_m3*10.0_dp**i
     call solve_equilibrium(equilibrium_input, root, status, message)

@@ -16,7 +16,7 @@ program test_closures
   real(dp) :: drift, n_source, vth_e, vth_pe, gamma_e, gamma_i, gamma_pe, current_scale, field
   character(len=512) :: message
   do i = 1, 3
-    input = zhao_equilibrium_input(branch=branches(i), sun_elevation_deg=elevations(i))
+    input = zhao_equilibrium_input(branch=branches(i), sun_elevation_deg=elevations(i), electron_drift_mode='zero')
     call solve_equilibrium(input, root, status, message)
     call ok('J=0 root '//branches(i))
     drift = input%solar_wind_speed_mps*sin(elevations(i)*pi/180.0_dp)
@@ -24,8 +24,8 @@ program test_closures
     vth_e = sqrt(2.0_dp*qe*input%electron_temperature_ev/input%electron_mass_kg)
     vth_pe = sqrt(2.0_dp*qe*input%photoelectron_temperature_ev/input%electron_mass_kg)
     ! Direct velocity quadrature is independent of the solver's erfc expression.
-    gamma_e = integrate_electron_flux(root%ambient_electron_density_m3, vth_e, drift, &
-                                      sqrt(-root%minimum_potential_v/input%electron_temperature_ev) - drift/vth_e)
+    gamma_e = integrate_electron_flux(root%ambient_electron_density_m3, vth_e, 0.0_dp, &
+                                      sqrt(-root%minimum_potential_v/input%electron_temperature_ev))
     gamma_i = input%ion_density_m3*drift
     gamma_pe = n_source*vth_pe/(2.0_dp*sqrt(pi))* &
                exp((root%minimum_potential_v - root%surface_potential_v)/input%photoelectron_temperature_ev)
@@ -36,13 +36,14 @@ program test_closures
     call near(root%ion_inward_flux_m2_s, gamma_i, 1e-12_dp*gamma_i, 'ion flux diagnostic')
     call near(root%photoelectron_escape_flux_m2_s, gamma_pe, 1e-12_dp*gamma_pe, 'escaping PE flux diagnostic')
   end do
-  input = zhao_equilibrium_input(branch='A')
+  input = zhao_equilibrium_input(branch='A', electron_drift_mode='zero')
   call solve_profile(input, zhao_profile_options(), profile, status, message)
   call ok('J=0 field reconstruction')
   root = profile%equilibrium
   field = profile%electric_field_v_m(1)
   field_input%branch = 'A'
-  field_input%root_selection = 'minimum_energy'
+  field_input%root_selection = 'max_field_energy'
+  field_input%electron_drift_mps = 0.0_dp
   n_source = input%photoelectron_reference_density_m3*sin(input%sun_elevation_deg*pi/180.0_dp)
   vth_pe = sqrt(2.0_dp*qe*input%photoelectron_temperature_ev/input%electron_mass_kg)
   field_input%electric_field_v_m = field
