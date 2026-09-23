@@ -356,6 +356,7 @@ contains
     residual_v = huge(1.0_dp)
     density_m3 = 0.0_dp
     success = .false.
+
     select case (branch)
     case ('B')
       if (phi_v <= 0.0_dp) return
@@ -368,20 +369,27 @@ contains
     case default
       return
     end select
+
     ion_term = p%n_swi_inf_m3*sqrt( &
         2.0_dp*pi*p%t_swe_ev/p%t_phe_ev*p%m_e_kg/p%m_i_kg &
         )*p%mach
     coefficient = swe_free_current_term(p, 1.0_dp, cutoff)
+
     if (.not. all(ieee_is_finite([source_current_term, ion_term, coefficient])) .or. &
         coefficient <= 0.0_dp) return
+
     density_m3 = (source_current_term + ion_term)/coefficient
+
     if (.not. ieee_is_finite(density_m3) .or. density_m3 <= 0.0_dp) return
+
     if (branch == 'B') then
       call zhao_residuals_type_b(p, [phi_v, density_m3], residual)
     else
       call zhao_residuals_type_c(p, [phi_v, density_m3], residual)
     end if
+
     if (.not. all(ieee_is_finite(residual))) return
+
     residual_v = residual(1)
     success = .true.
   end subroutine evaluate_monotonic_stationary_phi

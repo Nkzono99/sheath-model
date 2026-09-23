@@ -5,8 +5,11 @@
 module sheath_model_numerics
   use sheath_model_constants, only: dp
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+
   implicit none
+
   private
+
   public :: solve_nonlinear_system, try_guarded_newton_solve, residual_norm, NONLINEAR_TOL
 
   real(dp), parameter :: NONLINEAR_TOL = 1.0d-10
@@ -48,6 +51,7 @@ contains
     success = .false.
     x_best = 0.0_dp
     if (size(guesses, 1) /= n .or. size(guesses, 2) == 0) return
+
     x_best = guesses(:, 1)
     best_norm = huge(1.0d0)
     do guess_idx = 1, size(guesses, 2)
@@ -66,7 +70,10 @@ contains
     success = best_norm < NONLINEAR_TOL
   end subroutine solve_nonlinear_system
 
-  subroutine try_newton_solve(n, x0, residual_fn, x_out, final_norm, success)
+  subroutine try_newton_solve( &
+      n, x0, residual_fn, &
+      x_out, final_norm, success &
+      )
     integer, intent(in) :: n
     real(dp), intent(in) :: x0(n)
     procedure(nonlinear_residual) :: residual_fn
@@ -81,8 +88,10 @@ contains
     x = x0
     call residual_fn(x, f)
     fnorm = residual_norm(f)
+
     do iter = 1, NONLINEAR_MAX_ITER
       if (fnorm < NONLINEAR_TOL) exit
+
       call numerical_jacobian(n, x, f, residual_fn, jac)
       call solve_small_linear_system(n, jac, -f, dx, linear_ok)
       if (.not. linear_ok) exit
@@ -155,6 +164,7 @@ contains
         x = 0.0d0
         return
       end if
+
       if (pivot_row /= k) then
         tmp_row = a(k, :)
         a(k, :) = a(pivot_row, :)
@@ -163,6 +173,7 @@ contains
         b(k) = b(pivot_row)
         b(pivot_row) = tmp_val
       end if
+
       do i = k + 1, n
         factor = a(i, k)/a(k, k)
         a(i, k:n) = a(i, k:n) - factor*a(k, k:n)
@@ -187,11 +198,16 @@ contains
       norm2 = huge(1.0d0)
       return
     end if
+
     norm2 = sqrt(sum(f*f))
   end function residual_norm
 
   ! Central differences (one-sided at domain limits) and maximum residual norm.
-  subroutine try_guarded_newton_solve(n, y0, residual_fn, y_out, final_norm, iterations, success)
+  subroutine try_guarded_newton_solve( &
+      n, y0, residual_fn, &
+      y_out, final_norm, iterations, &
+      success &
+      )
     integer, intent(in) :: n
     real(dp), intent(in) :: y0(n)
     procedure(guarded_residual) :: residual_fn
@@ -213,6 +229,7 @@ contains
       success = .false.
       return
     end if
+
     norm = maxval(abs(f(1:n)))
     success = .false.
     do iteration = 0, GUARDED_MAX_ITERATIONS
@@ -221,10 +238,12 @@ contains
         exit
       end if
       if (iteration == GUARDED_MAX_ITERATIONS) exit
+
       call guarded_numerical_jacobian(n, y, f, residual_fn, jac, jacobian_ok)
       if (.not. jacobian_ok) exit
       call solve_guarded_linear_system(n, jac, -f, delta, linear_ok)
       if (.not. linear_ok) exit
+
       step = 1.0_dp
       do backtrack = 1, GUARDED_MAX_BACKTRACKS
         trial = y + step*delta
@@ -242,6 +261,7 @@ contains
       end do
       if (backtrack > GUARDED_MAX_BACKTRACKS) exit
     end do
+
     y_out = y
     final_norm = norm
     iterations = iteration
@@ -268,6 +288,7 @@ contains
       ym(column) = ym(column) - h
       call residual_fn(yp, fp, plus_valid)
       call residual_fn(ym, fm, minus_valid)
+
       if (plus_valid .and. minus_valid) then
         jac(1:n, column) = (fp(1:n) - fm(1:n))/(2.0_dp*h)
       else if (plus_valid) then
@@ -279,6 +300,7 @@ contains
         return
       end if
     end do
+
     success = all(ieee_is_finite(jac(1:n, 1:n)))
   end subroutine guarded_numerical_jacobian
 
@@ -295,12 +317,16 @@ contains
     b = b_in
     x = 0.0_dp
     success = .false.
+
     do k = 1, n
       pivot = k
       do i = k + 1, n
-        if (abs(a(i, k)) > abs(a(pivot, k))) pivot = i
+        if (abs(a(i, k)) > abs(a(pivot, k))) then
+          pivot = i
+        end if
       end do
       if (.not. ieee_is_finite(a(pivot, k)) .or. abs(a(pivot, k)) <= 1.0e-14_dp) return
+
       if (pivot /= k) then
         do j = k, n
           tmp = a(k, j)
@@ -311,6 +337,7 @@ contains
         b(k) = b(pivot)
         b(pivot) = tmp
       end if
+
       pivot_value = a(k, k)
       do i = k + 1, n
         factor = a(i, k)/pivot_value
@@ -318,6 +345,7 @@ contains
         b(i) = b(i) - factor*b(k)
       end do
     end do
+
     do i = n, 1, -1
       x(i) = b(i)
       do j = i + 1, n
@@ -325,6 +353,7 @@ contains
       end do
       x(i) = x(i)/a(i, i)
     end do
+
     success = all(ieee_is_finite(x(1:n)))
   end subroutine solve_guarded_linear_system
 

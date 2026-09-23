@@ -11,7 +11,11 @@ submodule(sheath_model_field) sheath_model_field_physics
 
 contains
 
-  module subroutine encode_field_unknowns(params, branch, phi0_v, phi_m_v, density_m3, y, valid)
+  module subroutine encode_field_unknowns( &
+      params, branch, &
+      phi0_v, phi_m_v, density_m3, &
+      y, valid &
+      )
     type(zhao_params_type), intent(in) :: params
     character(len=1), intent(in) :: branch
     real(dp), intent(in) :: phi0_v, phi_m_v, density_m3
@@ -21,30 +25,39 @@ contains
     y = 0.0_dp
     valid = density_m3 > 0.0_dp .and. params%n_phe_ref_m3 > 0.0_dp .and. params%t_phe_ev > 0.0_dp
     if (.not. valid) return
+
     select case (branch)
     case ('A')
       valid = phi_m_v < min(phi0_v, 0.0_dp)
       if (.not. valid) return
+
       y(1) = log((phi0_v - phi_m_v)/params%t_phe_ev)
       y(2) = log(-phi_m_v/params%t_phe_ev)
       y(3) = log(density_m3/params%n_phe_ref_m3)
     case ('B')
       valid = phi0_v > 0.0_dp
       if (.not. valid) return
+
       y(1) = log(phi0_v/params%t_phe_ev)
       y(2) = log(density_m3/params%n_phe_ref_m3)
     case ('C')
       valid = phi0_v < 0.0_dp
       if (.not. valid) return
+
       y(1) = log(-phi0_v/params%t_phe_ev)
       y(2) = log(density_m3/params%n_phe_ref_m3)
     case default
       valid = .false.
     end select
+
     valid = valid .and. all(ieee_is_finite(y))
   end subroutine encode_field_unknowns
 
-  module subroutine decode_field_unknowns(params, branch, y, phi0_v, phi_m_v, density_m3, valid)
+  module subroutine decode_field_unknowns( &
+      params, branch, y, &
+      phi0_v, phi_m_v, density_m3, &
+      valid &
+      )
     type(zhao_params_type), intent(in) :: params
     character(len=1), intent(in) :: branch
     real(dp), intent(in) :: y(3)
@@ -59,6 +72,7 @@ contains
       valid = .false.
       return
     end if
+
     select case (branch)
     case ('A')
       if (y(2) < -50.0_dp .or. y(2) > log(200.0_dp) .or. &
@@ -88,10 +102,14 @@ contains
     case default
       valid = .false.
     end select
+
     valid = valid .and. all(ieee_is_finite([phi0_v, phi_m_v, density_m3]))
   end subroutine decode_field_unknowns
 
-  module subroutine evaluate_charge_residual(params, branch, target_field_hat, y, residual, valid)
+  module subroutine evaluate_charge_residual( &
+      params, branch, target_field_hat, &
+      y, residual, valid &
+      )
     type(zhao_params_type), intent(in) :: params
     character(len=1), intent(in) :: branch
     real(dp), intent(in) :: target_field_hat, y(3)
@@ -108,6 +126,7 @@ contains
         params, branch, y, phi0_v, phi_m_v, density_m3, valid &
         )
     if (.not. valid) return
+
     phi0_hat = phi0_v/params%t_phe_ev
     phi_m_hat = phi_m_v/params%t_phe_ev
     density_hat = density_m3/params%n_phe_ref_m3
@@ -156,12 +175,15 @@ contains
       valid = .false.
       return
     end select
+
     valid = all(ieee_is_finite(residual))
   end subroutine evaluate_charge_residual
 
   subroutine integrate_field_rho_hat( &
-      params, branch, side, lower_phi_hat, upper_phi_hat, phi0_hat, phi_m_hat, &
-      density_hat, integral, success &
+      params, branch, side, &
+      lower_phi_hat, upper_phi_hat, &
+      phi0_hat, phi_m_hat, density_hat, &
+      integral, success &
       )
     type(zhao_params_type), intent(in) :: params
     character(len=1), intent(in) :: branch
@@ -175,7 +197,10 @@ contains
     success = ieee_is_finite(integral)
   end subroutine integrate_field_rho_hat
 
-  module subroutine validate_field_root_profile(params, root, target_field_hat, status, message)
+  module subroutine validate_field_root_profile( &
+      params, root, target_field_hat, &
+      status, message &
+      )
     type(zhao_params_type), intent(in) :: params
     type(zhao_field_root), intent(inout) :: root
     real(dp), intent(in) :: target_field_hat
@@ -183,10 +208,12 @@ contains
     character(len=*), intent(out) :: message
 
     real(dp) :: boundary_e2
+
     call validate_zhao_profile(params, root%branch, root%phi0_v/params%t_phe_ev, &
         root%phi_m_v/params%t_phe_ev, root%ambient_electron_density_m3/params%n_phe_ref_m3, &
         root%minimum_field_squared_hat, boundary_e2, status, message)
     if (status /= SHEATH_OK) return
+
     if (abs(boundary_e2 - target_field_hat**2) > 1e-7_dp*max(1.0_dp, target_field_hat**2)) then
       status = SHEATH_NUMERICAL_FAILURE
       message = 'The profile does not reproduce the prescribed field.'

@@ -10,7 +10,11 @@ submodule(sheath_model_field) sheath_model_field_roots
 
 contains
 
-  module subroutine solve_field_root(model, params, interface_field_v_m, root, status, message, diagnostics, initial_guesses)
+  module subroutine solve_field_root( &
+      model, params, interface_field_v_m, &
+      root, status, message, &
+      diagnostics, initial_guesses &
+      )
     character(len=*), intent(in) :: model
     type(zhao_params_type), intent(in) :: params
     real(dp), intent(in) :: interface_field_v_m
@@ -21,9 +25,11 @@ contains
     type(zhao_field_result), intent(in), optional :: initial_guesses(:)
 
     type(zhao_field_root), allocatable :: roots(:)
+
     root = zhao_field_root()
     call find_field_roots(model, params, interface_field_v_m, roots, status, message, diagnostics, initial_guesses)
     if (status /= SHEATH_OK) return
+
     if (size(roots) == 1) then
       root = roots(1)
     else
@@ -32,7 +38,11 @@ contains
     end if
   end subroutine solve_field_root
 
-  module subroutine find_field_roots(model, params, interface_field_v_m, roots, status, message, diagnostics, initial_guesses)
+  module subroutine find_field_roots( &
+      model, params, interface_field_v_m, &
+      roots, status, message, &
+      diagnostics, initial_guesses &
+      )
     character(len=*), intent(in) :: model
     type(zhao_params_type), intent(in) :: params
     real(dp), intent(in) :: interface_field_v_m
@@ -55,12 +65,17 @@ contains
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Invalid field normalization.'
     if (.not. ieee_is_finite(target) .or. field_scale <= 0.0_dp) return
+
     call field_branch_order(model, target, order, branch_count, status, message)
     if (status /= SHEATH_OK) return
+
     capacity = default_field_starts
-    if (present(initial_guesses)) capacity = capacity + size(initial_guesses)
+    if (present(initial_guesses)) then
+      capacity = capacity + size(initial_guesses)
+    end if
     allocate (found(3*capacity + 1))
     n = 0
+
     ! The flat state is one candidate, never a shortcut around the non-flat search.
     if (interface_field_v_m == 0.0_dp .and. (model == 'auto' .or. model == 'b')) then
       density = (2.0_dp*params%n_swi_inf_m3 - params%n_phe0_m3)/(1.0_dp + erf(params%u))
@@ -74,6 +89,7 @@ contains
         found(n) = flat
       end if
     end if
+
     do i = 1, branch_count
       call collect_field_branch_roots(params, order(i), target, candidates, count, diagnostics, initial_guesses)
       do j = 1, count
@@ -91,6 +107,7 @@ contains
         found(n) = candidates(j)
       end do
     end do
+
     do i = 1, n
       branch_index = index('ABC', found(i)%branch)
       diagnostics%roots_found(branch_index) = diagnostics%roots_found(branch_index) + 1
@@ -107,10 +124,13 @@ contains
       end if
       return
     end if
+
     roots = found(:n)
     status = SHEATH_OK
     message = ''
-    if (unresolved) message = 'Admissible candidates found; some starts or profile evaluations remain unresolved.'
+    if (unresolved) then
+      message = 'Admissible candidates found; some starts or profile evaluations remain unresolved.'
+    end if
   end subroutine find_field_roots
 
   subroutine field_branch_order(model, target_field_hat, order, count, status, message)
@@ -125,6 +145,7 @@ contains
     count = 0
     status = SHEATH_OK
     message = ''
+
     select case (trim(model))
     case ('a')
       order(1) = 'A'
@@ -148,8 +169,11 @@ contains
     end select
   end subroutine field_branch_order
 
-  subroutine collect_field_branch_roots(params, branch, target_field_hat, unique_roots, unique_count, &
-      diagnostics, initial_guesses)
+  subroutine collect_field_branch_roots( &
+      params, branch, target_field_hat, &
+      unique_roots, unique_count, &
+      diagnostics, initial_guesses &
+      )
     type(zhao_params_type), intent(in) :: params
     character(len=1), intent(in) :: branch
     real(dp), intent(in) :: target_field_hat
@@ -177,9 +201,12 @@ contains
     end if
 
     capacity = default_field_starts
-    if (present(initial_guesses)) capacity = capacity + size(initial_guesses)
+    if (present(initial_guesses)) then
+      capacity = capacity + size(initial_guesses)
+    end if
     allocate (guesses(3, capacity), unique_roots(capacity))
     guess_count = 0
+
     ! Nearby physical solutions supplement the independent starts; they do not
     ! select a preferred root or change the specified plasma/boundary conditions.
     if (present(initial_guesses)) then
@@ -193,17 +220,24 @@ contains
         guesses(:, guess_count) = encoded
       end do
     end if
+
     call make_field_branch_guesses(params, branch, target_field_hat, defaults, default_count)
     guesses(:, guess_count + 1:guess_count + default_count) = defaults(:, :default_count)
     guess_count = guess_count + default_count
+
     do guess_index = 1, guess_count
       diagnostics%starts(k) = diagnostics%starts(k) + 1
-      call newton_field_branch(params, branch, target_field_hat, guesses(:, guess_index), &
-          y, norm, iterations, success)
+      call newton_field_branch( &
+          params, branch, target_field_hat, &
+          guesses(:, guess_index), y, &
+          norm, iterations, &
+          success &
+          )
       if (.not. success) then
         diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1
         cycle
       end if
+
       candidate_root = zhao_field_root()
       candidate_root%branch = branch
       call decode_field_unknowns(params, branch, y, candidate_root%phi0_v, candidate_root%phi_m_v, &
@@ -212,6 +246,7 @@ contains
         diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1
         cycle
       end if
+
       if (target_field_hat == 0.0_dp .and. branch == 'A' .and. candidate_root%phi0_v < 0.0_dp .and. &
           candidate_root%phi0_v - candidate_root%phi_m_v < root_cluster_tolerance*params%t_phe_ev) then
         candidate_root%branch = 'C'
@@ -254,6 +289,7 @@ contains
     equivalent = .false.
     if (first%branch /= second%branch) return
     if (min(first%ambient_electron_density_m3, second%ambient_electron_density_m3) <= 0.0_dp) return
+
     first_phi0_hat = first%phi0_v/params%t_phe_ev
     second_phi0_hat = second%phi0_v/params%t_phe_ev
     first_phi_m_hat = first%phi_m_v/params%t_phe_ev
@@ -263,6 +299,7 @@ contains
         first_phi0_hat, second_phi0_hat, first_phi_m_hat, second_phi_m_hat, &
         log_density_ratio &
         ]))) return
+
     equivalent = abs(first_phi0_hat - second_phi0_hat) <= &
         root_cluster_tolerance*max(1.0_dp, abs(first_phi0_hat), abs(second_phi0_hat)) .and. &
         abs(first_phi_m_hat - second_phi_m_hat) <= &

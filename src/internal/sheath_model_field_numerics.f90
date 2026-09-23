@@ -30,6 +30,7 @@ contains
     source_shift = log(max(1.0_dp, 0.5_dp*source_ratio))
     field_voltage = max(1e-10_dp, min(100.0_dp, abs(target_field_hat)*sqrt(params%tau)))
     ion_limit = 0.5_dp*params%tau*params%mach**2
+
     select case (branch)
     case ('A')
       do i = 1, size(gaps)
@@ -49,7 +50,9 @@ contains
         end if
       end do
     end select
+
   contains
+
     subroutine add_guess(surface_hat, minimum_hat)
       real(dp), intent(in) :: surface_hat, minimum_hat
       real(dp) :: surface, minimum, coefficient, photo_density, density, encoded(3)
@@ -71,19 +74,26 @@ contains
       ! Initialize N_e from neutrality where possible; leave potential adjustment
       ! to Newton if a trial voltage would require a nonpositive normalization.
       density = max(0.1_dp, min(1e5_dp, (1.0_dp - photo_density)/max(coefficient, 1e-12_dp)))
+
       call encode_field_unknowns(params, branch, surface*params%t_phe_ev, minimum*params%t_phe_ev, &
           density*params%n_swi_inf_m3, encoded, valid)
+
       if (.not. valid) return
+
       do j = 1, count
         if (maxval(abs(encoded - guesses(:, j))) < 1e-10_dp) return
       end do
+
       count = count + 1
       guesses(:, count) = encoded
     end subroutine add_guess
   end subroutine make_field_branch_guesses
 
   module subroutine newton_field_branch( &
-      params, branch, target_field_hat, y0, y_out, final_norm, iterations, success &
+      params, branch, target_field_hat, &
+      y0, y_out, &
+      final_norm, iterations, &
+      success &
       )
     type(zhao_params_type), intent(in) :: params
     character(len=1), intent(in) :: branch
@@ -97,7 +107,9 @@ contains
     n = merge(3, 2, branch == 'A')
     y_out = y0
     call try_guarded_newton_solve(n, y0(1:n), field_residual, y_out(1:n), final_norm, iterations, success)
+
   contains
+
     subroutine field_residual(y, f, valid)
       real(dp), intent(in) :: y(:)
       real(dp), intent(out) :: f(:)

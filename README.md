@@ -154,7 +154,9 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-対象は `src/`・`test/`・`example/` の `.f90`、インデントは2文字、行長の目安は132文字です。
+対象は `src/`・`test/`・`example/` の `.f90`、字下げは2スペース、行長の目安は132文字です。
+宣言と実行文、処理のまとまりを空行で区切り、長い引数列は役割ごとに改行します。
+条件付き代入は `if ... then` のブロックで書き、短い `return`・`exit`・`cycle` のガードは1行にまとめます。
 整形で変更されたファイルは確認して再度 stage し、コミットします。
 `build/` の生成物と `outputs/` の検証用 snapshot は対象外です。
 
