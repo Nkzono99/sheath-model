@@ -1,4 +1,5 @@
-! SPDX-License-Identifier: MIT
+! SPDX-License-Identifier: MIT AND Apache-2.0
+! Zero-drift evaluation adapted from BEACH 3897f38; see NOTICE.
 ! Incoming electrons are defined at infinity and transported by energy conservation.
 module sheath_model_orbits
   use sheath_model_constants, only: dp, pi
@@ -31,6 +32,15 @@ contains
     real(dp) :: cutoff, upper, amax, amin
 
     cutoff = sqrt(max(0.0_dp, psi - barrier))
+    if (u == 0.0_dp) then
+      free = 0.5_dp*exp(barrier)*erfc_scaled(cutoff)
+      if (psi <= 0.0_dp) then
+        reflected = exp(psi)*erf(cutoff)
+      else
+        reflected = max(0.0_dp, erfc_scaled(sqrt(psi)) - 2.0_dp*free)
+      end if
+      return
+    end if
     amin = max(0.0_dp, u - 10.0_dp)
     amax = max(sqrt(max(0.0_dp, -barrier)), u, 0.0_dp) + 10.0_dp
     upper = sqrt(max(0.0_dp, amax*amax + psi))

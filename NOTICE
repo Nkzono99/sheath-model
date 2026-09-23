@@ -22,3 +22,14 @@ search to negative surface potentials and nonflat zero-field endpoints, and
 label field-energy ranking explicitly as a heuristic.
 
 Other files retain the MIT license in LICENSE unless marked otherwise.
+
+The zero-drift orbit evaluation in src/internal/sheath_model_orbits.f90 and
+sheath_model/_orbits.py incorporates the Apache-2.0 BEACH correction 3897f38.
+The spectral endpoint and upstream-admissibility work follows BEACH's
+feat/spectrum-robust-roots (through 7584aac): cancellation-resistant bin moments,
+the two-sided Type-B source coefficient, and a density coordinate restricted
+to adjacent floating-point potentials. These ideas are applied to static sheath
+physics here; BEACH's Backward Euler update and state management are not included.
+test/fixtures/beach_batch154_spectrum.csv and test/test_spectral_endpoint.f90
+adapt BEACH's batch-154 regression at 7584aac, including its independent
+high-precision static reference values, under Apache-2.0.

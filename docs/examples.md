@@ -135,6 +135,7 @@ fpm build
 fpm test
 fpm run --example compare_closures
 fpm run --example field_sweep
+fpm run --example potential_scan
 fpm run --example equilibrium_profile
 fpm install --prefix ./install
 ```
@@ -142,7 +143,9 @@ fpm install --prefix ./install
 [compare_closures.f90](../example/compare_closures.f90) は J=0 と E_H 指定の比較、
 [field_sweep.f90](../example/field_sweep.f90) は近隣解を初期値に加える電場掃引、
 [equilibrium_profile.f90](../example/equilibrium_profile.f90) は J=0 の高さ・電位・電場・電荷密度の CSV 出力です。
-後者は標準のプロファイル設定を使うため、README の図とは遠方の打ち切りが異なります。
+[potential_scan.f90](../example/potential_scan.f90) は任意 bin 光電子源の Type B を電位で走査し、
+符号付き E²・電場・N_e・電流・物理解判定を CSV で出力します。使い方は [静的評価 API](spectral-api.md) を参照してください。
+`equilibrium_profile` は標準のプロファイル設定を使うため、README の図とは遠方の打ち切りが異なります。
 
 E_H 指定の `solve_prescribed_field` は、検出した物理解が一つの場合に結果を返し、
 複数ある場合は `SHEATH_AMBIGUOUS_SOLUTION` を返します。安定性による選択は行いません。

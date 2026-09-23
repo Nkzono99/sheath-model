@@ -2,10 +2,11 @@
 module sheath_model_equilibrium
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use sheath_model_constants, only: dp, i32, pi, eps0, qe, electron_mass, proton_mass, lower_ascii
+  use sheath_model_photoelectrons, only: maxwellian_photoelectrons
   use sheath_model_admissibility, only: validate_zhao_profile
   use sheath_model_core, only: zhao_params_type, try_solve_zhao_unknowns, &
       evaluate_zhao_density_hat, zhao_residuals_type_a, zhao_residuals_type_b, zhao_residuals_type_c, &
-      swe_free_current_term
+      evaluate_zhao_fluxes
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NUMERICAL_FAILURE, SHEATH_NO_PHYSICAL_SOLUTION
 
   implicit none
@@ -109,10 +110,11 @@ contains
 
     p%alpha_rad = input%sun_elevation_deg*pi/180.0_dp
     p%n_swi_inf_m3 = input%ion_density_m3
-    p%n_phe_ref_m3 = input%photoelectron_reference_density_m3
-    p%n_phe0_m3 = p%n_phe_ref_m3*sin(p%alpha_rad)
+    p%density_scale_m3 = input%photoelectron_reference_density_m3
+    p%emission_density_scale_m3 = p%density_scale_m3*sin(p%alpha_rad)
     p%t_swe_ev = input%electron_temperature_ev
-    p%t_phe_ev = input%photoelectron_temperature_ev
+    p%potential_scale_v = input%photoelectron_temperature_ev
+    p%photoelectrons = maxwellian_photoelectrons(p%emission_density_scale_m3, input%photoelectron_temperature_ev)
     p%m_i_kg = input%ion_mass_kg
     p%m_e_kg = input%electron_mass_kg
 
@@ -132,17 +134,17 @@ contains
     if (p%v_d_ion_mps <= 0.0_dp) return
 
     p%v_swe_th_mps = sqrt(2.0_dp*qe*p%t_swe_ev/p%m_e_kg)
-    p%v_phe_th_mps = sqrt(2.0_dp*qe*p%t_phe_ev/p%m_e_kg)
+    p%velocity_scale_mps = sqrt(2.0_dp*qe*p%potential_scale_v/p%m_e_kg)
     p%cs_mps = sqrt(qe*p%t_swe_ev/p%m_i_kg)
     p%mach = p%v_d_ion_mps/p%cs_mps
     p%u = p%v_d_electron_mps/p%v_swe_th_mps
-    p%tau = p%t_swe_ev/p%t_phe_ev
-    p%lambda_d_phe_ref_m = sqrt(eps0*p%t_phe_ev/(p%n_phe_ref_m3*qe))
+    p%tau = p%t_swe_ev/p%potential_scale_v
+    p%length_scale_m = sqrt(eps0*p%potential_scale_v/(p%density_scale_m3*qe))
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Parameter normalization is non-finite or underflowed.'
-    if (.not. all(ieee_is_finite([p%v_swe_th_mps, p%v_phe_th_mps, p%cs_mps, p%mach, p%u, p%tau, &
-        p%lambda_d_phe_ref_m]))) return
-    if (min(p%v_swe_th_mps, p%v_phe_th_mps, p%cs_mps, p%mach, p%tau, p%lambda_d_phe_ref_m) <= 0.0_dp) return
+    if (.not. all(ieee_is_finite([p%v_swe_th_mps, p%velocity_scale_mps, p%cs_mps, p%mach, p%u, p%tau, &
+        p%length_scale_m]))) return
+    if (min(p%v_swe_th_mps, p%velocity_scale_mps, p%cs_mps, p%mach, p%tau, p%length_scale_m) <= 0.0_dp) return
 
     status = SHEATH_OK
     message = ''
@@ -160,7 +162,7 @@ contains
     type(zhao_params_type) :: p
     type(zhao_equilibrium_result) :: trial
     real(dp) :: phi0, phim, density, residual(3)
-    real(dp) :: cutoff, flux_scale, minimum_e2, boundary_e2
+    real(dp) :: outward, returning, minimum_e2, boundary_e2
     character(len=1) :: order(3)
     integer :: attempt, count
     logical :: nonphysical, unresolved_search
@@ -191,7 +193,7 @@ contains
       if (branch == 'B') then
         phim = 0.0_dp
       end if
-      call validate_zhao_profile(p, branch, phi0/p%t_phe_ev, phim/p%t_phe_ev, density/p%n_phe_ref_m3, &
+      call validate_zhao_profile(p, branch, phi0/p%potential_scale_v, phim/p%potential_scale_v, density/p%density_scale_m3, &
           minimum_e2, boundary_e2, status, message)
       if (status == SHEATH_OK) exit
       if (status == SHEATH_NO_PHYSICAL_SOLUTION) then
@@ -224,14 +226,11 @@ contains
       call zhao_residuals_type_c(p, [phi0, density], residual(1:2))
     end select
 
-    residual(1:2) = residual(1:2)/p%n_phe_ref_m3
-    trial = zhao_equilibrium_result(.false., branch, phi0, phim, density, p%lambda_d_phe_ref_m, &
+    residual(1:2) = residual(1:2)/p%density_scale_m3
+    trial = zhao_equilibrium_result(.false., branch, phi0, phim, density, p%length_scale_m, &
         maxval(abs(residual)))
-    cutoff = sqrt(max(0.0_dp, -phim/p%t_swe_ev)) - p%u
-    flux_scale = p%v_phe_th_mps/(2.0_dp*sqrt(pi))
-    trial%electron_inward_flux_m2_s = flux_scale*swe_free_current_term(p, density, cutoff)
-    trial%ion_inward_flux_m2_s = p%n_swi_inf_m3*p%v_d_ion_mps
-    trial%photoelectron_escape_flux_m2_s = flux_scale*p%n_phe0_m3*exp((phim - phi0)/p%t_phe_ev)
+    call evaluate_zhao_fluxes(p, phi0, phim, density, trial%electron_inward_flux_m2_s, &
+        trial%ion_inward_flux_m2_s, outward, trial%photoelectron_escape_flux_m2_s, returning)
     trial%net_current_a_m2 = qe*(trial%electron_inward_flux_m2_s - trial%ion_inward_flux_m2_s - &
         trial%photoelectron_escape_flux_m2_s)
     status = SHEATH_NUMERICAL_FAILURE
@@ -301,10 +300,10 @@ contains
     if (potential_v < solution%minimum_potential_v .or. potential_v > upper) return
     if (1.0_dp - 2.0_dp*potential_v/(p%t_swe_ev*p%mach**2) <= 0.0_dp) return
 
-    call evaluate_zhao_density_hat(p, solution%branch, region, potential_v/p%t_phe_ev, &
-        solution%surface_potential_v/p%t_phe_ev, solution%minimum_potential_v/p%t_phe_ev, &
-        solution%ambient_electron_density_m3/p%n_phe_ref_m3, d(1), d(2), d(3), d(4), d(5))
-    d = d*p%n_phe_ref_m3
+    call evaluate_zhao_density_hat(p, solution%branch, region, potential_v/p%potential_scale_v, &
+        solution%surface_potential_v/p%potential_scale_v, solution%minimum_potential_v/p%potential_scale_v, &
+        solution%ambient_electron_density_m3/p%density_scale_m3, d(1), d(2), d(3), d(4), d(5))
+    d = d*p%density_scale_m3
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Density evaluation is non-finite or negative.'
     if (.not. all(ieee_is_finite(d)) .or. any(d < 0.0_dp)) return
@@ -347,9 +346,9 @@ contains
     n = options%points_per_segment
     allocate (phi(n), distance(n), rho(n), e2(n))
     allocate (z(2*n), v(2*n), e(2*n))
-    phi0 = root%surface_potential_v/p%t_phe_ev
-    phim = root%minimum_potential_v/p%t_phe_ev
-    cutoff = min(options%potential_cutoff_v/p%t_phe_ev, 0.5_dp*abs(phim))
+    phi0 = root%surface_potential_v/p%potential_scale_v
+    phim = root%minimum_potential_v/p%potential_scale_v
+    cutoff = min(options%potential_cutoff_v/p%potential_scale_v, 0.5_dp*abs(phim))
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Profile first integral is non-finite or does not support a real electric field.'
     total = 0
@@ -399,7 +398,7 @@ contains
       end do
     else
       ! Integrate from the exact upstream potential, then omit that infinite endpoint.
-      cutoff = min(options%potential_cutoff_v/p%t_phe_ev, 0.5_dp*abs(phi0))
+      cutoff = min(options%potential_cutoff_v/p%potential_scale_v, 0.5_dp*abs(phi0))
       do i = 1, n
         t = real(i - 1, dp)/real(n - 1, dp)
         phi(i) = phi0*(1.0_dp - t)**2
@@ -424,9 +423,14 @@ contains
         total = i
       end do
     end if
-    z(1:total) = z(1:total)*p%lambda_d_phe_ref_m
-    v(1:total) = v(1:total)*p%t_phe_ev
-    e(1:total) = e(1:total)*p%t_phe_ev/p%lambda_d_phe_ref_m
+    z(1:total) = z(1:total)*p%length_scale_m
+    v(1:total) = v(1:total)*p%potential_scale_v
+    ! Preserve exact physical endpoints through the normalized-coordinate round trip.
+    v(1) = root%surface_potential_v
+    if (root%branch == 'A') then
+      v(n) = root%minimum_potential_v
+    end if
+    e(1:total) = e(1:total)*p%potential_scale_v/p%length_scale_m
     if (.not. all(ieee_is_finite(z(1:total))) .or. .not. all(ieee_is_finite(e(1:total)))) return
 
     kept = count(z(1:total) <= options%max_distance_m)
@@ -438,7 +442,7 @@ contains
 
     trial%equilibrium = root
     if (root%branch == 'A') then
-      trial%turning_height_m = turn*p%lambda_d_phe_ref_m
+      trial%turning_height_m = turn*p%length_scale_m
     end if
     trial%z_m = z(1:kept)
     trial%potential_v = v(1:kept)
@@ -467,7 +471,7 @@ contains
       real(dp), intent(out) :: values(5)
 
       call evaluate_zhao_density_hat(p, root%branch, region, phi_hat, phi0, phim, &
-          root%ambient_electron_density_m3/p%n_phe_ref_m3, &
+          root%ambient_electron_density_m3/p%density_scale_m3, &
           values(1), values(2), values(3), values(4), values(5))
     end subroutine density_at
 

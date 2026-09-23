@@ -23,7 +23,7 @@ program test_prescribed_field
   input%branch = 'A'
   input%electron_drift_mps = 0.0_dp
   input%electric_field_v_m = 1.4187346568707933e-11_dp/eps0
-  input%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
+  input%photoelectrons = maxwellian_photoelectrons(5.5425625842204072e7_dp, 2.2_dp)
   call solve_prescribed_field(input, output, status, message)
   call ok('Type A reference')
 
@@ -53,7 +53,7 @@ program test_prescribed_field
   call solve_prescribed_field(input, output, status, message)
   call check(status == SHEATH_NO_PHYSICAL_SOLUTION, 'explicit branch does not fall back')
 
-  input = zhao_field_input(photoelectron_source_density_m3=-1.0_dp)
+  input = zhao_field_input(photoelectrons=maxwellian_photoelectrons(-1.0_dp, 2.2_dp))
   call solve_prescribed_field(input, output, status, message)
   call check(status == SHEATH_INVALID_ARGUMENT, 'negative source density')
   input = zhao_field_input(electric_field_v_m=ieee_value(0.0_dp, ieee_quiet_nan))
@@ -62,7 +62,7 @@ program test_prescribed_field
   input = zhao_field_input(ion_mass_kg=-1.0_dp)
   call solve_prescribed_field(input, output, status, message)
   call check(status == SHEATH_INVALID_ARGUMENT, 'negative mass')
-  input = zhao_field_input(photoelectron_temperature_ev=0.0_dp)
+  input = zhao_field_input(photoelectrons=maxwellian_photoelectrons(0.0_dp, 0.0_dp))
   call solve_prescribed_field(input, output, status, message)
   call check(status == SHEATH_INVALID_ARGUMENT, 'zero temperature')
   input = zhao_field_input(branch='invalid')

@@ -47,7 +47,7 @@ program test_closures
   n_source = input%photoelectron_reference_density_m3*sin(input%sun_elevation_deg*pi/180.0_dp)
   vth_pe = sqrt(2.0_dp*qe*input%photoelectron_temperature_ev/input%electron_mass_kg)
   field_input%electric_field_v_m = field
-  field_input%photoelectron_source_density_m3 = n_source
+  field_input%photoelectrons = maxwellian_photoelectrons(n_source, 2.2_dp)
   call solve_prescribed_field(field_input, response, status, message)
   call ok('E_H set to the J=0 solution field')
   call near(response%boundary_potential_v, root%surface_potential_v, 3e-5_dp, 'common solution potential')

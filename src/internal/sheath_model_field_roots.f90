@@ -60,7 +60,7 @@ contains
     logical :: duplicate, unresolved
 
     diagnostics = zhao_field_search_diagnostics()
-    field_scale = params%t_phe_ev/params%lambda_d_phe_ref_m
+    field_scale = params%potential_scale_v/params%length_scale_m
     target = interface_field_v_m/field_scale
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Invalid field normalization.'
@@ -78,7 +78,7 @@ contains
 
     ! The flat state is one candidate, never a shortcut around the non-flat search.
     if (interface_field_v_m == 0.0_dp .and. (model == 'auto' .or. model == 'b')) then
-      density = (2.0_dp*params%n_swi_inf_m3 - params%n_phe0_m3)/(1.0_dp + erf(params%u))
+      density = neutral_electron_density(params, 'B', 0.0_dp, 0.0_dp)
       if (density > 0.0_dp .and. ieee_is_finite(density)) then
         flat = zhao_field_root()
         flat%branch = 'B'
@@ -98,7 +98,7 @@ contains
           duplicate = field_roots_equivalent(params, candidates(j), found(k))
           if (interface_field_v_m == 0.0_dp .and. found(k)%phi0_v == 0.0_dp) then
             duplicate = duplicate .or. max(abs(candidates(j)%phi0_v), abs(candidates(j)%phi_m_v)) &
-                < 1e-4_dp*params%t_phe_ev
+                < 1e-4_dp*params%potential_scale_v
           end if
           if (duplicate) exit
         end do
@@ -248,7 +248,7 @@ contains
       end if
 
       if (target_field_hat == 0.0_dp .and. branch == 'A' .and. candidate_root%phi0_v < 0.0_dp .and. &
-          candidate_root%phi0_v - candidate_root%phi_m_v < root_cluster_tolerance*params%t_phe_ev) then
+          candidate_root%phi0_v - candidate_root%phi_m_v < root_cluster_tolerance*params%potential_scale_v) then
         candidate_root%branch = 'C'
         candidate_root%phi0_v = candidate_root%phi_m_v
       end if
@@ -290,10 +290,10 @@ contains
     if (first%branch /= second%branch) return
     if (min(first%ambient_electron_density_m3, second%ambient_electron_density_m3) <= 0.0_dp) return
 
-    first_phi0_hat = first%phi0_v/params%t_phe_ev
-    second_phi0_hat = second%phi0_v/params%t_phe_ev
-    first_phi_m_hat = first%phi_m_v/params%t_phe_ev
-    second_phi_m_hat = second%phi_m_v/params%t_phe_ev
+    first_phi0_hat = first%phi0_v/params%potential_scale_v
+    second_phi0_hat = second%phi0_v/params%potential_scale_v
+    first_phi_m_hat = first%phi_m_v/params%potential_scale_v
+    second_phi_m_hat = second%phi_m_v/params%potential_scale_v
     log_density_ratio = log(first%ambient_electron_density_m3/second%ambient_electron_density_m3)
     if (.not. all(ieee_is_finite([ &
         first_phi0_hat, second_phi0_hat, first_phi_m_hat, second_phi_m_hat, &

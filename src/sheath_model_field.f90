@@ -3,10 +3,11 @@
 ! Modified: standalone physical input/result; removed application coupling interfaces.
 module sheath_model_field
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use sheath_model_constants, only: dp, i32, eps0, pi, qe, electron_mass, proton_mass, lower_ascii
+  use sheath_model_constants, only: dp, i32, qe, lower_ascii
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NO_PHYSICAL_SOLUTION, SHEATH_NUMERICAL_FAILURE, &
       SHEATH_AMBIGUOUS_SOLUTION
-  use sheath_model_core, only: zhao_params_type, swe_free_current_term
+  use sheath_model_core, only: zhao_params_type, neutral_electron_density, evaluate_zhao_fluxes
+  use sheath_model_state, only: zhao_plasma_input, prepare_plasma_params
 
   implicit none
 
@@ -30,18 +31,10 @@ module sheath_model_field
   end type zhao_field_search_diagnostics
 
   !> Plasma inputs and prescribed normal field E_H [V/m]; branch selects A/B/C/auto.
-  !! Other quantities use SI units except temperatures [eV]; field is positive outward, drift positive inward.
-  type :: zhao_field_input
+  !! Other quantities use SI units except temperatures/normal energies [eV]; field is positive outward, drift positive inward.
+  type, extends(zhao_plasma_input) :: zhao_field_input
     character(len=9) :: branch = 'auto'
     real(dp) :: electric_field_v_m = 0.0_dp
-    real(dp) :: ion_density_m3 = 8.7e6_dp
-    real(dp) :: photoelectron_source_density_m3 = 0.0_dp
-    real(dp) :: electron_temperature_ev = 12.0_dp
-    real(dp) :: photoelectron_temperature_ev = 2.2_dp
-    real(dp) :: electron_drift_mps = 4.0529988897111727e5_dp
-    real(dp) :: ion_drift_mps = 4.0529988897111727e5_dp
-    real(dp) :: ion_mass_kg = proton_mass
-    real(dp) :: electron_mass_kg = electron_mass
   end type zhao_field_input
 
   !> Accepted prescribed-field root with potentials, densities, particle fluxes and current in SI units.
@@ -55,6 +48,8 @@ module sheath_model_field
     real(dp) :: ambient_electron_density_m3 = 0.0_dp
     real(dp) :: electron_inward_flux_m2_s = 0.0_dp
     real(dp) :: ion_inward_flux_m2_s = 0.0_dp
+    real(dp) :: photoelectron_outward_flux_m2_s = 0.0_dp
+    real(dp) :: photoelectron_return_flux_m2_s = 0.0_dp
     real(dp) :: photoelectron_escape_flux_m2_s = 0.0_dp
     real(dp) :: net_current_a_m2 = 0.0_dp
     real(dp) :: residual_norm = huge(1.0_dp)
@@ -280,7 +275,6 @@ contains
     character(len=*), intent(out) :: message
 
     type(zhao_field_result) :: trial
-    real(dp) :: cutoff, flux_scale
 
     output = zhao_field_result()
     status = SHEATH_OK
@@ -294,15 +288,13 @@ contains
     end if
     trial%ambient_electron_density_m3 = root%ambient_electron_density_m3
 
-    cutoff = sqrt(max(0.0_dp, -trial%minimum_potential_v/params%t_swe_ev)) - params%u
-    flux_scale = params%v_phe_th_mps/(2.0_dp*sqrt(pi))
-    trial%electron_inward_flux_m2_s = flux_scale*swe_free_current_term(params, root%ambient_electron_density_m3, cutoff)
-    trial%ion_inward_flux_m2_s = params%n_swi_inf_m3*params%v_d_ion_mps
-    trial%photoelectron_escape_flux_m2_s = params%n_phe0_m3*flux_scale* &
-        exp((trial%minimum_potential_v - root%phi0_v)/params%t_phe_ev)
+    call evaluate_zhao_fluxes(params, root%phi0_v, trial%minimum_potential_v, root%ambient_electron_density_m3, &
+        trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, trial%photoelectron_outward_flux_m2_s, &
+        trial%photoelectron_escape_flux_m2_s, trial%photoelectron_return_flux_m2_s)
     trial%net_current_a_m2 = qe*(trial%electron_inward_flux_m2_s - trial%ion_inward_flux_m2_s - &
         trial%photoelectron_escape_flux_m2_s)
     if (.not. all(ieee_is_finite([trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, &
+        trial%photoelectron_outward_flux_m2_s, trial%photoelectron_return_flux_m2_s, &
         trial%photoelectron_escape_flux_m2_s, trial%net_current_a_m2]))) then
       status = SHEATH_NUMERICAL_FAILURE
       message = 'Prescribed-field flux or current evaluation is non-finite.'
@@ -332,43 +324,9 @@ contains
       return
     end select
 
-    message = 'Prescribed-field inputs must be finite.'
-    if (.not. all(ieee_is_finite([input%electric_field_v_m, input%ion_density_m3, &
-        input%photoelectron_source_density_m3, input%electron_temperature_ev, input%photoelectron_temperature_ev, &
-        input%electron_drift_mps, input%ion_drift_mps, input%ion_mass_kg, input%electron_mass_kg]))) return
-
-    message = 'Ion density, temperatures, ion speed, and masses must be positive; photoelectron density nonnegative.'
-    if (min(input%ion_density_m3, input%electron_temperature_ev, input%photoelectron_temperature_ev, &
-        input%ion_drift_mps, input%ion_mass_kg, input%electron_mass_kg) <= 0.0_dp) return
-    if (input%photoelectron_source_density_m3 < 0.0_dp) return
-
-    params%n_swi_inf_m3 = input%ion_density_m3
-    params%n_phe_ref_m3 = input%ion_density_m3
-    params%n_phe0_m3 = input%photoelectron_source_density_m3
-    params%t_swe_ev = input%electron_temperature_ev
-    params%t_phe_ev = input%photoelectron_temperature_ev
-    params%v_d_electron_mps = input%electron_drift_mps
-    params%v_d_ion_mps = input%ion_drift_mps
-    params%m_i_kg = input%ion_mass_kg
-    params%m_e_kg = input%electron_mass_kg
-
-    params%v_swe_th_mps = sqrt(2.0_dp*qe*params%t_swe_ev/params%m_e_kg)
-    params%v_phe_th_mps = sqrt(2.0_dp*qe*params%t_phe_ev/params%m_e_kg)
-    params%cs_mps = sqrt(qe*params%t_swe_ev/params%m_i_kg)
-    params%mach = params%v_d_ion_mps/params%cs_mps
-    params%u = params%v_d_electron_mps/params%v_swe_th_mps
-    params%tau = params%t_swe_ev/params%t_phe_ev
-    params%lambda_d_phe_ref_m = sqrt(eps0*params%t_phe_ev/(params%n_phe_ref_m3*qe))
-
-    status = SHEATH_NUMERICAL_FAILURE
-    message = 'Prescribed-field normalization produced non-finite or underflowed parameters.'
-    if (.not. all(ieee_is_finite([params%v_swe_th_mps, params%v_phe_th_mps, params%cs_mps, &
-        params%mach, params%u, params%tau, params%lambda_d_phe_ref_m]))) return
-    if (min(params%v_swe_th_mps, params%v_phe_th_mps, params%cs_mps, params%mach, &
-        params%tau, params%lambda_d_phe_ref_m) <= 0.0_dp) return
-
-    status = SHEATH_OK
-    message = ''
+    message = 'The prescribed field must be finite.'
+    if (.not. ieee_is_finite(input%electric_field_v_m)) return
+    call prepare_plasma_params(input, params, status, message)
   end subroutine prepare_field_params
 
 end module sheath_model_field

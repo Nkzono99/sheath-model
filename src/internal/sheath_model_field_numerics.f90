@@ -22,11 +22,11 @@ contains
     real(dp) :: source_ratio, source_shift, field_voltage, ion_limit, phi0, phim
     integer :: i
 
-    ! Every start scales with T_pe and n_i. Additional starts respond to the
+    ! Every start scales with potential_scale_v and n_i. Additional starts respond to the
     ! emission strength and dimensionless prescribed field, never to SI constants.
     guesses = 0.0_dp
     count = 0
-    source_ratio = params%n_phe0_m3/params%n_swi_inf_m3
+    source_ratio = params%emission_density_scale_m3/params%n_swi_inf_m3
     source_shift = log(max(1.0_dp, 0.5_dp*source_ratio))
     field_voltage = max(1e-10_dp, min(100.0_dp, abs(target_field_hat)*sqrt(params%tau)))
     ion_limit = 0.5_dp*params%tau*params%mach**2
@@ -55,7 +55,7 @@ contains
 
     subroutine add_guess(surface_hat, minimum_hat)
       real(dp), intent(in) :: surface_hat, minimum_hat
-      real(dp) :: surface, minimum, coefficient, photo_density, density, encoded(3)
+      real(dp) :: surface, minimum, density, encoded(3)
       logical :: valid
       integer :: j
       surface = min(surface_hat, 0.8_dp*ion_limit, 180.0_dp)
@@ -68,14 +68,12 @@ contains
       else
         minimum = 0.0_dp
       end if
-      coefficient = 0.5_dp*(1.0_dp + 2.0_dp*erf(params%u) + &
-          erf(sqrt(max(0.0_dp, -minimum/params%tau)) - params%u))
-      photo_density = 0.5_dp*source_ratio*exp(-surface)*erfc(sqrt(max(0.0_dp, -minimum)))
-      ! Initialize N_e from neutrality where possible; leave potential adjustment
-      ! to Newton if a trial voltage would require a nonpositive normalization.
-      density = max(0.1_dp, min(1e5_dp, (1.0_dp - photo_density)/max(coefficient, 1e-12_dp)))
+      density = neutral_electron_density(params, branch, surface*params%potential_scale_v, &
+          minimum*params%potential_scale_v)/params%n_swi_inf_m3
+      if (.not. ieee_is_finite(density)) return
+      density = max(0.1_dp, min(1e5_dp, density))
 
-      call encode_field_unknowns(params, branch, surface*params%t_phe_ev, minimum*params%t_phe_ev, &
+      call encode_field_unknowns(params, branch, surface*params%potential_scale_v, minimum*params%potential_scale_v, &
           density*params%n_swi_inf_m3, encoded, valid)
 
       if (.not. valid) return

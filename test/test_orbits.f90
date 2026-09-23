@@ -24,11 +24,12 @@ program test_orbits
     if (reflected /= 0.0_dp) error stop 'spurious B reflection'
   end do
   p%n_swi_inf_m3 = 8.7e6_dp
-  p%n_phe_ref_m3 = 64e6_dp
-  p%n_phe0_m3 = 32e6_dp
-  p%t_phe_ev = 2.2_dp
+  p%density_scale_m3 = 64e6_dp
+  p%emission_density_scale_m3 = 32e6_dp
+  p%potential_scale_v = 2.2_dp
+  p%photoelectrons = maxwellian_photoelectrons(32e6_dp, 2.2_dp)
   p%t_swe_ev = 12.0_dp
-  p%tau = p%t_swe_ev/p%t_phe_ev
+  p%tau = p%t_swe_ev/p%potential_scale_v
   p%mach = 5.0_dp
   p%u = 0.0_dp
   integral_zero = type_a_e2_sum_at_infinity(p, 3.0_dp, -1.0_dp, 8.0e6_dp)
@@ -70,11 +71,13 @@ program test_orbits
     print *, trim(message)
     error stop 'accepted A profile'
   end if
+  if (profile%potential_v(1) /= profile%equilibrium%surface_potential_v) error stop 'exact surface endpoint'
+  if (minval(profile%potential_v) /= profile%equilibrium%minimum_potential_v) error stop 'exact turning endpoint'
   input = zhao_equilibrium_input(branch='C', sun_elevation_deg=1.0_dp, electron_drift_mode='zero')
   call solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_NO_PHYSICAL_SOLUTION .or. root%valid) error stop 'unphysical C accepted'
   field_input = zhao_field_input()
-  field_input%photoelectron_source_density_m3 = 64e6_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
+  field_input%photoelectrons = maxwellian_photoelectrons(64e6_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp), 2.2_dp)
   field_input%electron_drift_mps = 0.0_dp
   field_input%ion_drift_mps = 468e3_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
   do i = -1, 1

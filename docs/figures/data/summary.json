@@ -16,8 +16,8 @@
       "surface_potential_v": 3.8401890937,
       "minimum_potential_v": -0.33165814284,
       "surface_field_v_m": 1.6237638182,
-      "current_a_m2": 2.4251697097e-21,
-      "last_saved_height_m": 110.41136263
+      "current_a_m2": 2.2687071478e-21,
+      "last_saved_height_m": 110.41136239
     },
     {
       "type": "B",
@@ -25,7 +25,7 @@
       "surface_potential_v": 1.6159581059,
       "minimum_potential_v": 0.0,
       "surface_field_v_m": 0.60892440141,
-      "current_a_m2": -2.3469384287e-22,
+      "current_a_m2": -1.5646256191e-22,
       "last_saved_height_m": 13.003509121
     },
     {
@@ -61,12 +61,12 @@
         129
       ],
       "displayed_category_counts": {
-        "A": 1406,
-        "B": 98,
-        "A + B": 1980,
+        "A": 1428,
+        "B": 59,
+        "A + B": 1955,
         "C": 16550,
         "B + C": 44,
-        "No root resolved": 13075
+        "No root resolved": 13117
       },
       "cells_with_unresolved_search": 26721,
       "maximum_candidates_reported": 3

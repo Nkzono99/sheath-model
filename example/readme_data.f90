@@ -162,7 +162,7 @@ contains
     character(len=512) :: message
     input = zhao_field_input(electric_field_v_m=field, electron_drift_mps=0.0_dp)
     input%ion_drift_mps = 468.0e3_dp*sin(alpha_field*pi/180.0_dp)
-    input%photoelectron_source_density_m3 = input%ion_density_m3*source_ratio*sin(alpha_field*pi/180.0_dp)
+    input%photoelectrons = maxwellian_photoelectrons(input%ion_density_m3*source_ratio*sin(alpha_field*pi/180.0_dp), 2.2_dp)
     call solve_prescribed_field_candidates(input, roots, status, message, diagnostics)
     found = 0
     unknown = 0

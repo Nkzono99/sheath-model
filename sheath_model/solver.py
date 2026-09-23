@@ -347,6 +347,14 @@ class ZhaoSheathSolver:
         }
 
     def _validate_profile_root(self, branch, phi0, phim, density):
+        if branch == "B" and phi0 > 0:
+            ambient_edge = (
+                density * self.p.n_phe_ref_m3 * math.exp(-self.p.u**2)
+                / math.sqrt(math.pi * self.p.T_swe_eV)
+            )
+            photo_edge = self.p.n_phe0_m3 * math.exp(-phi0) / math.sqrt(math.pi * self.p.T_phe_eV)
+            if ambient_edge - photo_edge > 128 * np.finfo(float).eps * max(abs(ambient_edge), abs(photo_edge)):
+                raise RuntimeError("Type B has negative field squared arbitrarily near upstream infinity")
         if branch in ("A", "C") and self.p.u > 0:
             raise RuntimeError("algebraic root has no semi-infinite profile: inward drift with reflected slow "
                                "electrons makes E^2 negative near neutral infinity; use electron_drift_mode='zero' "

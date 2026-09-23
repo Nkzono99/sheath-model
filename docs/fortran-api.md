@@ -5,7 +5,7 @@
 
 `use sheath_model` が公開窓口です。`src/internal/` は実装詳細です。
 実数は `real(dp)`（real64）、ステータスは `integer(i32)`（int32）を使います。
-単位は SI、温度のみ eV。上流の `phi(infinity)=0 V` を電位基準とし、+z は境界から上流へ向かいます。
+単位は SI、温度と光電子の法線運動エネルギーは eV。上流の `phi(infinity)=0 V` を電位基準とし、+z は境界から上流へ向かいます。
 電場は `E=-dphi/dz`、粒子数流束は指定方向への正の大きさです。
 
 ## モデルと呼び出し方
@@ -14,8 +14,10 @@
 | --- | --- | --- | --- |
 | `solve_equilibrium(input, result, status, message)` | J=0 | `zhao_equilibrium_input` | `zhao_equilibrium_result` |
 | `solve_prescribed_field(input, result, status, message)` | E_H 指定 | `zhao_field_input` | `zhao_field_result` |
+| `evaluate_sheath_state(input, branch, phi_H, result, status, message, ...)` | 電位指定の静的評価 | `zhao_plasma_input` | `zhao_state_result` |
 
-両方とも平面・一次元・半無限領域の定常シースです。冷たいイオンビーム、ドリフト Maxwell 電子、Maxwell 光電子源を仮定します。
+いずれも平面・一次元・半無限領域のシースです。冷たいイオンビーム、ドリフト Maxwell 背景電子を仮定します。
+J=0 は Maxwell 光電子源、E_H 指定と静的評価は Maxwell または任意 bin 光電子源を使います。
 光電子の分布形は指定する境界条件です。計測された任意分布を単一 Maxwell に近似する処理は含みません。
 J=0 は上流準中性・零電流条件から解き、A は極小から上流の電場条件も満たします。
 両モデルとも、代数根に加えてイオン到達条件・実数電場の接続・上流漸近条件を検査します。
@@ -26,7 +28,9 @@ B/C は `E_H²=(2/epsilon_0)*integral(phi_H..0, rho dphi)` です。
 A の上側領域では `E(infinity)=0` を満たす極小電位を求めます。
 
 型に値を設定して関数を呼ぶだけで、初期化や前回解の管理は不要です。結果は毎回上書きされます。
-成功は `status == SHEATH_OK` で判定し、失敗時は `result%valid=.false.` になります。
+求解の成功は `status == SHEATH_OK` で判定し、失敗時は `result%valid=.false.` になります。
+静的評価では評価成功と物理解の成立を分け、後者を `result%admissible` で返します。
+光電子源の指定・静的評価の入出力・丸め精度の扱いは [スペクトルと静的評価 API](spectral-api.md) を参照してください。
 
 ```fortran
 use sheath_model
@@ -46,7 +50,7 @@ if (status /= SHEATH_OK) stop 1
 field_input%branch = 'A'
 field_input%electron_drift_mps = 0.0_dp
 field_input%electric_field_v_m = 1.62_dp
-field_input%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
+field_input%photoelectrons = maxwellian_photoelectrons(5.5425625842204072e7_dp, 2.2_dp)
 call solve_prescribed_field(field_input, field_solution, status, message)
 if (status /= SHEATH_OK) stop 1
 ```
@@ -73,19 +77,21 @@ if (status /= SHEATH_OK) stop 1
 
 ## E_H 指定の入力: `zhao_field_input`
 
+`zhao_plasma_input` を継承し、`branch` と `electric_field_v_m` を追加した型です。
+
 | フィールド | 既定値 | 意味・制約 |
 | --- | --- | --- |
 | `branch` | `'auto'` | A/B/C/auto。大文字小文字は不問 |
 | `electric_field_v_m` | 0 | 指定する法線電場 E_H [V/m]。+z 向きが正 |
 | `ion_density_m3` | 8.7e6 | 上流イオン密度、正 |
-| `photoelectron_source_density_m3` | 0 | 境界での光電子源規格化密度 n_phe0、非負 |
+| `photoelectrons` | 零放出 Maxwell 源、2.2 eV | `photoelectron_source` 型。解析 Maxwell または任意 bin 源 |
 | `electron_temperature_ev` | 12 | 上流電子温度、正 |
-| `photoelectron_temperature_ev` | 2.2 | 光電子温度、正 |
 | `electron_drift_mps` | 405299.88897111727 | 内向きを正とする電子の法線ドリフト |
 | `ion_drift_mps` | 405299.88897111727 | 内向きのイオンビーム速度、正 |
 | `ion_mass_kg`, `electron_mass_kg` | J=0 と同じ | 正の質量 |
 
-すべての数値は有限値が必要です。光電子源ゼロでも温度は正を指定します。
+すべての数値は有限値が必要です。Maxwell 源は零放出でも温度を正にします。
+任意 bin 源は昇順のエネルギー境界 [eV] と各 bin の積分流束 [m⁻² s⁻¹] を指定します。
 ドリフトは法線方向へ射影済みの値を渡します。絶対高度 H は平面モデルの方程式に入りません。
 光電子源密度は半 Maxwell 分布の規格化密度で、総放出流束との関係は
 `Gamma_pe,emit=n_phe0*sqrt(2 e T_pe/m_e)/(2 sqrt(pi))` です。局所の光電子全密度とは異なります。
@@ -128,7 +134,8 @@ if (status == SHEATH_OK) call move_alloc(candidates, previous)
 出力配列と初期推定配列には**別の変数**を使ってください。出力配列は呼び出し時に未確保へ戻ります。
 完全な掃引例は [field_sweep.f90](../example/field_sweep.f90) です。
 
-標準の初期値は、電位を光電子温度、密度を上流イオン密度で規格化して作ります。
+標準の初期値は、電位を Maxwell 源では光電子温度、bin 源では背景電子温度に近い 2 の冪、密度を上流イオン密度で規格化して作ります。
+bin 源で使う値は数値的な尺度であり、スペクトルを Maxwell に近似するものではありません。
 放出強度、指定電場、イオンの到達限界も使い、重複を除いた最大16個の初期値を各枝で試します。
 電子密度の初期値は可能な範囲で上流準中性条件に合わせます。
 `initial_guesses(:)` は前回得た `zhao_field_result` の配列で、標準の探索に追加されます。
@@ -180,8 +187,11 @@ J=0 モデルの電流は数値誤差の範囲でゼロ、E_H 指定モデルで
 
 `zhao_equilibrium_result` は追加で `surface_potential_v`（表面電位）と `debye_length_m`（光電子参照密度・温度による Debye 長）を持ちます。
 `zhao_field_result` は追加で `boundary_potential_v`（指定電場の位置の電位）、`nonlinear_iterations`（反復数）、
-`minimum_field_squared_hat`（確認した経路上の最小無次元電場二乗）を持ちます。
-E_H 側は密度を n_i、電位を T_pe、長さを `sqrt(epsilon_0 T_pe/(n_i e))` で規格化します。
+`minimum_field_squared_hat`（確認した経路上の最小無次元電場二乗）、
+`photoelectron_outward_flux_m2_s` と `photoelectron_return_flux_m2_s`（放出・戻り数流束）を持ちます。
+E_H 側は密度を n_i、電位を V_ref、長さを `sqrt(epsilon_0 V_ref/(n_i e))` で規格化します。
+V_ref は Maxwell 源では T_pe、bin 源では T_e 以下で最大の 2 の冪です。
+後者は内部単位への往復で bin 端をずらさないための選択です。
 残差・最小電場二乗は未計算時に `huge()` です。
 数値ゼロと失敗を区別するため、必ず `status` を確認してください。
 

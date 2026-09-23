@@ -4,7 +4,7 @@ program test_field_search
   implicit none
   type(zhao_field_input) :: base, input
   type(zhao_field_search_diagnostics) :: diagnostics, reference_diagnostics
-  type(zhao_field_result) :: output
+  type(zhao_field_result) :: output, difficult_seed(1)
   type(zhao_field_result), allocatable :: reference(:), scaled(:), previous(:), cold(:), warm(:)
   real(dp), parameter :: density_scales(*) = [1e-8_dp, 1.0_dp, 1e8_dp]
   real(dp), parameter :: temperature_scales(*) = [0.1_dp, 1.0_dp, 10.0_dp]
@@ -16,7 +16,7 @@ program test_field_search
   character(len=512) :: message
 
   base%electron_drift_mps = 0.0_dp
-  base%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
+  base%photoelectrons = maxwellian_photoelectrons(5.5425625842204072e7_dp, 2.2_dp)
   base%electric_field_v_m = 1.6_dp
   call solve_prescribed_field_candidates(base, reference, status, message, reference_diagnostics)
   call check(status == SHEATH_OK, 'reference candidates')
@@ -32,9 +32,8 @@ program test_field_search
       temperature_scale = temperature_scales(j)
       input = base
       input%ion_density_m3 = base%ion_density_m3*density_scale
-      input%photoelectron_source_density_m3 = base%photoelectron_source_density_m3*density_scale
+      input%photoelectrons = maxwellian_photoelectrons(5.5425625842204072e7_dp*density_scale, 2.2_dp*temperature_scale)
       input%electron_temperature_ev = base%electron_temperature_ev*temperature_scale
-      input%photoelectron_temperature_ev = base%photoelectron_temperature_ev*temperature_scale
       input%ion_drift_mps = base%ion_drift_mps*sqrt(temperature_scale)
       input%electric_field_v_m = base%electric_field_v_m*sqrt(density_scale*temperature_scale)
       call solve_prescribed_field_candidates(input, scaled, status, message, diagnostics)
@@ -66,8 +65,8 @@ program test_field_search
   do i = 1, size(small_fields)
     input = zhao_field_input(electron_drift_mps=0.0_dp)
     input%ion_drift_mps = 468e3_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
-    input%photoelectron_source_density_m3 = input%ion_density_m3*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)* &
-        0.5_dp*32.0_dp**(real(small_field_ratio_indices(i), dp)/128.0_dp)
+    input%photoelectrons = maxwellian_photoelectrons(input%ion_density_m3*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)* &
+        0.5_dp*32.0_dp**(real(small_field_ratio_indices(i), dp)/128.0_dp), 2.2_dp)
     input%electric_field_v_m = small_fields(i) - 0.015625_dp
     call solve_prescribed_field_candidates(input, previous, status, message)
     call check(status == SHEATH_OK, 'nearby small-field reference')
@@ -77,23 +76,27 @@ program test_field_search
     call check(any(warm%branch == 'A' .and. warm%minimum_potential_v < -1e-3_dp), 'shallow A branch recovered')
   end do
 
-  ! This A branch has a converged but inadmissible root AND failed starts.
-  ! A rejected root must not hide the unresolved portion of the same search.
+  ! First establish a fully rejected search, then add a difficult start.
+  ! A rejected root must not hide unresolved attempts in the same search.
   input = zhao_field_input(branch='A', electron_drift_mps=0.0_dp)
   input%ion_drift_mps = 468e3_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
-  input%photoelectron_source_density_m3 = &
-      9.82784429_dp*input%ion_density_m3*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
+  input%photoelectrons = maxwellian_photoelectrons( &
+      9.82784429_dp*input%ion_density_m3*sin(20.0_dp*acos(-1.0_dp)/180.0_dp), 2.2_dp)
   input%electric_field_v_m = 1.09375_dp
-  call solve_prescribed_field_candidates(input, scaled, status, message, diagnostics)
-  call check(status == SHEATH_NUMERICAL_FAILURE, 'mixed rejection and nonconvergence is unresolved')
-  call check(diagnostics%rejected(1) > 0 .and. diagnostics%unconverged(1) > 0, 'mixed search evidence retained')
-  call check(.not. allocated(scaled), 'no accepted candidates in mixed search')
-
   input%branch = 'B'
   call solve_prescribed_field_candidates(input, scaled, status, message, diagnostics)
   call check(status == SHEATH_NO_PHYSICAL_SOLUTION, 'fully resolved physical rejection stays distinct')
   call check(diagnostics%rejected(2) > 0 .and. diagnostics%unconverged(2) == 0, 'all-rejected search evidence')
   call check(.not. allocated(scaled), 'rejected candidates are not returned')
+
+  difficult_seed(1)%valid = .true.
+  difficult_seed(1)%branch = 'B'
+  difficult_seed(1)%boundary_potential_v = 1e6_dp
+  difficult_seed(1)%ambient_electron_density_m3 = input%ion_density_m3
+  call solve_prescribed_field_candidates(input, scaled, status, message, diagnostics, difficult_seed)
+  call check(status == SHEATH_NUMERICAL_FAILURE, 'mixed rejection and nonconvergence is unresolved')
+  call check(diagnostics%rejected(2) > 0 .and. diagnostics%unconverged(2) > 0, 'mixed search evidence retained')
+  call check(.not. allocated(scaled), 'no accepted candidates in mixed search')
 
   ! Deterministic analytical exclusions need no numerical starts.
   input = base

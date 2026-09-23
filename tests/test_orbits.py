@@ -47,7 +47,7 @@ class OrbitTests(unittest.TestCase):
                 self.assertAlmostEqual(local_flux, upstream_flux, delta=2e-11)
 
     def test_zero_drift_positive_potential_cutoff(self):
-        for psi in (0.0, 1e-8, 0.25, 3.0, 30.0):
+        for psi in (0.0, 1e-8, 0.25, 3.0, 30.0, 1e4):
             free, bounced = electron_density(psi, 0.0, 0.0)
             self.assertAlmostEqual(float(free), 0.5 * erfcx(math.sqrt(psi)), delta=2e-9)
             self.assertEqual(float(bounced), 0.0)
@@ -157,6 +157,17 @@ class OrbitTests(unittest.TestCase):
 
         field_squared = 2 * quad(rho, -0.01, 0, epsabs=1e-13)[0]
         self.assertLess(field_squared, -1e-7)
+
+    def test_b_upstream_obstruction_despite_positive_boundary_integral(self):
+        p = ZhaoParams(alpha_deg=60.0, electron_drift_mode="zero")
+        solver = ZhaoSheathSolver(p)
+        phi0 = 10.0 / p.T_phe_eV
+        # At infinity B has one incoming half-Maxwellian and escaping PE.
+        density = 2 * (p.n_swi_inf_m3 - 0.5 * p.n_phe0_m3 * math.exp(-phi0)) / p.n_phe_ref_m3
+        field_squared = 2 * solver._integrate_rho("B", "monotonic", phi0, 0.0, phi0, 0.0, density)
+        self.assertGreater(field_squared, 0.0)
+        with self.assertRaisesRegex(RuntimeError, "arbitrarily near upstream infinity"):
+            solver._validate_profile_root("B", phi0, 0.0, density)
 
 
 if __name__ == "__main__":

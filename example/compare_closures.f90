@@ -19,8 +19,7 @@ program compare_closures
   field_input%branch = 'A'
   field_input%electron_drift_mps = 0.0_dp
   field_input%electric_field_v_m = 1.62_dp
-  field_input%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
-  field_input%photoelectron_temperature_ev = 2.2_dp
+  field_input%photoelectrons = maxwellian_photoelectrons(5.5425625842204072e7_dp, 2.2_dp)
   call solve_prescribed_field(field_input, response, status, message)
   call require_success()
   print *, 'Prescribed E_H: E_H [V/m], phi_H [V], J_z [A/m^2]'

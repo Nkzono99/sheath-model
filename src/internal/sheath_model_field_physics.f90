@@ -23,7 +23,7 @@ contains
     logical, intent(out) :: valid
 
     y = 0.0_dp
-    valid = density_m3 > 0.0_dp .and. params%n_phe_ref_m3 > 0.0_dp .and. params%t_phe_ev > 0.0_dp
+    valid = density_m3 > 0.0_dp .and. params%density_scale_m3 > 0.0_dp .and. params%potential_scale_v > 0.0_dp
     if (.not. valid) return
 
     select case (branch)
@@ -31,21 +31,21 @@ contains
       valid = phi_m_v < min(phi0_v, 0.0_dp)
       if (.not. valid) return
 
-      y(1) = log((phi0_v - phi_m_v)/params%t_phe_ev)
-      y(2) = log(-phi_m_v/params%t_phe_ev)
-      y(3) = log(density_m3/params%n_phe_ref_m3)
+      y(1) = log((phi0_v - phi_m_v)/params%potential_scale_v)
+      y(2) = log(-phi_m_v/params%potential_scale_v)
+      y(3) = log(density_m3/params%density_scale_m3)
     case ('B')
       valid = phi0_v > 0.0_dp
       if (.not. valid) return
 
-      y(1) = log(phi0_v/params%t_phe_ev)
-      y(2) = log(density_m3/params%n_phe_ref_m3)
+      y(1) = log(phi0_v/params%potential_scale_v)
+      y(2) = log(density_m3/params%density_scale_m3)
     case ('C')
       valid = phi0_v < 0.0_dp
       if (.not. valid) return
 
-      y(1) = log(-phi0_v/params%t_phe_ev)
-      y(2) = log(density_m3/params%n_phe_ref_m3)
+      y(1) = log(-phi0_v/params%potential_scale_v)
+      y(2) = log(density_m3/params%density_scale_m3)
     case default
       valid = .false.
     end select
@@ -80,25 +80,25 @@ contains
         valid = .false.
         return
       end if
-      phi_m_v = -params%t_phe_ev*exp(y(2))
-      phi0_v = phi_m_v + params%t_phe_ev*exp(y(1))
-      density_m3 = params%n_phe_ref_m3*exp(y(3))
+      phi_m_v = -params%potential_scale_v*exp(y(2))
+      phi0_v = phi_m_v + params%potential_scale_v*exp(y(1))
+      density_m3 = params%density_scale_m3*exp(y(3))
     case ('B')
       if (y(2) < -30.0_dp .or. y(2) > log(1.0e6_dp)) then
         valid = .false.
         return
       end if
-      phi0_v = params%t_phe_ev*exp(y(1))
-      phi_m_v = phi0_v
-      density_m3 = params%n_phe_ref_m3*exp(y(2))
+      phi0_v = params%potential_scale_v*exp(y(1))
+      phi_m_v = 0.0_dp
+      density_m3 = params%density_scale_m3*exp(y(2))
     case ('C')
       if (y(2) < -30.0_dp .or. y(2) > log(1.0e6_dp)) then
         valid = .false.
         return
       end if
-      phi0_v = -params%t_phe_ev*exp(y(1))
+      phi0_v = -params%potential_scale_v*exp(y(1))
       phi_m_v = phi0_v
-      density_m3 = params%n_phe_ref_m3*exp(y(2))
+      density_m3 = params%density_scale_m3*exp(y(2))
     case default
       valid = .false.
     end select
@@ -127,9 +127,9 @@ contains
         )
     if (.not. valid) return
 
-    phi0_hat = phi0_v/params%t_phe_ev
-    phi_m_hat = phi_m_v/params%t_phe_ev
-    density_hat = density_m3/params%n_phe_ref_m3
+    phi0_hat = phi0_v/params%potential_scale_v
+    phi_m_hat = phi_m_v/params%potential_scale_v
+    density_hat = density_m3/params%density_scale_m3
     if (.not. ion_accessible(params, max(phi0_hat, 0.0_dp))) then
       valid = .false.
       return
@@ -149,9 +149,12 @@ contains
       end if
       field_squared = -2.0_dp*integral
       field_residual_scale = max(1.0_dp, target_field_hat*target_field_hat)
-      residual(1) = raw(1)/params%n_phe_ref_m3
+      residual(1) = raw(1)/params%density_scale_m3
       residual(2) = (field_squared - target_field_hat*target_field_hat)/field_residual_scale
       residual(3) = raw(3)
+      if (params%photoelectrons%is_binned()) then
+        residual(3) = raw(3)/(-phi_m_hat)**1.5_dp
+      end if
     case ('B', 'C')
       x2 = [phi0_v, density_m3]
       if (branch == 'B') then
@@ -169,7 +172,7 @@ contains
       end if
       field_squared = 2.0_dp*integral
       field_residual_scale = max(1.0_dp, target_field_hat*target_field_hat)
-      residual(1) = raw(1)/params%n_phe_ref_m3
+      residual(1) = raw(1)/params%density_scale_m3
       residual(2) = (field_squared - target_field_hat*target_field_hat)/field_residual_scale
     case default
       valid = .false.
@@ -209,8 +212,8 @@ contains
 
     real(dp) :: boundary_e2
 
-    call validate_zhao_profile(params, root%branch, root%phi0_v/params%t_phe_ev, &
-        root%phi_m_v/params%t_phe_ev, root%ambient_electron_density_m3/params%n_phe_ref_m3, &
+    call validate_zhao_profile(params, root%branch, root%phi0_v/params%potential_scale_v, &
+        root%phi_m_v/params%potential_scale_v, root%ambient_electron_density_m3/params%density_scale_m3, &
         root%minimum_field_squared_hat, boundary_e2, status, message)
     if (status /= SHEATH_OK) return
 
