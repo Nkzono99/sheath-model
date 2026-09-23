@@ -1,0 +1,86 @@
+{
+  "status": "PASS",
+  "controlled": {
+    "status": "PASS",
+    "quadrature_max_scaled_conservation_or_mapping_error": 4.440892098500626e-16,
+    "monotonic_retardation_cases": 20,
+    "shifted_truncated_cases": 32,
+    "source_temperature_ev": 2.2,
+    "source_flux_m2_s": 28086790000000.0,
+    "sign_checks": [
+      {
+        "case": "acceleration_small",
+        "cutoff_ev": 0.5,
+        "crossover_barrier_ev": 2.700000000000001,
+        "minimum_escape_error_over_H_flux": -0.16904961009870803,
+        "maximum_escape_error_over_H_flux": 0.027532783114122276
+      },
+      {
+        "case": "acceleration_large",
+        "cutoff_ev": 4.0,
+        "crossover_barrier_ev": 6.200000000000002,
+        "minimum_escape_error_over_H_flux": -0.4754220740600015,
+        "maximum_escape_error_over_H_flux": 0.12265361897291804
+      },
+      {
+        "case": "inner_minimum",
+        "cutoff_ev": 2.0,
+        "crossover_barrier_ev": 4.2,
+        "minimum_escape_error_over_H_flux": -0.3788548423845485,
+        "maximum_escape_error_over_H_flux": 0.08254500058650976
+      },
+      {
+        "case": "inner_minimum_negative_potentials",
+        "cutoff_ev": 2.0,
+        "crossover_barrier_ev": 4.200000000000001,
+        "minimum_escape_error_over_H_flux": -0.37885484238454836,
+        "maximum_escape_error_over_H_flux": 0.08254500058650985
+      }
+    ],
+    "conclusions": [
+      "Static planar monotonic retardation preserves a same-temperature half-Maxwellian.",
+      "Escaping flux is invariant under the location of H on the same monotonic potential segment.",
+      "Acceleration or an earlier inner potential minimum can create a positive H energy cutoff.",
+      "Moment matching underestimates escape below the mean-energy barrier and overestimates it above, for these shifted exponentials."
+    ]
+  },
+  "archive": {
+    "status": "PASS",
+    "archive_root": "/LARGE0/gr20001/b36291/Github/BEACH/outputs/sheath_pe_spectrum_implementation_20260922/raw",
+    "samples": 9,
+    "inputs": [
+      {
+        "path": "/LARGE0/gr20001/b36291/Github/BEACH/outputs/sheath_pe_spectrum_implementation_20260922/raw/moments_128/matching_plane_spectrum_history.csv",
+        "sha256": "2df28d326b681492cfb00a36fb639d8b3f3c00d802b7c217d8e5940d87cfd24e"
+      },
+      {
+        "path": "/LARGE0/gr20001/b36291/Github/BEACH/outputs/sheath_pe_spectrum_implementation_20260922/raw/moments_128/matching_plane_history.csv",
+        "sha256": "4337686459e7ff34742ab2dc4db832ea19b44a7ef35b5b44602e987da7f2fa0e"
+      },
+      {
+        "path": "/LARGE0/gr20001/b36291/Github/BEACH/outputs/sheath_pe_spectrum_implementation_20260922/raw/spectrum_128/matching_plane_spectrum_history.csv",
+        "sha256": "06d6520466b23fbd683dca03fe4001030d2b8b008fe505ce7c9963f2f0cec983"
+      },
+      {
+        "path": "/LARGE0/gr20001/b36291/Github/BEACH/outputs/sheath_pe_spectrum_implementation_20260922/raw/spectrum_128/matching_plane_history.csv",
+        "sha256": "d164c307ab7b395b1f353d7776ccd3104310c8629d9694b7b35d4b48a40b910d"
+      },
+      {
+        "path": "/LARGE0/gr20001/b36291/Github/BEACH/outputs/sheath_pe_spectrum_implementation_20260922/raw/spectrum_32/matching_plane_spectrum_history.csv",
+        "sha256": "1f4cda08f996b0686ca674567412e2bb3df6115cc80909c175feccc927848c25"
+      },
+      {
+        "path": "/LARGE0/gr20001/b36291/Github/BEACH/outputs/sheath_pe_spectrum_implementation_20260922/raw/spectrum_32/matching_plane_history.csv",
+        "sha256": "fa967fece6b3bc3cab172b53cb76706937d72098216e8c00ab04370e5849aaea"
+      }
+    ],
+    "maximum_absolute_same_input_moment_vs_histogram_escape_fraction": 0.1820692876648904,
+    "limitations": [
+      "Exact refers to the archived piecewise-constant energy-bin representation, not an exact kinetic solution.",
+      "Each comparison uses one saved distribution and the same recorded barrier; it does not compare separate evolved runs as if their states were identical.",
+      "Observed trajectory escape additionally uses local crossing potentials and individual energies, so it is not identified with an exact mean-plane-bin escape.",
+      "The small pilot has Monte Carlo sampling and bin uncertainty. Differences do not establish systematic transport distortion or statistical significance.",
+      "These calculations do not reproduce the historical no-root event or solve any modified outer boundary model."
+    ]
+  }
+}

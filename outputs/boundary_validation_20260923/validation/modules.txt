@@ -1,0 +1,4 @@
+Currently Loaded Modulefiles:
+ 1) slurm/2022            4) openmpi/4.1.5_nvhpc-23.9(default)  
+ 2) SysG/2022             5) PrgEnvNvidia/2023(default)         
+ 3) nvhpc/23.9(default)  

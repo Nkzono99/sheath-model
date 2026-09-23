@@ -18,7 +18,6 @@ program compare_closures
 
   field_input%branch = 'A'
   field_input%electron_drift_mps = 0.0_dp
-  field_input%root_selection = 'max_field_energy'
   field_input%electric_field_v_m = 1.62_dp
   field_input%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
   field_input%photoelectron_temperature_ev = 2.2_dp

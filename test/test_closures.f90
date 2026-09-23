@@ -11,6 +11,7 @@ program test_closures
   type(zhao_profile_result) :: profile
   type(zhao_field_input) :: field_input
   type(zhao_field_result) :: response
+  type(zhao_field_result), allocatable :: responses(:)
   integer(i32) :: status
   integer :: i
   real(dp) :: drift, n_source, vth_e, vth_pe, gamma_e, gamma_i, gamma_pe, current_scale, field
@@ -42,7 +43,6 @@ program test_closures
   root = profile%equilibrium
   field = profile%electric_field_v_m(1)
   field_input%branch = 'A'
-  field_input%root_selection = 'max_field_energy'
   field_input%electron_drift_mps = 0.0_dp
   n_source = input%photoelectron_reference_density_m3*sin(input%sun_elevation_deg*pi/180.0_dp)
   vth_pe = sqrt(2.0_dp*qe*input%photoelectron_temperature_ev/input%electron_mass_kg)
@@ -55,17 +55,20 @@ program test_closures
   call near(response%net_current_a_m2, 0.0_dp, 1e-10_dp, 'common solution current')
   ! A different field must be preserved, without restoring J=0.
   field_input%electric_field_v_m = 1.01_dp*field
-  call solve_prescribed_field(field_input, response, status, message)
+  call solve_prescribed_field_candidates(field_input, responses, status, message)
   call ok('nonzero-current E_H model')
-  call near(integrate_type_a_field(response%boundary_potential_v, response%minimum_potential_v, &
+  do i = 1, size(responses)
+    response = responses(i)
+    call near(integrate_type_a_field(response%boundary_potential_v, response%minimum_potential_v, &
                         response%ambient_electron_density_m3), field_input%electric_field_v_m, 2e-6_dp, 'independent Sagdeev field')
-  gamma_pe = n_source*vth_pe/(2.0_dp*sqrt(pi))* &
+    gamma_pe = n_source*vth_pe/(2.0_dp*sqrt(pi))* &
              exp((response%minimum_potential_v - response%boundary_potential_v)/input%photoelectron_temperature_ev)
-  current_scale = qe*response%electron_inward_flux_m2_s
-  call near(response%photoelectron_escape_flux_m2_s, gamma_pe, 1e-12_dp*gamma_pe, 'E_H escaping flux')
-  call near(response%net_current_a_m2, qe*(response%electron_inward_flux_m2_s - &
+    current_scale = qe*response%electron_inward_flux_m2_s
+    call near(response%photoelectron_escape_flux_m2_s, gamma_pe, 1e-12_dp*gamma_pe, 'E_H escaping flux')
+    call near(response%net_current_a_m2, qe*(response%electron_inward_flux_m2_s - &
                                         response%ion_inward_flux_m2_s - gamma_pe), 1e-12_dp*current_scale, 'E_H current diagnostic')
-  call check(abs(response%net_current_a_m2) > 1e-3_dp*current_scale, 'E_H model does not impose J=0')
+    call check(abs(response%net_current_a_m2) > 1e-3_dp*current_scale, 'E_H model does not impose J=0')
+  end do
   print *, 'J=0 and E_H closure checks passed.'
 contains
   real(dp) function integrate_electron_flux(density, vth, velocity, lower) result(flux)

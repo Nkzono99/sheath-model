@@ -16,6 +16,7 @@
 | `solve_prescribed_field(input, result, status, message)` | E_H 指定 | `zhao_field_input` | `zhao_field_result` |
 
 両方とも平面・一次元・半無限領域の定常シースです。冷たいイオンビーム、ドリフト Maxwell 電子、Maxwell 光電子源を仮定します。
+光電子の分布形は指定する境界条件です。計測された任意分布を単一 Maxwell に近似する処理は含みません。
 J=0 は上流準中性・零電流条件から解き、A は極小から上流の電場条件も満たします。
 両モデルとも、代数根に加えてイオン到達条件・実数電場の接続・上流漸近条件を検査します。
 背景電子の内向きドリフトが正で反射低速集団を持つ A/C は、半無限上流条件に接続できないため不採用です。
@@ -44,7 +45,6 @@ if (status /= sheath_ok) stop 1
 
 field_input%branch = 'A'
 field_input%electron_drift_mps = 0.0_dp
-field_input%root_selection = 'max_field_energy'
 field_input%electric_field_v_m = 1.62_dp
 field_input%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
 call solve_prescribed_field(field_input, field_solution, status, message)
@@ -76,7 +76,6 @@ if (status /= sheath_ok) stop 1
 | フィールド | 既定値 | 意味・制約 |
 | --- | --- | --- |
 | `branch` | `'auto'` | A/B/C/auto。大文字小文字は不問 |
-| `root_selection` | `'require_unique'` | 物理解が複数ある場合の選択方針 |
 | `electric_field_v_m` | 0 | 指定する法線電場 E_H [V/m]。+z 向きが正 |
 | `ion_density_m3` | 8.7e6 | 上流イオン密度、正 |
 | `photoelectron_source_density_m3` | 0 | 境界での光電子源規格化密度 n_phe0、非負 |
@@ -99,20 +98,16 @@ Zhao のシース解に作用しないため、本 API の入力には含めて�
 背景電子 VDF の規格化を固定した応答ではなく、E_H の変更に伴い規格化密度も変わり得ます。
 `fixed_ambient` を同じ半無限条件へ追加すると一般に過剰決定になるため、別モードは設けていません。
 
-根の選択方針は二つです。
-
-- `require_unique`: 検出された物理解が一意なら採用。複数なら `sheath_ambiguous_solution`。
-- `max_field_energy`: 正の電場エネルギー `+(epsilon_0/2)*integral(E² dz)` が最大の候補を選択。数値的な同順位は曖昧性を返す。
-
-後者はヒューリスティックであり、安定性を意味しません。
+`solve_prescribed_field` は検出した物理解が一つの場合に結果を返します。
+複数ある場合は `sheath_ambiguous_solution` を返します。
 
 `solve_prescribed_field_candidates(input, results, status, message)` は
 `type(zhao_field_result), allocatable :: results(:)` に発見した物理候補を返します。
-`root_selection` による選択は行いません。失敗時は配列を未確保に戻します。
+候補の順位付けや選択は行いません。失敗時は配列を未確保に戻します。
 ゼロ電場でも非平坦解を探索し、平坦解は正の電子規格化密度を持つ場合だけ候補に加えます。
 A の極小が境界へ合流したゼロ電場端点は C として一度だけ返します。
 
-複数の物理解を扱うための指定であり、有限個の初期値による探索で全パラメータ域の存在・一意性を保証するものではありません。
+有限個の初期値による探索で全パラメータ域の存在・一意性を保証するものではありません。
 探索は指定枝に限定します。ただし A/C のゼロ電場端点は共通の C 表現にまとめます。
 
 ## 結果
@@ -135,9 +130,9 @@ J=0 モデルの電流は数値誤差の範囲でゼロ、E_H 指定モデルで
 
 `zhao_equilibrium_result` は追加で `surface_potential_v`（表面電位）と `debye_length_m`（光電子参照密度・温度による Debye 長）を持ちます。
 `zhao_field_result` は追加で `boundary_potential_v`（指定電場の位置の電位）、`nonlinear_iterations`（反復数）、
-`minimum_field_squared_hat`（確認した経路上の最小無次元電場二乗）、`field_energy_j_m2`（正の静電場エネルギー）を持ちます。
+`minimum_field_squared_hat`（確認した経路上の最小無次元電場二乗）を持ちます。
 E_H 側は密度を n_i、電位を T_pe、長さを `sqrt(epsilon_0 T_pe/(n_i e))` で規格化します。
-成功した候補の電場エネルギーは選択方針によらず計算します。エネルギー・残差・最小電場二乗は未計算時に `huge()` です。
+残差・最小電場二乗は未計算時に `huge()` です。
 数値ゼロと失敗を区別するため、必ず `status` を確認してください。
 
 ## J=0 解の密度・プロファイル
@@ -172,7 +167,7 @@ Python の B/C も同じ半無限条件の一次積分です。`n_profile_grid` 
 | `sheath_invalid_argument` | 1 | 不正な入力、設定、評価範囲 |
 | `sheath_no_physical_solution` | 2 | 指定電場・枝で物理解が成立しない |
 | `sheath_numerical_failure` | 3 | 収束失敗、非有限値、プロファイル積分失敗等 |
-| `sheath_ambiguous_solution` | 4 | 複数解を指定方針では選べない |
+| `sheath_ambiguous_solution` | 4 | 複数の物理解を検出した |
 
 `message` は呼び出し側の文字列へ書き込みます（256 文字以上を推奨）。成功時にも縮退解の説明が入る場合があります。
 数値探索失敗は物理解の不存在を証明しません。ライブラリはログ出力・ファイル操作・プロセス終了を行いません。

@@ -33,8 +33,6 @@ def main() -> None:
     print(f"z_m_hat              = {out['z_m_hat']:.6f}")
     print(f"electron drift mode  = {out['electron_drift_mode']}")
     print(f"ion drift mode       = {out['ion_drift_mode']}")
-    if out.get("note"):
-        print(f"note                 = {out['note']}")
 
 
 if __name__ == "__main__":

@@ -6,7 +6,6 @@ program test_prescribed_field
   type(zhao_field_input) :: input
   type(zhao_field_result) :: output
   type(zhao_field_result), allocatable :: candidates(:)
-  real(dp) :: selected_energy
   real(dp) :: thermal, expected
   integer(i32) :: status
   character(len=512) :: message
@@ -23,23 +22,24 @@ program test_prescribed_field
 
   input%branch = 'A'
   input%electron_drift_mps = 0.0_dp
-  input%root_selection = 'max_field_energy'
   input%electric_field_v_m = 1.4187346568707933e-11_dp/eps0
   input%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
   call solve_prescribed_field(input, output, status, message)
   call ok('Type A reference')
-  selected_energy = output%field_energy_j_m2
-  call check(output%field_energy_j_m2 > 0.0_dp, 'positive electrostatic field energy')
 
   call solve_prescribed_field_candidates(input, candidates, status, message)
-  call ok('candidate enumeration')
-  call near(selected_energy, maxval(candidates%field_energy_j_m2), selected_energy*1e-10_dp, 'heuristic ranking')
+  call check(status == sheath_ok .and. allocated(candidates), 'candidate enumeration')
+  call check(size(candidates) == 1 .and. all(candidates%valid), 'one admissible Type A candidate')
+  call near(candidates(1)%boundary_potential_v, output%boundary_potential_v, 1e-10_dp, 'unique candidate potential')
 
   input%branch = 'auto'
-  input%root_selection = 'require_unique'
   call solve_prescribed_field(input, output, status, message)
   call check(status == sheath_ambiguous_solution, 'ambiguous roots must be explicit')
   call check(.not. output%valid .and. output%boundary_potential_v == 0.0_dp, 'failed result reset')
+  call solve_prescribed_field_candidates(input, candidates, status, message)
+  call check(status == sheath_ok .and. allocated(candidates), 'ambiguous candidates remain inspectable')
+  call check(size(candidates) == 2 .and. all(candidates%valid), 'two admissible candidates')
+  call check(any(candidates%branch == 'A') .and. any(candidates%branch == 'B'), 'A and B candidates')
 
   input = zhao_field_input(electric_field_v_m=-0.02_dp, electron_drift_mps=0.0_dp)
   call solve_prescribed_field(input, output, status, message)
@@ -65,9 +65,6 @@ program test_prescribed_field
   input = zhao_field_input(photoelectron_temperature_ev=0.0_dp)
   call solve_prescribed_field(input, output, status, message)
   call check(status == sheath_invalid_argument, 'zero temperature')
-  input = zhao_field_input(root_selection='invalid')
-  call solve_prescribed_field(input, output, status, message)
-  call check(status == sheath_invalid_argument, 'unknown root selection')
   input = zhao_field_input(branch='invalid')
   call solve_prescribed_field(input, output, status, message)
   call check(status == sheath_invalid_argument, 'unknown branch')

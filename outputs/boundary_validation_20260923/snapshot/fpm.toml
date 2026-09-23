@@ -1,0 +1,22 @@
+name = "sheath-model"
+version = "0.1.0"
+license = "MIT AND Apache-2.0"
+author = "Jin Nakazono"
+maintainer = "Jin Nakazono"
+description = "Standalone Zhao sheath models with zero-current or prescribed-field closure"
+
+[build]
+auto-executables = false
+auto-tests = true
+auto-examples = true
+
+[library]
+source-dir = "src"
+
+[install]
+library = true
+
+[fortran]
+implicit-typing = false
+implicit-external = false
+source-form = "free"

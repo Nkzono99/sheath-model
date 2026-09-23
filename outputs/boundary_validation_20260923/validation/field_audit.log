@@ -1,0 +1,28 @@
+{
+  "passed": true,
+  "roots_checked": 10,
+  "max_neutrality_error": 6.077147420795485e-13,
+  "max_field_squared_error": 1.987072637951556e-13,
+  "max_flux_relative_error": 4.745415150870259e-16,
+  "ambient_normalization_fractional_range": {
+    "A": 0.34610206799687937,
+    "B": 3.3308183443051886
+  },
+  "unresolved_queries": [
+    {
+      "case": "6",
+      "requested_branch": "auto",
+      "status": "3",
+      "count": "0",
+      "message": "No root converged in the finite multistart search."
+    },
+    {
+      "case": "9",
+      "requested_branch": "auto",
+      "status": "3",
+      "count": "0",
+      "message": "No root converged in the finite multistart search."
+    }
+  ],
+  "scope": "public Fortran candidates vs independent quadrature and sampled E\u00b2 positivity; finite sampling is not a general existence proof"
+}

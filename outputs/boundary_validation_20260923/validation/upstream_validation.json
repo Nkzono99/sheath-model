@@ -1,0 +1,65 @@
+{
+  "checks": {
+    "source_density_matches_independent_upstream_quadrature": true,
+    "flux_conserved_between_local_and_upstream_velocity": true,
+    "hlog_coefficients_match_independent_asymptotics": true,
+    "independent_A_algebraic_root_refined": true,
+    "independently_negative_upstream_field_integral": true
+  },
+  "passed": true,
+  "elapsed_seconds": 0.46957836393266916,
+  "max_density_abs_error": 1.5795698082854415e-12,
+  "max_flux_abs_error": 5.551115123125783e-17,
+  "asymptotic": [
+    {
+      "drift": 0.0,
+      "predicted_log_coefficient": 0.0,
+      "observed_log_coefficient": 4.995505574985993e-12,
+      "absolute_error": 4.995505574985993e-12,
+      "explanation": "A upper and C share this reflected upstream population; normalization N_e=1."
+    },
+    {
+      "drift": 0.05,
+      "predicted_log_coefficient": 0.02813904356065048,
+      "observed_log_coefficient": 0.028139043568071072,
+      "absolute_error": 7.420591918716468e-12,
+      "explanation": "A upper and C share this reflected upstream population; normalization N_e=1."
+    },
+    {
+      "drift": 0.2,
+      "predicted_log_coefficient": 0.10841347871048632,
+      "observed_log_coefficient": 0.10841347872473756,
+      "absolute_error": 1.4251239077722744e-11,
+      "explanation": "A upper and C share this reflected upstream population; normalization N_e=1."
+    },
+    {
+      "drift": 0.213272,
+      "predicted_log_coefficient": 0.11497543046891578,
+      "observed_log_coefficient": 0.11497543048370668,
+      "absolute_error": 1.4790890734417417e-11,
+      "explanation": "A upper and C share this reflected upstream population; normalization N_e=1."
+    }
+  ],
+  "independent_algebraic_root": {
+    "phi0_v": 2.654426813943442,
+    "phim_v": -1.18972381158758,
+    "electron_normalization_m3": 7923268.558245212,
+    "electron_drift_ratio": 0.19726960040476482,
+    "root_solver_reported_success": true,
+    "root_solver_message": "The solution converged.",
+    "residuals": [
+      4.163336342344337e-17,
+      5.216033052664556e-18,
+      1.6541813451106134e-17
+    ],
+    "most_negative_field_squared_hat": -1.520257919790455e-07
+  },
+  "interpretation": [
+    "The algebraic A root satisfies neutrality, J=0, and the upper Sagdeev endpoint condition.",
+    "Its negative E^2 near upstream infinity independently disproves a real half-infinite profile for that root.",
+    "The positive-u h log(1/h) coefficient was measured without calling the production admissibility guard.",
+    "No internal-domain electrons or their space charge were added.",
+    "A finite upstream reservoir, collisions, and alternative low-speed VDFs were not solved or validated here.",
+    "The finite parameter sample is a numerical check of the stated asymptotic argument, not an existence theorem."
+  ]
+}

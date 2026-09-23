@@ -1,0 +1,4 @@
+Job 297799 failed before any tests at environment discovery.
+BEACH/.venv Python 3.13 could not import scipy (ModuleNotFoundError).
+No physics result was produced. sacct: FAILED exit 1:0, elapsed 00:00:19.
+The retry uses the existing DRIFT/.venv Python 3.12 with SciPy installed.

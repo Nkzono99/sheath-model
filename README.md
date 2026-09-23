@@ -1,164 +1,147 @@
-# sheath-model
+<h1 align="center">sheath-model</h1>
 
-Zhao の一次元光電子シース（Type A/B/C）を解く、独立した Fortran ライブラリです。
-`fpm.toml` から外部依存なしで利用でき、公開窓口は `use sheath_model` です。
+<p align="center">
+  <strong>一次元の光電子シースを、電位・電場・粒子流束まで。</strong><br>
+  Fortran / fpm &nbsp; · &nbsp; Python &nbsp; · &nbsp; Type A / B / C
+</p>
 
-| 計算 | 関数 | 入力 → 出力 |
-| --- | --- | --- |
-| J=0 定常解 | `solve_equilibrium` | 太陽高度・プラズマ・光電子源 → 電位・密度・流束・電流 |
-| E_H 指定解 | `solve_prescribed_field` | 法線電場・プラズマ・光電子源 → 電位・密度・流束・電流 |
-| 定常解の局所密度 | `evaluate_density` | J=0 解・電位・領域 → 各粒子集団の密度 |
-| 定常プロファイル | `solve_profile` | J=0 モデルの入力・積分設定 → 高さ・電位・電場・密度 |
+<p align="center">
+  <a href="#examples">計算例</a> &nbsp; / &nbsp;
+  <a href="#quickstart">使い始める</a> &nbsp; / &nbsp;
+  <a href="docs/fortran-api.md">Fortran API</a> &nbsp; / &nbsp;
+  <a href="docs/examples.md">図とデータ</a>
+</p>
 
-J=0 モデルは零電流条件を課します。E_H 指定モデルは電場を境界条件として与え、電流は結果として返します。
-いずれも、名前付きの入力型と結果型を使う関数呼び出しです。初期化手順や内部状態はありません。
-入力・出力の単位と物理的な意味は [Fortran API](docs/fortran-api.md) を参照してください。
+Zhao 型の平面・定常光電子シースを解く、独立した Fortran ライブラリです。
+**零電流条件 `J=0`** と **境界電場 `E_H` の指定**に対応し、外部ライブラリに依存せず fpm から利用できます。
 
-ソース版では、背景電子を上流 VDF から軌道保存に沿って写像し、代数根の物理プロファイルも検査します。
-v0.1.0 から解の存在域が変わります。特に正の内向き電子ドリフトを持つ A/C は、
-完全反射・半無限上流の仮定と両立しないため不採用です。以下の A 枝の例は無ドリフト電子を明示します。
-導出、固定する量と解く量、複数解の扱いは [運動論モデル](docs/kinetic-model.md) に記載しています。
+<a id="examples"></a>
 
-## シース解と Type の範囲
+## 計算例
 
-以下は **電子の法線ドリフトをゼロ** とした計算例です。
-共通条件は `n_i=8.7 cm⁻³`、`T_e=12 eV`、`T_pe=2.2 eV`、陽子イオン、
-`v_sw=468 km/s`、`v_i=v_sw sin(alpha)` です。`alpha` は太陽高度、上流の電位基準は 0 V です。
+### 3 つのシース構造
 
-### Type A/B/C の 1D プロファイル
+太陽高度を変えたときの、Type A/B/C の電位と電場です。
+いずれも **`J=0`・電子ドリフト 0** の計算で、表面から上流へ向かう最初の 60 m を表示しています。
 
-`J=0`、光電子参照密度 `n_pe,ref=64 cm⁻³` として解いた電位と電場です。
-光電子源密度は `n_pe,0=n_pe,ref sin(alpha)`。横軸は表面から上流へ向かう高さで、最初の 60 m を表示しています。
-各曲線は遠方の電位打ち切り `|phi|≈2.2×10⁻⁴ V` までを計算し、そこから先に人工的なゼロ電位の線は追加していません。
+[![Type A は内部に電位の極小を持ち、Type B は正の表面電位から、Type C は負の表面電位から上流の 0 V に近づく。上段は電位、下段は電場。](docs/figures/sheath_profiles.png)](docs/figures/sheath_profiles.pdf)
 
-![Type A/B/C の J=0 シース解。上段は電位、下段は電場。A は内部極小を持ち、B/C は単調。](docs/figures/sheath_profiles.png)
+| Type | この例の電位の形 | 表面電位 |
+| --- | --- | ---: |
+| **A** · 60° | 内部に極小を持つ非単調なシース | 3.840 V |
+| **B** · 20° | 正電位から上流へ単調に減少 | 1.616 V |
+| **C** · 10° | 負電位から上流へ単調に増加 | −4.238 V |
 
-| Type | 電位の形 | 太陽高度 | 表面電位 | 最小電位 |
-| --- | --- | --- | --- | --- |
-| A | 内部に極小を持つ非単調解 | 60° | 3.840 V | −0.332 V |
-| B | 正電位から上流の 0 へ単調減少 | 20° | 1.616 V | 0 V（上流） |
-| C | 負電位から上流の 0 へ単調増加 | 10° | −4.238 V | −4.238 V（表面） |
+Type A の極小電位は −0.332 V です。A は負の表面電位を持つ場合もあります。
 
-A は負の表面電位も許します。上表はそのうち正の表面電位を持つ例です。
-[PDF](docs/figures/sheath_profiles.pdf) と [数値データ・解の残差](docs/figures/data/profile_metadata.csv) も利用できます。
+[PDF](docs/figures/sheath_profiles.pdf) · [計算条件とプロファイルデータ](docs/examples.md#profiles)
 
-### 解が得られた範囲と Type
+### 解の Type マップ
 
-縦軸は光電子源の強さ `r=n_pe,ref/n_i`（対数軸）、各パネルは **257 × 129 点** の計算です。
-太陽高度は 0.34375° 間隔、指定電場は 0.015625 V/m 間隔、`r` は 0.5〜16 を対数等間隔で走査します。
+太陽高度または指定電場と、光電子源の強さを変えたときに見つかった Type を示します。
+**左は `J=0`、右は `E_H` 指定**。電子ドリフトは 0、各パネルは **257 × 129 点**の計算です。
 
-- 左：`J=0`。太陽高度と `r` を変え、A/B/C をそれぞれ指定して物理解を探索します。
-- 右：`E_H` 指定。太陽高度を 20° に固定し、電場と `r` を変え、`solve_prescribed_field_candidates` で候補を取得します。電流は出力です。
+[![J=0 と E_H 指定の Type マップ。Type A は青、B は橙、C は緑。複数 Type が見つかった条件は組合せの色で表示する。](docs/figures/sheath_type_maps.png)](docs/figures/sheath_type_maps.pdf)
 
-![J=0 と E_H 指定のシース解の Type マップ。複数の Type が見つかった点は組合せの色で表示。](docs/figures/sheath_type_maps.png)
+**A+B などの色は、同じ条件で複数の Type が見つかったことを表します。** 安定性による選択はしていません。
+灰色は候補の物理条件による棄却、薄灰色は採用解のない未解決点です。色付きの点にも未解決の枝があり、解の不存在や全根の発見を保証する図ではありません。
+左の A/B/C マーカーは上のプロファイル例の位置です。
 
-色は**この探索で得られた物理解の Type**です。A+B などは同じ条件で複数の Type が得られたことを表し、安定性による選択はしていません。
-左の A/B/C マーカーは上の 1D 例の位置です。
-灰色は物理条件による候補の棄却、薄灰色は数値探索が未解決で採用解が得られなかった点です。
-色付きの点でも、他の枝の探索が未解決の場合があります。有限個の初期値による結果であり、灰色領域も含めて解の不存在や全根の発見を保証しません。
+[PDF](docs/figures/sheath_type_maps.pdf) · [J=0 データ](docs/figures/data/equilibrium_map.csv) · [E_H 指定データ](docs/figures/data/field_map.csv) · [条件・凡例・再生成手順](docs/examples.md#maps)
 
-両パネルとも背景電子 Maxwell 分布の規格化は未知量です。電子ドリフトを正にすると A/C の半無限上流条件が成立しなくなるため、この図の範囲をそのまま適用できません。
-[PDF](docs/figures/sheath_type_maps.pdf)、[J=0 の格子データ](docs/figures/data/equilibrium_map.csv)、
-[E_H 指定の格子データ](docs/figures/data/field_map.csv)、[集計](docs/figures/data/summary.json) を保存しています。
-CSV の Type はビット値 `A=1, B=2, C=4` の和で表し、未解決・棄却の情報も別列に記録します。
+<a id="quickstart"></a>
 
-図は公開 Fortran API で再計算できます。NumPy と Matplotlib を用意し、リポジトリ直下で実行してください。
-以下の GNU Fortran / OpenMP の例は 16 コアを使用します。KUDPC では計算ノード割当内で実行します。
+## 使い始める
+
+### Fortran / fpm
+
+Fortran 2008 対応コンパイラと fpm を用意すると、2 つのモデルを比較する例を実行できます。
 
 ```bash
-mkdir -p docs/figures/data
-OMP_NUM_THREADS=16 OMP_PROC_BIND=false fpm run --example readme_data --compiler gfortran --profile release --flag "-fopenmp" -- docs/figures/data 257 129
-python examples/plot_readme_figures.py
-```
-
-計算部分は [readme_data.f90](example/readme_data.f90)、描画部分は [plot_readme_figures.py](examples/plot_readme_figures.py) です。
-計算コマンドの末尾に `equilibrium` または `field` を付けると、そのカラーマップだけを再計算できます。
-
-## Fortran / fpm
-
-Fortran 2008 対応コンパイラと fpm が必要です。
-
-```bash
-fpm build
-fpm test
+git clone https://github.com/Nkzono99/sheath-model.git
+cd sheath-model
 fpm run --example compare_closures
-fpm run --example equilibrium_profile
-fpm install --prefix ./install
 ```
 
-KUDPC 等の共有ログインノードでは、ビルド・テスト・例の実行をサイトの計算ノード割当内で行ってください。
-別プロジェクトの `fpm.toml` に依存を追加すると、この作業ツリーを利用できます。
+自分の fpm プロジェクトから使う場合は、`fpm.toml` に依存を追加します。
 
 ```toml
 [dependencies]
-sheath-model = { path = "../sheath-model" }
+sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", branch = "main" }
 ```
 
-Git 依存でも利用できます。再現性が必要な場合は利用するコミットの `rev` を指定してください。
-公開済みの `v0.1.0` タグには、以下の軌道モデル修正は含まれません。
+> 掲載例は `main` の実装に対応します。公開済みの `v0.1.0` には軌道保存・物理解判定の修正が含まれません。計算の再現性が必要な場合は `branch` を使用するコミットの `rev` に置き換えてください。
 
-```toml
-[dependencies]
-sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git" }
-```
-
-E_H 指定モデルの使用例です。
+**Type A の零電流解を求める最小例。** アプリ用 fpm プロジェクトの `app/main.f90` に保存し、`fpm run` で実行します。
+太陽高度と電子ドリフトを明示し、その他の入力は上のプロファイル例と同じ既定値を使います。
 
 ```fortran
-use sheath_model
-implicit none
-type(zhao_field_input) :: input
-type(zhao_field_result) :: result
-integer(i32) :: status
-character(len=256) :: message
+program sheath_example
+  use sheath_model
+  implicit none
+  type(zhao_equilibrium_input) :: input
+  type(zhao_equilibrium_result) :: solution
+  integer(i32) :: status
+  character(len=256) :: message
 
-input%branch = 'A'
-input%electron_drift_mps = 0.0_dp
-input%root_selection = 'max_field_energy'
-input%electric_field_v_m = 1.62_dp
-input%photoelectron_source_density_m3 = 5.5425625842204072e7_dp
-call solve_prescribed_field(input, result, status, message)
-if (status /= sheath_ok) stop 1
-print *, result%boundary_potential_v, result%net_current_a_m2
+  input%branch = 'A'
+  input%sun_elevation_deg = 60.0_dp
+  input%electron_drift_mode = 'zero'
+  call solve_equilibrium(input, solution, status, message)
+  if (status /= sheath_ok) then
+    print *, trim(message)
+    stop 1
+  end if
+
+  print '(a,f8.3)', 'Surface potential [V]: ', solution%surface_potential_v
+  print '(a,es12.4)', 'Current [A/m^2]: ', solution%net_current_a_m2
+end program sheath_example
 ```
 
-J=0 モデルも `call solve_equilibrium(input, result, status, message)` の形で呼び出します。
-`max_field_energy` は正の電場エネルギーが最大の候補を選ぶヒューリスティックで、安定性の判定ではありません。
-既定の `require_unique` は複数解を曖昧性として返し、`solve_prescribed_field_candidates` で候補を取得できます。
-両方を比較する完全な例は [compare_closures.f90](example/compare_closures.f90) にあります。
-ライブラリ自体は `stop` / `error stop` やファイル出力を行いません。
+表面電位は約 **3.840 V**、正味電流は数値誤差の範囲で 0 になります。
 
-## Python
+| 求めたいもの | 公開 API | 入力 → 出力 |
+| --- | --- | --- |
+| 零電流の定常解 | `solve_equilibrium` | 太陽高度・プラズマ・光電子源 → 電位・密度・流束 |
+| 指定電場への応答 | `solve_prescribed_field` | 法線電場・プラズマ・光電子源 → 電位・密度・流束・電流 |
+| J=0 の空間分布 | `solve_profile` | 定常解の入力・積分設定 → 高さ・電位・電場・密度 |
 
-既存 Python ソルバーは Python 3.10+、NumPy、SciPy で独立して利用できます。
+単位は **SI、温度のみ eV**。初期化は不要で、入力型を渡して結果型とステータスを受け取ります。
+両モデルとも背景電子 Maxwell 分布の規格化を未知量として解きます。
+`E_H` 指定時の候補列挙・複数解の扱いは [Fortran API](docs/fortran-api.md)、
+2 つのモデルの呼び出し例は [compare_closures.f90](example/compare_closures.f90) を参照してください。
 
-```bash
-python -m pip install -e .
-python -m unittest discover -s tests -v
-python -m sheath_model --branch A --alpha 60 --electron-drift-mode zero --ion-drift-mode normal --zmax-hat 120
-```
+### Python
+
+Python 3.10+ では NumPy / SciPy による独立した実装も利用できます。
+リポジトリ直下で `python -m pip install -e '.[plot]'` を実行してください。
 
 ```python
 from sheath_model import ZhaoParams, ZhaoSheathSolver
 
-solver = ZhaoSheathSolver(ZhaoParams(alpha_deg=60.0, electron_drift_mode="zero", zmax_hat=120.0))
+solver = ZhaoSheathSolver(
+    ZhaoParams(alpha_deg=60.0, electron_drift_mode="zero", zmax_hat=120.0)
+)
 profile = solver.solve_profile("A")
-print(profile["phi0_V"], profile["phi_m_V"], profile["n_swe_inf_m3"])
+print(profile["phi0_V"], profile["phi_m_V"])
 ```
 
-描画には `python -m pip install -e '.[plot]'` の後、`python examples/plot_profiles.py` を使います。
-Python の局所流束・VDF 診断も同じ軌道分布に基づきます。Fortran と Python のバインディングはありません。
-Python と Fortran はともに半無限領域の一次積分からプロファイルを構成します。
+`python examples/plot_profiles.py` でプロファイルを描画できます。
+Fortran とのバインディングはなく、局所流束・速度分布の診断にも同じ軌道分布を使います。
 
-## 構成とライセンス
+## さらに詳しく
 
-- `src/sheath_model.f90`: 公開する型・関数の一覧。
-- `src/sheath_model_equilibrium.f90`: J=0 定常解、密度、プロファイル。
-- `src/sheath_model_field.f90`: E_H 指定解。
-- `src/internal/`: Zhao の式、積分、非線形解法、分岐選択。
-- `test/`, `example/`: Fortran の物理テストと利用例。
-- `sheath_model/`, `tests/`, `examples/`: Python ソルバー、テスト、描画例。
-- [Algorithm notes](docs/algorithm.md): Python モデルの式と仮定。
+| ドキュメント | 内容 |
+| --- | --- |
+| [図と計算例](docs/examples.md) | 図の条件、CSV / PDF、再生成手順、実行例 |
+| [Fortran API](docs/fortran-api.md) | 入出力・単位・既定値・ステータス・候補選択 |
+| [運動論モデル](docs/kinetic-model.md) | 軌道保存、半無限上流条件、解の採用条件 |
+| [Algorithm notes](docs/algorithm.md) | Python モデルの式と数値解法 |
 
-既存 Python と新規の公開窓口は MIT。BEACH のシース数値実装から抽出した部分は Apache-2.0 です。
-出典と変更点は [NOTICE](NOTICE)、ライセンス本文は [LICENSE](LICENSE) と [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt) を参照してください。
+図の A/C は無ドリフト電子の例です。正の内向き電子ドリフトと完全反射を仮定した A/C は、
+このモデルの半無限上流条件に接続できません。詳細は [運動論モデル](docs/kinetic-model.md) に記載しています。
+
+## ライセンス
+
+Python 実装と新規の公開窓口は **MIT**、BEACH のシース数値実装から抽出した部分は **Apache-2.0** です。
+出典は [NOTICE](NOTICE)、ライセンス本文は [LICENSE](LICENSE) / [Apache-2.0](LICENSES/Apache-2.0.txt) を参照してください。
