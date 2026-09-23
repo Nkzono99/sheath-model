@@ -486,10 +486,13 @@ contains
     character(len=1), intent(in) :: branch
     character(len=*), intent(in) :: side
     real(dp), intent(in) :: lo, hi, phi0, phim, density
+
     real(dp) :: t, phi, rho
     integer :: panel, j
     value = 0.0_dp
+
     if (lo == hi) return
+
     do panel = 0, 3
       do j = 1, 16
         t = (real(panel, dp) + 0.5_dp*(1.0_dp + gauss_x(j)))/4.0_dp
