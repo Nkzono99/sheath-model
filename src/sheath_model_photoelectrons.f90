@@ -22,9 +22,45 @@ module sheath_model_photoelectrons
     procedure :: is_binned
     procedure :: search_breakpoints
     procedure :: potential_scale
+    procedure :: atlas_shape
+    procedure :: with_outward_flux
   end type
 
 contains
+
+  !> Dimensionless spectral shape for identifying compatible atlas entries.
+  !! Maxwellians use an empty shape; their temperature is the potential scale.
+  pure function atlas_shape(self, potential_scale_v) result(shape)
+    class(photoelectron_source), intent(in) :: self
+    real(dp), intent(in) :: potential_scale_v
+    real(dp), allocatable :: shape(:)
+    real(dp) :: total
+    integer :: n
+    allocate (shape(0))
+    if (.not. self%binned) return
+    n = size(self%flux_m2_s)
+    deallocate (shape)
+    allocate (shape(2*n + 1))
+    shape(:n + 1) = self%edges_ev/potential_scale_v
+    shape(n + 2:) = 0.0_dp
+    total = sum(self%flux_m2_s)
+    if (total > 0.0_dp) shape(n + 2:) = self%flux_m2_s/total
+  end function atlas_shape
+
+  !> Change source amplitude while preserving its energy distribution.
+  pure function with_outward_flux(self, total_flux_m2_s, mass_kg) result(source)
+    class(photoelectron_source), intent(in) :: self
+    real(dp), intent(in) :: total_flux_m2_s, mass_kg
+    type(photoelectron_source) :: source
+    real(dp) :: total
+    source = self
+    if (self%binned) then
+      total = sum(self%flux_m2_s)
+      if (total > 0.0_dp) source%flux_m2_s = self%flux_m2_s*(total_flux_m2_s/total)
+    else
+      source%density_m3 = total_flux_m2_s*2.0_dp*sqrt(pi)/sqrt(2.0_dp*qe*self%temperature_ev/mass_kg)
+    end if
+  end function with_outward_flux
 
   !> Construct an analytic source from Maxwellian normalization [m^-3] and temperature [eV].
   !! Validity is checked by the model entry points, including zero emission.

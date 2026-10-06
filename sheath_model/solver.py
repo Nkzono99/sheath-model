@@ -18,6 +18,7 @@ from ._ions import ion_density_ratio, ion_critical_potential
 from ._constants import QE, ME
 from .params import FixedEntryParams, ZhaoParams
 from .search import SearchOptions, SearchDiagnostics, SearchFailure, solve_guarded_system
+from .continuation import continue_guarded_system, find_guarded_roots
 
 Branch = Literal["A", "B", "C"]
 TypeASide = Literal["lower", "upper"]
@@ -257,8 +258,69 @@ class _SheathSolver:
                 guesses.append(encoded)
         return guesses
 
+    def _encoded_residual(self, branch, y, options):
+        physical = self._decode_unknowns(branch, y, options)
+        if physical is None:
+            return None
+        raw = getattr(self, "_residuals_type_"+branch.lower())(physical if branch == "A" else physical[[0, 2]])
+        raw[:2] /= self.p.ion_density_m3
+        if branch == "A":
+            raw[2] *= self.p.density_scale_m3/self.p.ion_density_m3/(-physical[1]/
+                       self.p.photoelectron_temperature_ev)**1.5
+        return raw if np.all(np.isfinite(raw)) else None
+
+    def _unknown_result(self, branch, physical, diagnostics):
+        p = self.p
+        phi0_V, phi_m_V, n_swe_inf_m3 = physical
+        return {"branch": branch, "phi0_V": float(phi0_V), "phi_m_V": float(phi_m_V),
+                "n_swe_inf_m3": float(n_swe_inf_m3),
+                "phi0_hat": float(phi0_V/p.photoelectron_temperature_ev),
+                "phi_m_hat": float(phi_m_V/p.photoelectron_temperature_ev),
+                "n_swe_inf_hat": float(n_swe_inf_m3/p.density_scale_m3),
+                "electron_drift_mps": p.electron_drift_mps,
+                "ion_entry_speed_mps": p.ion_entry_speed_mps,
+                "search_diagnostics": diagnostics}
+
+    def _continue_from_atlas(self, branch, atlas, options, diagnostics):
+        from .atlas import parameter_key, params_from_key
+        target_key = parameter_key(self.p)
+        n = 3 if branch == "A" else 2
+        k = "ABC".index(branch)
+        for point in atlas.neighbors(self.p, branch):
+            start_key = np.array(point.key)
+
+            def path_solver(t):
+                if t == 1.:
+                    return self
+                return _SheathSolver(params_from_key(start_key+t*(target_key-start_key), self.p), search=options)
+
+            def residual(y, t):
+                try:
+                    return path_solver(t)._encoded_residual(branch, y, options)
+                except (ValueError, OverflowError):
+                    return None
+
+            def accept(y, t):
+                try:
+                    solver = path_solver(t)
+                    physical = solver._decode_unknowns(branch, y, options)
+                    if physical is None:
+                        return False
+                    solver._validate_profile_root(branch, physical[0]/solver.p.photoelectron_temperature_ev,
+                                                  physical[1]/solver.p.photoelectron_temperature_ev,
+                                                  physical[2]/solver.p.density_scale_m3)
+                except (ValueError, RuntimeError, FloatingPointError, OverflowError):
+                    return False
+                return True
+
+            y, success = continue_guarded_system(residual, point.coordinates[:n], options, atlas.continuation,
+                                                  diagnostics, k, accept=accept)
+            if success:
+                return self._decode_unknowns(branch, y, options)
+        return None
+
     def solve_unknowns(self, branch: Branch, guess: tuple[float, ...] | None = None,
-                       *, search: SearchOptions | None = None) -> dict[str, float | str | SearchDiagnostics]:
+                       *, search: SearchOptions | None = None, atlas=None) -> dict[str, float | str | SearchDiagnostics]:
         """Find the first physically connecting root; attach search_diagnostics.
 
         guess is (surface V, minimum V, density m^-3) for A, or (surface V,
@@ -278,17 +340,13 @@ class _SheathSolver:
         if branch in ("A", "C") and p.u > 0:
             diagnostics.excluded[k] = True
             raise SearchFailure("reflected drifting electrons have no neutral semi-infinite profile", diagnostics)
-        func = getattr(self, "_residuals_type_"+branch.lower())
+        if atlas is not None:
+            from .atlas import EquilibriumAtlas
+            if not isinstance(atlas, EquilibriumAtlas):
+                raise TypeError("atlas must be EquilibriumAtlas")
 
         def residual(y):
-            physical = self._decode_unknowns(branch, y, options)
-            if physical is None:
-                return None
-            raw = func(physical if branch == "A" else physical[[0, 2]])
-            raw[:2] /= p.ion_density_m3
-            if branch == "A":
-                raw[2] *= p.density_scale_m3/p.ion_density_m3/(-physical[1]/p.photoelectron_temperature_ev)**1.5
-            return raw
+            return self._encoded_residual(branch, y, options)
 
         def accept(physical):
             try:
@@ -304,17 +362,21 @@ class _SheathSolver:
             diagnostics.roots_found[k] += 1
             return True
 
-        def multivariate(starts):
+        def multivariate(starts, from_atlas=False):
             for encoded in starts:
                 if diagnostics.starts[k] >= options.max_starts:
                     break
                 diagnostics.starts[k] += 1
+                if from_atlas:
+                    diagnostics.atlas_starts[k] += 1
                 y, norm, success = solve_guarded_system(residual, encoded, options, diagnostics, k)
                 if not success:
                     diagnostics.unconverged[k] += 1
                     continue
                 physical = self._decode_unknowns(branch, y, options)
                 if physical is not None and accept(physical):
+                    if from_atlas:
+                        diagnostics.atlas_hits[k] += 1
                     return physical
             return None
 
@@ -328,23 +390,97 @@ class _SheathSolver:
                 raise ValueError("guess must be finite and satisfy branch signs and positive density")
             seeds.append(encoded)
         found = multivariate(seeds) if options.method != "bracket" else None
+        if found is None and atlas is not None and options.method != "bracket":
+            n = 3 if branch == "A" else 2
+            found = multivariate([prediction[:n] for prediction in atlas.predictions(p, branch)], from_atlas=True)
         if found is None and branch != "A" and options.method in ("auto", "bracket"):
             found = self._scalar_search(branch, options, diagnostics, accept)
         if found is None and options.method != "bracket" and options.use_default_guesses:
             found = multivariate(self._default_guesses(branch, options))
+        if found is None and atlas is not None and options.method != "bracket":
+            trial = self._continue_from_atlas(branch, atlas, options, diagnostics)
+            if trial is not None and accept(trial):
+                diagnostics.atlas_hits[k] += 1
+                found = trial
         if found is None:
             raise SearchFailure(f"finite {options.method} search found no admissible {branch} root; "
                                 f"best residual={diagnostics.best_residual[k]:.3e}, "
                                 f"unconverged={diagnostics.unconverged[k]}, rejected={diagnostics.rejected[k]}", diagnostics)
-        phi0_V, phi_m_V, n_swe_inf_m3 = found
-        return {"branch": branch, "phi0_V": float(phi0_V), "phi_m_V": float(phi_m_V),
-                "n_swe_inf_m3": float(n_swe_inf_m3),
-                "phi0_hat": float(phi0_V/p.photoelectron_temperature_ev),
-                "phi_m_hat": float(phi_m_V/p.photoelectron_temperature_ev),
-                "n_swe_inf_hat": float(n_swe_inf_m3/p.density_scale_m3),
-                "electron_drift_mps": p.electron_drift_mps,
-                "ion_entry_speed_mps": p.ion_entry_speed_mps,
-                "search_diagnostics": diagnostics}
+        return self._unknown_result(branch, found, diagnostics)
+
+    def solve_candidates(self, branch: Branch, *, atlas=None, deflation=True, max_roots=16):
+        """Locate distinct admissible roots; finite search does not imply completeness."""
+        self._validate_params_for_branch(branch)
+        options = self.search
+        diagnostics = SearchDiagnostics()
+        k = "ABC".index(branch)
+        diagnostics.searched[k] = True
+        if not isinstance(max_roots, int) or isinstance(max_roots, bool) or max_roots < 1:
+            raise ValueError("max_roots must be a positive integer")
+        if not isinstance(deflation, bool):
+            raise ValueError("deflation must be a bool")
+        if atlas is not None:
+            from .atlas import EquilibriumAtlas
+            if not isinstance(atlas, EquilibriumAtlas):
+                raise TypeError("atlas must be EquilibriumAtlas")
+        if branch in {"A", "C"} and self.p.u > 0:
+            diagnostics.excluded[k] = True
+            return {"candidates": [], "search_diagnostics": diagnostics}
+        roots = []
+        n = 3 if branch == "A" else 2
+
+        def accept(physical):
+            encoded = self._encode_unknowns(branch, physical)
+            raw = self._encoded_residual(branch, encoded, options)
+            if raw is None or np.max(np.abs(raw)) > options.residual_tolerance:
+                return False
+            if any(np.linalg.norm(encoded-root) < 1e-6 for root in roots):
+                return False
+            try:
+                self._validate_profile_root(branch, physical[0]/self.p.photoelectron_temperature_ev,
+                                            physical[1]/self.p.photoelectron_temperature_ev,
+                                            physical[2]/self.p.density_scale_m3)
+            except FloatingPointError:
+                diagnostics.profile_failures[k] += 1
+                return False
+            except RuntimeError:
+                diagnostics.rejected[k] += 1
+                return False
+            roots.append(encoded)
+            diagnostics.roots_found[k] += 1
+            return len(roots) >= max_roots
+
+        if branch != "A" and options.method in {"auto", "bracket"}:
+            self._scalar_search(branch, options, diagnostics, accept)
+        elif branch == "A" and options.method == "bracket":
+            raise ValueError("bracket supports only B/C J=0 branches")
+        if options.method != "bracket" and len(roots) < max_roots:
+            starts = [] if atlas is None else [y[:n] for y in atlas.predictions(self.p, branch)]
+            atlas_flags = [True]*len(starts)
+            if options.use_default_guesses:
+                defaults = self._default_guesses(branch, options)
+                starts.extend(defaults)
+                atlas_flags.extend([False]*len(defaults))
+            origins = []
+            algebraic = find_guarded_roots(lambda y: self._encoded_residual(branch, y, options), starts,
+                                           options, diagnostics, k, max_roots=max_roots,
+                                           deflation=deflation, known_roots=roots,
+                                           atlas_flags=atlas_flags, origins=origins)
+            for y, origin in zip(algebraic, origins):
+                physical = self._decode_unknowns(branch, y, options)
+                if physical is not None:
+                    count_before = len(roots)
+                    accept(physical)
+                    if len(roots) > count_before and atlas_flags[origin]:
+                        diagnostics.atlas_hits[k] += 1
+            if not roots and atlas is not None:
+                physical = self._continue_from_atlas(branch, atlas, options, diagnostics)
+                if physical is not None:
+                    accept(physical)
+                    if roots:
+                        diagnostics.atlas_hits[k] += 1
+        candidates = [self._unknown_result(branch, self._decode_unknowns(branch, y, options), diagnostics) for y in roots]
+        return {"candidates": candidates, "search_diagnostics": diagnostics}
 
     def _scalar_search(self, branch, options, diagnostics, accept):
         p = self.p
@@ -686,10 +822,10 @@ class _SheathSolver:
     # Public profile API
     # ------------------------------------------------------------------
     def solve_profile(
-        self, branch: Branch, guess_unknowns: tuple[float, ...] | None = None
+        self, branch: Branch, guess_unknowns: tuple[float, ...] | None = None, *, atlas=None
     ) -> Dict[str, np.ndarray | float | str | SearchDiagnostics]:
         p = self.p
-        uk = self.solve_unknowns(branch, guess_unknowns)
+        uk = self.solve_unknowns(branch, guess_unknowns, atlas=atlas)
 
         if branch == "A":
             return self._build_type_a_profile(uk)
@@ -741,7 +877,7 @@ class _SheathSolver:
         out["rho_hat"] = out["n_swi_hat"] - out["n_total_hat"]
         return out
 
-    def solve_auto(self) -> Dict[str, np.ndarray | float | str | SearchDiagnostics]:
+    def solve_auto(self, *, atlas=None) -> Dict[str, np.ndarray | float | str | SearchDiagnostics]:
         if self.search.method == "bracket":
             raise ValueError("bracket requires an explicit B/C branch")
         if isinstance(self.p, ZhaoParams) and self.p.alpha_deg < 20.0:
@@ -752,7 +888,7 @@ class _SheathSolver:
         diagnostics = SearchDiagnostics()
         for br in order:
             try:
-                profile = self.solve_profile(br)
+                profile = self.solve_profile(br, atlas=atlas)
                 diagnostics.include(profile["search_diagnostics"])
                 profile["search_diagnostics"] = diagnostics
                 return profile

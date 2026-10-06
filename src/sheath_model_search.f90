@@ -6,6 +6,7 @@ module sheath_model_search
   implicit none
   private
   public :: sheath_search_options, sheath_search_diagnostics, valid_search_options
+  public :: sheath_continuation_options, valid_continuation_options
 
   type :: sheath_search_options
     character(len=9) :: method = 'auto' ! auto, newton, lm, bracket (J=0 B/C only)
@@ -18,15 +19,34 @@ module sheath_model_search
     real(dp) :: potential_extent = 200.0_dp ! finite search limit / potential_scale_v
   end type sheath_search_options
 
+  type :: sheath_continuation_options
+    character(len=9) :: method = 'parameter' ! parameter, arclength
+    real(dp) :: initial_step = 0.25_dp, min_step = 1e-4_dp, max_step = 0.5_dp
+    integer :: max_steps = 128
+    real(dp) :: max_root_distance = 0.75_dp ! distance in dimensionless logarithmic unknowns
+  end type sheath_continuation_options
+
   !> Arrays are ordered A/B/C. A finite search does not prove root completeness.
   type :: sheath_search_diagnostics
     logical :: searched(3) = .false., excluded(3) = .false.
     integer :: starts(3) = 0, unconverged(3) = 0, rejected(3) = 0, profile_failures(3) = 0
     integer :: roots_found(3) = 0, evaluations(3) = 0, iterations(3) = 0, lm_steps(3) = 0, brackets(3) = 0
+    integer :: atlas_starts(3) = 0, atlas_hits(3) = 0, continuation_steps(3) = 0, continuation_retries(3) = 0
+    integer :: deflations(3) = 0
     real(dp) :: best_residual(3) = huge(1.0_dp)
   end type sheath_search_diagnostics
 
 contains
+
+  logical function valid_continuation_options(options) result(valid)
+    type(sheath_continuation_options), intent(in) :: options
+    valid = .false.
+    if (options%method /= 'parameter' .and. options%method /= 'arclength') return
+    if (.not. all(ieee_is_finite([options%initial_step, options%min_step, options%max_step, &
+        options%max_root_distance]))) return
+    valid = options%min_step > 0.0_dp .and. options%initial_step >= options%min_step .and. &
+        options%max_step >= options%initial_step .and. options%max_root_distance > 0.0_dp .and. options%max_steps > 0
+  end function valid_continuation_options
 
   logical function valid_search_options(options) result(valid)
     type(sheath_search_options), intent(in) :: options

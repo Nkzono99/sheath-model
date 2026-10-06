@@ -54,6 +54,11 @@ class SearchDiagnostics:
     iterations: list[int] = field(default_factory=_zeros)
     lm_steps: list[int] = field(default_factory=_zeros)
     brackets: list[int] = field(default_factory=_zeros)
+    atlas_starts: list[int] = field(default_factory=_zeros)
+    atlas_hits: list[int] = field(default_factory=_zeros)
+    continuation_steps: list[int] = field(default_factory=_zeros)
+    continuation_retries: list[int] = field(default_factory=_zeros)
+    deflations: list[int] = field(default_factory=_zeros)
     best_residual: list[float] = field(default_factory=lambda: [math.inf]*3)
 
     def include(self, other):
@@ -63,7 +68,8 @@ class SearchDiagnostics:
             self.excluded[k] |= other.excluded[k]
             self.best_residual[k] = min(self.best_residual[k], other.best_residual[k])
             for name in ("starts", "unconverged", "rejected", "profile_failures", "roots_found",
-                         "evaluations", "iterations", "lm_steps", "brackets"):
+                         "evaluations", "iterations", "lm_steps", "brackets", "atlas_starts", "atlas_hits",
+                         "continuation_steps", "continuation_retries", "deflations"):
                 getattr(self, name)[k] += getattr(other, name)[k]
 
 

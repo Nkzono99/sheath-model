@@ -11,7 +11,7 @@ module sheath_model_numerics
 
   private
 
-  public :: solve_guarded_system, residual_norm
+  public :: solve_guarded_system, residual_norm, solve_guarded_linear_system
 
   abstract interface
     subroutine guarded_residual(x, f, valid)

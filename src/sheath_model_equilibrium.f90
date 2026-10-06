@@ -9,6 +9,10 @@ module sheath_model_equilibrium
       evaluate_zhao_density_hat, &
       evaluate_zhao_fluxes
   use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, valid_search_options
+  use sheath_model_atlas, only: sheath_equilibrium_atlas
+  use sheath_model_atlas_physics, only: equilibrium_key, atlas_equilibrium_seeds, continue_equilibrium_from_atlas
+  use sheath_model_coordinates, only: encode_unknowns
+  use sheath_model_admissibility, only: validate_zhao_profile
   use sheath_model_equilibrium_search, only: search_equilibrium_branch, equilibrium_residual
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NUMERICAL_FAILURE, SHEATH_NO_PHYSICAL_SOLUTION
 
@@ -19,6 +23,7 @@ module sheath_model_equilibrium
   public :: zhao_equilibrium_input, fixed_entry_equilibrium_input, zhao_equilibrium_result, zhao_density_result
   public :: solve_equilibrium, evaluate_density, solve_profile
   public :: zhao_profile_options, zhao_profile_result
+  public :: build_equilibrium_atlas, add_equilibrium_to_atlas, solve_equilibrium_candidates
 
   type, abstract :: equilibrium_input
     type(sheath_search_options) :: search
@@ -192,7 +197,7 @@ contains
   !> Solve the J=0 closure for the plasma inputs and return a physically admissible equilibrium.
   !! branch='auto' returns the first admissible branch in the model's search order.
   !! status/message report the outcome; output%valid is false on failure. Physical outputs use SI units.
-  subroutine solve_equilibrium(input, output, status, message, diagnostics, initial_guesses)
+  subroutine solve_equilibrium(input, output, status, message, diagnostics, initial_guesses, atlas)
     class(equilibrium_input), intent(in) :: input
     type(zhao_equilibrium_result), intent(out) :: output
     integer(i32), intent(out) :: status
@@ -201,13 +206,13 @@ contains
     type(zhao_params_type) :: p
     type(sheath_search_diagnostics), intent(out), optional :: diagnostics
     type(zhao_equilibrium_result), intent(in), optional :: initial_guesses(:)
+    type(sheath_equilibrium_atlas), intent(in), optional :: atlas
     type(sheath_search_diagnostics) :: search
     real(dp), allocatable :: initial(:, :)
+    real(dp), allocatable :: atlas_initial(:, :)
     real(dp) :: found(3)
-    integer :: i, seed_count
-    type(zhao_equilibrium_result) :: trial
-    real(dp) :: phi0, phim, density, residual(3)
-    real(dp) :: outward, returning
+    integer :: i, seed_count, atlas_count
+    real(dp) :: phi0, phim, density
     character(len=1) :: order(3)
     integer :: attempt, count
     logical :: nonphysical, unresolved_search
@@ -219,6 +224,13 @@ contains
     if (present(diagnostics)) diagnostics = search
     call prepare_params(input, p, status, message)
     if (status /= SHEATH_OK) return
+    if (present(atlas)) then
+      if (.not. atlas%valid()) then
+        status = SHEATH_INVALID_ARGUMENT
+        message = 'Invalid atlas or continuation options.'
+        return
+      end if
+    end if
 
     order = ['A', 'B', 'C']
     select type (input)
@@ -236,6 +248,7 @@ contains
       branch = order(attempt)
       if (branch >= 'a' .and. branch <= 'c') branch = achar(iachar(branch) - 32)
       seed_count = 0
+      atlas_count = 0
       if (allocated(initial)) deallocate (initial)
       allocate (initial(3, 0))
       if (present(initial_guesses)) then
@@ -248,7 +261,18 @@ contains
               initial_guesses(i)%ambient_electron_density_m3]
         end do
       end if
-      call search_equilibrium_branch(p, branch, initial(:, :seed_count), found, success, search)
+      if (present(atlas)) then
+        call atlas_equilibrium_seeds(p, branch, atlas, atlas_initial)
+        atlas_count = size(atlas_initial, 2)
+        initial = reshape([reshape(initial(:, :seed_count), [3*seed_count]), &
+            reshape(atlas_initial, [3*atlas_count])], [3, seed_count + atlas_count])
+        seed_count = seed_count + atlas_count
+      end if
+      call search_equilibrium_branch(p, branch, initial(:, :seed_count), found, success, search, atlas_count)
+      if (.not. success .and. present(atlas) .and. .not. search%excluded(index('ABC', branch)) .and. &
+          p%search%method /= 'bracket') then
+        call continue_equilibrium_from_atlas(p, branch, atlas, search, found, success)
+      end if
       if (present(diagnostics)) diagnostics = search
       phi0 = found(1)
       phim = found(2)
@@ -272,10 +296,27 @@ contains
       return
     end if
 
-    call equilibrium_residual(p, branch, [phi0, phim, density], residual)
-    trial = zhao_equilibrium_result(.false., branch, phi0, phim, density, p%length_scale_m, &
+    call make_equilibrium_result(p, branch, [phi0, phim, density], output, status, message)
+  end subroutine solve_equilibrium
+
+  subroutine make_equilibrium_result(p, branch, physical, output, status, message)
+    type(zhao_params_type), intent(in) :: p
+    character(len=1), intent(in) :: branch
+    real(dp), intent(in) :: physical(3)
+    type(zhao_equilibrium_result), intent(out) :: output
+    integer(i32), intent(out) :: status
+    character(len=*), intent(out) :: message
+    type(zhao_equilibrium_result) :: trial
+    real(dp) :: residual(3), outward, returning
+    output = zhao_equilibrium_result()
+    call equilibrium_residual(p, branch, physical, residual)
+    status = SHEATH_NUMERICAL_FAILURE
+    message = 'Original equilibrium residual exceeds tolerance.'
+    if (.not. all(ieee_is_finite(residual))) return
+    if (maxval(abs(residual)) > p%search%residual_tolerance) return
+    trial = zhao_equilibrium_result(.false., branch, physical(1), physical(2), physical(3), p%length_scale_m, &
         maxval(abs(residual)))
-    call evaluate_zhao_fluxes(p, phi0, phim, density, trial%electron_inward_flux_m2_s, &
+    call evaluate_zhao_fluxes(p, physical(1), physical(2), physical(3), trial%electron_inward_flux_m2_s, &
         trial%ion_inward_flux_m2_s, outward, trial%photoelectron_escape_flux_m2_s, returning)
     trial%net_current_a_m2 = qe*(trial%electron_inward_flux_m2_s - trial%ion_inward_flux_m2_s - &
         trial%photoelectron_escape_flux_m2_s)
@@ -288,7 +329,213 @@ contains
     output = trial
     status = SHEATH_OK
     message = ''
-  end subroutine solve_equilibrium
+  end subroutine make_equilibrium_result
+
+  !> Enumerate located physical roots with optional deflation; no completeness claim.
+  !! max_roots is per A/B/C type, and initial_guesses/atlas supplement default seeds.
+  subroutine solve_equilibrium_candidates(input, candidates, status, message, diagnostics, &
+      initial_guesses, atlas, deflation, max_roots)
+    class(equilibrium_input), intent(in) :: input
+    type(zhao_equilibrium_result), allocatable, intent(out) :: candidates(:)
+    integer(i32), intent(out) :: status
+    character(len=*), intent(out) :: message
+    type(sheath_search_diagnostics), intent(out), optional :: diagnostics
+    type(zhao_equilibrium_result), intent(in), optional :: initial_guesses(:)
+    type(sheath_equilibrium_atlas), intent(in), optional :: atlas
+    logical, intent(in), optional :: deflation
+    integer, intent(in), optional :: max_roots
+    type(sheath_search_diagnostics) :: search
+    type(zhao_params_type) :: p
+    type(zhao_equilibrium_result) :: root
+    real(dp), allocatable :: initial(:, :), atlas_initial(:, :), physical_roots(:, :)
+    real(dp) :: first(3)
+    integer :: k, i, seed_count, atlas_count, limit
+    logical :: success, use_deflation
+    character(len=1) :: branch
+    character(len=1), parameter :: branches(3) = ['A', 'B', 'C']
+    allocate (candidates(0))
+    search = sheath_search_diagnostics()
+    if (present(diagnostics)) diagnostics = search
+    call prepare_params(input, p, status, message)
+    if (status /= SHEATH_OK) return
+    limit = 16
+    if (present(max_roots)) limit = max_roots
+    status = SHEATH_INVALID_ARGUMENT
+    message = 'max_roots must be positive and atlas controls valid.'
+    if (limit < 1) return
+    if (present(atlas)) then
+      if (.not. atlas%valid()) return
+    end if
+    use_deflation = .true.
+    if (present(deflation)) use_deflation = deflation
+    do k = 1, 3
+      branch = branches(k)
+      if (trim(lower_ascii(input%branch)) /= 'auto' .and. &
+          trim(lower_ascii(input%branch)) /= lower_ascii(branch)) cycle
+      seed_count = 0
+      atlas_count = 0
+      if (allocated(initial)) deallocate (initial)
+      allocate (initial(3, 0))
+      if (present(initial_guesses)) then
+        deallocate (initial)
+        allocate (initial(3, size(initial_guesses)))
+        do i = 1, size(initial_guesses)
+          if (.not. initial_guesses(i)%valid .or. initial_guesses(i)%branch /= branch) cycle
+          seed_count = seed_count + 1
+          initial(:, seed_count) = [initial_guesses(i)%surface_potential_v, initial_guesses(i)%minimum_potential_v, &
+              initial_guesses(i)%ambient_electron_density_m3]
+        end do
+      end if
+      if (present(atlas)) then
+        call atlas_equilibrium_seeds(p, branch, atlas, atlas_initial)
+        atlas_count = size(atlas_initial, 2)
+        initial = reshape([reshape(initial(:, :seed_count), [3*seed_count]), reshape(atlas_initial, [3*atlas_count])], &
+            [3, seed_count + atlas_count])
+        seed_count = seed_count + atlas_count
+      end if
+      call search_equilibrium_branch(p, branch, initial(:, :seed_count), first, success, search, atlas_count, &
+          physical_roots, use_deflation, limit)
+      if (.not. success .and. present(atlas) .and. .not. search%excluded(k) .and. p%search%method /= 'bracket') then
+        call continue_equilibrium_from_atlas(p, branch, atlas, search, first, success)
+        if (success) physical_roots = reshape(first, [3, 1])
+      end if
+      do i = 1, size(physical_roots, 2)
+        call make_equilibrium_result(p, branch, physical_roots(:, i), root, status, message)
+        if (status /= SHEATH_OK) then
+          if (present(diagnostics)) diagnostics = search
+          return
+        end if
+        candidates = [candidates, root]
+      end do
+    end do
+    if (present(diagnostics)) diagnostics = search
+    status = SHEATH_OK
+    message = 'Located roots do not establish completeness or dynamical stability.'
+    if (size(candidates) == 0) then
+      status = SHEATH_NUMERICAL_FAILURE
+      message = 'Finite search found no admissible roots.'
+      if (all(search%excluded .or. .not. search%searched)) then
+        status = SHEATH_NO_PHYSICAL_SOLUTION
+        message = 'All requested branches are analytically excluded.'
+      end if
+    end if
+  end subroutine solve_equilibrium_candidates
+
+  !> Store only an independently checked root, in dimensionless coordinates.
+  subroutine add_equilibrium_to_atlas(input, root, atlas, status, message, component)
+    class(equilibrium_input), intent(in) :: input
+    type(zhao_equilibrium_result), intent(in) :: root
+    type(sheath_equilibrium_atlas), intent(inout) :: atlas
+    integer(i32), intent(out) :: status
+    character(len=*), intent(out) :: message
+    integer, intent(in), optional :: component
+    type(zhao_params_type) :: p
+    real(dp) :: key(6), y(3), raw(3), physical(3), minimum_e2, boundary_e2
+    real(dp), allocatable :: shape(:)
+    logical :: valid
+    call prepare_params(input, p, status, message)
+    if (status /= SHEATH_OK) return
+    status = SHEATH_INVALID_ARGUMENT
+    message = 'Atlas requires valid controls and a converged, physical A/B/C root.'
+    if (.not. atlas%valid() .or. .not. root%valid .or. index('ABC', root%branch) == 0) return
+    if (present(component)) then
+      if (component < 1) return
+    end if
+    physical = [root%surface_potential_v, root%minimum_potential_v, root%ambient_electron_density_m3]
+    if (root%branch == 'B' .and. physical(2) /= 0.0_dp) return
+    if (root%branch == 'C' .and. physical(2) /= physical(1)) return
+    call encode_unknowns(p, root%branch, physical(1), physical(2), physical(3), y, valid)
+    if (.not. valid) return
+    call equilibrium_residual(p, root%branch, physical, raw)
+    if (.not. all(ieee_is_finite(raw))) return
+    if (maxval(abs(raw)) > p%search%residual_tolerance) return
+    call validate_zhao_profile(p, root%branch, physical(1)/p%potential_scale_v, physical(2)/p%potential_scale_v, &
+        physical(3)/p%density_scale_m3, minimum_e2, boundary_e2, status, message)
+    if (status /= SHEATH_OK) return
+    call equilibrium_key(p, key, shape)
+    call atlas%insert(key, shape, root%branch, y, component)
+    status = SHEATH_OK
+    message = ''
+  end subroutine add_equilibrium_to_atlas
+
+  !> Build a table from a sweep, then retry unresolved points using later neighbors.
+  !! report is ordered (A/B/C,input); unrequested branches have INVALID_ARGUMENT.
+  subroutine build_equilibrium_atlas(inputs, atlas, status, message, report, deflation)
+    class(equilibrium_input), intent(in) :: inputs(:)
+    type(sheath_equilibrium_atlas), intent(inout) :: atlas
+    integer(i32), intent(out) :: status
+    character(len=*), intent(out) :: message
+    integer(i32), allocatable, intent(out), optional :: report(:, :)
+    logical, intent(in), optional :: deflation
+    class(equilibrium_input), allocatable :: current
+    type(zhao_equilibrium_result) :: root
+    type(zhao_equilibrium_result), allocatable :: candidates(:)
+    type(zhao_params_type) :: p
+    integer(i32) :: outcomes(3, size(inputs)), local_status
+    integer :: pass, i, k, j, size_before
+    logical :: discover
+    logical :: excluded(3, size(inputs))
+    type(sheath_search_diagnostics) :: diagnostics
+    character(len=1), parameter :: branches(3) = ['A', 'B', 'C']
+    outcomes = SHEATH_INVALID_ARGUMENT
+    excluded = .false.
+    status = SHEATH_INVALID_ARGUMENT
+    message = 'Invalid atlas controls.'
+    if (.not. atlas%valid()) return
+    discover = .false.
+    if (present(deflation)) discover = deflation
+    do pass = 1, 3*size(inputs) + 1
+      size_before = atlas%size()
+      do i = 1, size(inputs)
+        if (allocated(current)) deallocate (current)
+        allocate (current, source=inputs(i))
+        call prepare_params(current, p, local_status, message)
+        if (local_status /= SHEATH_OK) then
+          status = local_status
+          if (present(report)) report = outcomes
+          return
+        end if
+        do k = 1, 3
+          if (trim(lower_ascii(inputs(i)%branch)) /= 'auto' .and. &
+              trim(lower_ascii(inputs(i)%branch)) /= lower_ascii(branches(k))) cycle
+          if (pass > 1) then
+            if (outcomes(k, i) == SHEATH_OK .or. excluded(k, i)) cycle
+          end if
+          current%branch = branches(k)
+          if (discover) then
+            call solve_equilibrium_candidates(current, candidates, local_status, message, diagnostics, &
+                atlas=atlas, deflation=.true.)
+          else
+            call solve_equilibrium(current, root, local_status, message, diagnostics, atlas=atlas)
+            if (allocated(candidates)) deallocate (candidates)
+            allocate (candidates(0))
+            if (local_status == SHEATH_OK) candidates = [root]
+          end if
+          outcomes(k, i) = local_status
+          excluded(k, i) = diagnostics%excluded(k)
+          if (local_status == SHEATH_INVALID_ARGUMENT) then
+            status = local_status
+            if (present(report)) report = outcomes
+            return
+          end if
+          if (local_status /= SHEATH_OK) cycle
+          do j = 1, size(candidates)
+            call add_equilibrium_to_atlas(current, candidates(j), atlas, local_status, message)
+            if (local_status /= SHEATH_OK) then
+              status = local_status
+              if (present(report)) report = outcomes
+              return
+            end if
+          end do
+        end do
+      end do
+      if (.not. any((outcomes == SHEATH_NUMERICAL_FAILURE .or. outcomes == SHEATH_NO_PHYSICAL_SOLUTION) &
+          .and. .not. excluded) .or. atlas%size() == size_before) exit
+    end do
+    if (present(report)) report = outcomes
+    status = SHEATH_OK
+    message = 'Atlas built; unresolved points do not establish absence of solutions.'
+  end subroutine build_equilibrium_atlas
 
   !> Return species densities [m^-3] and charge density [C/m^3] at potential_v [V].
   !! Pass a valid equilibrium solution and the same input used to obtain it.
@@ -363,8 +610,9 @@ contains
   !> Solve the J=0 equilibrium and reconstruct its 1D profile using the Poisson first integral.
   !! options controls sampling and truncation of the semi-infinite domain; no forced zero tail is attached.
   !! On SHEATH_OK, output contains allocated arrays in SI units; otherwise inspect status and message.
-  subroutine solve_profile(input, options, output, status, message)
+  subroutine solve_profile(input, options, output, status, message, atlas)
     class(equilibrium_input), intent(in) :: input
+    type(sheath_equilibrium_atlas), intent(in), optional :: atlas
     type(zhao_profile_options), intent(in) :: options
     type(zhao_profile_result), intent(out) :: output
     integer(i32), intent(out) :: status
@@ -387,7 +635,7 @@ contains
     if (.not. all(ieee_is_finite([options%max_distance_m, options%potential_cutoff_v]))) return
     if (min(options%max_distance_m, options%potential_cutoff_v) <= 0.0_dp) return
 
-    call solve_equilibrium(input, root, status, message)
+    call solve_equilibrium(input, root, status, message, atlas=atlas)
     if (status /= SHEATH_OK) return
 
     n = options%points_per_segment
