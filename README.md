@@ -45,7 +45,7 @@ python examples/plot_profiles.py
 ## ドキュメント
 
 - [図の再生成・実行例](docs/examples.md)
-- [Fortran API](docs/fortran-api.md) / [スペクトルと静的評価 API](docs/spectral-api.md)
+- [Fortran API](docs/fortran-api.md) / [Python API](docs/python-api.md) / [スペクトルと静的評価 API](docs/spectral-api.md)
 - [モデルの仮定](docs/kinetic-model.md) / [数値計算法](docs/algorithm.md)
 
 ## ライセンス

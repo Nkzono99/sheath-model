@@ -1,8 +1,8 @@
 # Algorithm notes
 
 The current model transports the upstream electron distribution along collisionless
-orbits. It retains Zhao's cold-ion, photoelectron and A/B/C population topology,
-but replaces the locally shifted Maxwellian expressions used in v0.1.0.
+orbits. It uses Zhao's photoelectron and A/B/C population topology with cold or
+warm fluid ions and a fixed normal entrance state.
 The derivation, closure and limits are detailed in [kinetic-model.md](kinetic-model.md).
 Fortran inputs and units are listed in [fortran-api.md](fortran-api.md).
 
@@ -44,7 +44,7 @@ connection residual without imposing either the current or boundary-field closur
 
 ## Photoelectron energy spectra
 
-The Fortran field and static APIs accept either an analytic Maxwellian source or
+The Fortran fixed-entry equilibrium, field and static APIs accept either an analytic Maxwellian source or
 arbitrary normal-energy bins. A bin stores its **integrated outward number flux**;
 `g=dGamma/dK=bin_flux/bin_width` is constant within it. Let `v*=sqrt(2e/m_e)`,
 `q=phi_H-phi`, and `B=phi_H-phi_min`. For each bin `[a,b]`, the passing density is
@@ -79,7 +79,7 @@ coalesced into C when the minimum reaches the boundary.
 
 ## Acceptance and profiles
 
-Roots must have accessible cold ions and a real connecting first integral of
+Roots must have an accessible upstream-connected ion fluid branch and a real connecting first integral of
 Poisson's equation. Fortran shares the same acceptance routine between J=0 and
 prescribed-field solves and static evaluation. Python also checks physical admissibility before returning
 algebraic unknowns. Auto selection skips inadmissible roots.
@@ -106,11 +106,37 @@ relative margin on the two coefficients allows for roundoff without replacing
 the physical check by a finite profile grid. C=0 still needs the remaining checks.
 
 Both implementations reconstruct all profiles from the semi-infinite first integral.
-The old Python B/C finite-interval BVP has been removed: its trial iterates can leave
-the accessible potential interval after introducing the kinetic cutoffs. The
-Python parameter `n_profile_grid` controls the potential grid for B/C, and
+Python `ProfileOptions.n_profile_grid` controls the potential grid for B/C, and
 `profile_phi_tol_hat` controls the upstream cutoff on all branches. Returned positions
 are nonuniform and may stop before zmax_hat; no artificial zero-potential tail is added.
+
+## Search policy and solution maps
+
+The reusable Solver owns numerical options and optional solution maps, while
+physical conditions are supplied per call. Per-call contexts evaluate original
+residuals; profile reconstruction uses an existing accepted root and has no root
+search responsibility. Maps are read during queries and changed only explicitly.
+
+The auto method uses guarded Newton corrections with an LM fallback, logarithmic
+unknowns, domain checks and backtracking. Explicit newton/lm choices use the same
+guards. J=0 B/C additionally permits a scalar bracket method after eliminating
+electron normalization; prescribed-field searches do not use that reduction.
+Acceptance requires the original residual tolerance, not a small step or a
+least-squares stationary point.
+
+Maps use six dimensionless plasma/source coordinates, with a seventh prescribed
+field coordinate for field maps. A/B/C types, proximity-based component labels
+and normalized spectral shape remain separate. Local linear predictions and
+nearby stored roots seed exact solves. Parameter continuation uses adaptive
+predictor/corrector steps; pseudo-arclength continuation adds a tangent condition
+to pass simple folds. Every accepted path point passes the physical profile gate,
+and the final point is corrected at the exact requested conditions.
+
+Shifted deflation repels already located roots in candidate enumeration. New
+candidates must satisfy the original equations and physical conditions, then are
+deduplicated. Finite start, step and candidate budgets limit all searches. Map
+construction retries holes using later neighbors; an empty region is not a proof
+of absence, and no global branch-coverage guarantee is provided.
 
 ## Multiple solutions and numerical limits
 

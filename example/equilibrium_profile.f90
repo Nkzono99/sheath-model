@@ -1,16 +1,18 @@
 program equilibrium_profile
   use sheath_model
   implicit none
+  type(sheath_solver) :: solver
   type(zhao_equilibrium_input) :: input
-  type(zhao_profile_options) :: options
-  type(zhao_profile_result) :: profile
+  type(sheath_profile_options) :: options
+  type(sheath_profile_result) :: profile
   integer(i32) :: status
   integer :: i
   character(len=256) :: message
   input%branch = 'A'
   input%electron_drift_mode = 'zero'
   input%sun_elevation_deg = 60.0_dp
-  call solve_profile(input, options, profile, status, message)
+  solver%profile = options
+  call solver%solve_profile(input, profile, status, message)
   if (status /= SHEATH_OK) then
     print *, trim(message)
     stop 1

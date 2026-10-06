@@ -2,8 +2,8 @@
 program potential_scan
   use sheath_model
   implicit none
-  type(zhao_plasma_input) :: plasma
-  type(zhao_state_result) :: state
+  type(plasma_input) :: plasma
+  type(sheath_state_result) :: state
   integer(i32) :: status
   integer :: i
   real(dp) :: phi

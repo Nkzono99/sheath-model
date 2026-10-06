@@ -3,23 +3,24 @@ program test_closures
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use sheath_model
   implicit none
+  type(sheath_solver) :: solver
   real(dp), parameter :: qe = 1.602176634e-19_dp, eps0 = 8.8541878128e-12_dp, pi = acos(-1.0_dp)
   real(dp), parameter :: elevations(3) = [60.0_dp, 20.0_dp, 10.0_dp]
   character(len=1), parameter :: branches(3) = ['A', 'B', 'C']
   type(zhao_equilibrium_input) :: input
-  type(zhao_equilibrium_result) :: root
-  type(zhao_profile_result) :: profile
-  type(zhao_field_input) :: field_input
-  type(zhao_field_result) :: response
+  type(sheath_equilibrium_result) :: root
+  type(sheath_profile_result) :: profile
+  type(prescribed_field_input) :: field_input
+  type(prescribed_field_result) :: response
   type(sheath_field_atlas) :: atlas
-  type(zhao_field_result), allocatable :: responses(:)
+  type(prescribed_field_result), allocatable :: responses(:)
   integer(i32) :: status
   integer :: i
   real(dp) :: drift, n_source, vth_e, vth_pe, gamma_e, gamma_i, gamma_pe, current_scale, field
   character(len=512) :: message
   do i = 1, 3
     input = zhao_equilibrium_input(branch=branches(i), sun_elevation_deg=elevations(i), electron_drift_mode='zero')
-    call solve_equilibrium(input, root, status, message)
+    call solver%solve_equilibrium(input, root, status, message)
     call ok('J=0 root '//branches(i))
     drift = input%solar_wind_speed_mps*sin(elevations(i)*pi/180.0_dp)
     n_source = input%photoelectron_reference_density_m3*sin(elevations(i)*pi/180.0_dp)
@@ -39,7 +40,8 @@ program test_closures
     call near(root%photoelectron_escape_flux_m2_s, gamma_pe, 1e-12_dp*gamma_pe, 'escaping PE flux diagnostic')
   end do
   input = zhao_equilibrium_input(branch='A', electron_drift_mode='zero')
-  call solve_profile(input, zhao_profile_options(), profile, status, message)
+  solver%profile = sheath_profile_options()
+  call solver%solve_profile(input, profile, status, message)
   call ok('J=0 field reconstruction')
   root = profile%equilibrium
   field = profile%electric_field_v_m(1)
@@ -49,16 +51,18 @@ program test_closures
   vth_pe = sqrt(2.0_dp*qe*input%photoelectron_temperature_ev/input%electron_mass_kg)
   field_input%electric_field_v_m = field
   field_input%photoelectrons = maxwellian_photoelectrons(n_source, 2.2_dp)
-  call solve_prescribed_field(field_input, response, status, message)
+  call solver%solve_prescribed_field(field_input, response, status, message)
   call ok('E_H set to the J=0 solution field')
   call near(response%boundary_potential_v, root%surface_potential_v, 3e-5_dp, 'common solution potential')
   call near(response%ambient_electron_density_m3, root%ambient_electron_density_m3, 30.0_dp, 'common solution density')
   call near(response%net_current_a_m2, 0.0_dp, 1e-10_dp, 'common solution current')
-  call add_field_to_atlas(field_input, response, atlas, status, message)
+  call solver%add_field_to_atlas(field_input, response, atlas, status, message)
   call ok('store E_H reference')
   ! A different field must be preserved, without restoring J=0.
   field_input%electric_field_v_m = 1.01_dp*field
-  call solve_prescribed_field_candidates(field_input, responses, status, message, atlas=atlas, deflation=.true.)
+  solver%field_atlas = atlas
+  call solver%solve_prescribed_field_candidates(field_input, responses, status, message, deflation=.true.)
+  deallocate (solver%field_atlas)
   call ok('nonzero-current E_H model')
   do i = 1, size(responses)
     response = responses(i)
@@ -103,7 +107,7 @@ contains
       phi = phim + (phi0 - phim)*t*t
       s_pe = sqrt(max(0.0_dp, (phi - phim)/input%photoelectron_temperature_ev))
       s_e = sqrt(max(0.0_dp, (phi - phim)/field_input%electron_temperature_ev))
-      n_i = field_input%ion_density_m3/sqrt(1.0_dp - 2.0_dp*qe*phi/(field_input%ion_mass_kg*field_input%ion_drift_mps**2))
+      n_i = field_input%ion_density_m3/sqrt(1.0_dp - 2.0_dp*qe*phi/(field_input%ion_mass_kg*field_input%ion_entry_speed_mps**2))
       n_e = 0.5_dp*density*exp(phi/field_input%electron_temperature_ev)*erfc(s_e - drift_ratio)
       n_pe = 0.5_dp*n_source*exp((phi - phi0)/input%photoelectron_temperature_ev)*(1.0_dp + erf(s_pe))
       rho = qe*(n_i - n_e - n_pe)

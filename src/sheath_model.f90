@@ -7,16 +7,16 @@
 module sheath_model
   use sheath_model_photoelectrons, only: photoelectron_source, maxwellian_photoelectrons, binned_photoelectrons
   use sheath_model_ions, only: ion_density_ratio, ion_critical_potential
-  use sheath_model_state, only: zhao_plasma_input, zhao_state_result, evaluate_sheath_state
+  use sheath_model_state, only: plasma_input, sheath_state_result, evaluate_sheath_state
   use sheath_model_constants, only: dp, i32
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, &
       SHEATH_NO_PHYSICAL_SOLUTION, SHEATH_NUMERICAL_FAILURE, SHEATH_AMBIGUOUS_SOLUTION
-  use sheath_model_equilibrium, only: zhao_equilibrium_input, fixed_entry_equilibrium_input, zhao_equilibrium_result, &
-      zhao_density_result, solve_equilibrium, evaluate_density, &
-      zhao_profile_options, zhao_profile_result, solve_profile, build_equilibrium_atlas, add_equilibrium_to_atlas, &
-      solve_equilibrium_candidates
-  use sheath_model_field, only: zhao_field_input, zhao_field_result, solve_prescribed_field, solve_prescribed_field_candidates, &
-      build_field_atlas, add_field_to_atlas
+  use sheath_model_equilibrium, only: sheath_equilibrium_input, zhao_equilibrium_input, fixed_entry_equilibrium_input, &
+      sheath_equilibrium_result, &
+      sheath_density_result, evaluate_density, &
+      sheath_profile_options, sheath_profile_result
+  use sheath_model_field, only: prescribed_field_input, prescribed_field_result
+  use sheath_model_solver, only: sheath_solver
   use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, sheath_continuation_options
   use sheath_model_atlas, only: sheath_equilibrium_atlas, sheath_field_atlas, sheath_atlas_options, sheath_atlas_point
   implicit none
@@ -25,16 +25,14 @@ module sheath_model
 
   public :: photoelectron_source, maxwellian_photoelectrons, binned_photoelectrons
   public :: ion_density_ratio, ion_critical_potential
-  public :: zhao_plasma_input, zhao_state_result, evaluate_sheath_state
+  public :: plasma_input, sheath_state_result, evaluate_sheath_state
   public :: dp, i32, SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NO_PHYSICAL_SOLUTION
   public :: SHEATH_NUMERICAL_FAILURE, SHEATH_AMBIGUOUS_SOLUTION
-  public :: zhao_equilibrium_input, fixed_entry_equilibrium_input, zhao_equilibrium_result, zhao_density_result
-  public :: solve_equilibrium, evaluate_density, solve_profile
-  public :: zhao_profile_options, zhao_profile_result
-  public :: zhao_field_input, zhao_field_result, solve_prescribed_field, solve_prescribed_field_candidates
+  public :: zhao_equilibrium_input, fixed_entry_equilibrium_input, sheath_equilibrium_result, sheath_density_result
+  public :: sheath_solver, evaluate_density, sheath_equilibrium_input
+  public :: sheath_profile_options, sheath_profile_result
+  public :: prescribed_field_input, prescribed_field_result
   public :: sheath_search_options, sheath_search_diagnostics
   public :: sheath_equilibrium_atlas, sheath_atlas_options, sheath_atlas_point, sheath_continuation_options
-  public :: build_equilibrium_atlas, add_equilibrium_to_atlas
-  public :: solve_equilibrium_candidates
-  public :: sheath_field_atlas, build_field_atlas, add_field_to_atlas
+  public :: sheath_field_atlas
 end module sheath_model

@@ -8,7 +8,7 @@ module sheath_model_core
   use sheath_model_orbits, only: electron_density, gauss_x, gauss_w
   use sheath_model_ions, only: ion_density_ratio
   use sheath_model_constants, only: dp
-  use sheath_model_search, only: sheath_search_options
+  use sheath_model_search, only: sheath_search_options, sheath_continuation_options
   use sheath_model_constants, only: pi, eps0, qe
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_quiet_nan
   implicit none
@@ -18,6 +18,7 @@ module sheath_model_core
   !! Physical fields use their suffix units; mach, u and tau are dimensionless ratios.
   type :: zhao_params_type
     type(sheath_search_options) :: search
+    type(sheath_continuation_options) :: continuation
     type(photoelectron_source) :: photoelectrons
     real(dp) :: alpha_rad = 0.0d0
     real(dp) :: n_swi_inf_m3 = 0.0d0

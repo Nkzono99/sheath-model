@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 
-from .solver import ZhaoParams, ZhaoSheathSolver
+from .params import ZhaoParams
+from .solver import SheathSolver
+from .results import ProfileOptions
 
 
 def main() -> None:
@@ -17,20 +19,20 @@ def main() -> None:
     args = parser.parse_args()
 
     prm = ZhaoParams(
-        alpha_deg=args.alpha,
-        zmax_hat=args.zmax_hat,
+        sun_elevation_deg=args.alpha,
         electron_drift_mode=args.electron_drift_mode,
         ion_drift_mode=args.ion_drift_mode,
     )
-    solver = ZhaoSheathSolver(prm)
-    out = solver.solve_auto() if args.branch == "auto" else solver.solve_profile(args.branch)
+    solver = SheathSolver(profile=ProfileOptions(zmax_hat=args.zmax_hat))
+    profile = solver.solve_profile(prm, branch=args.branch)
+    out = profile.equilibrium
 
-    print(f"=== solved branch {out['branch']} ===")
-    print(f"alpha                = {prm.alpha_deg:.1f} deg")
-    print(f"phi0                 = {out['phi0_V']:.6f} V")
-    print(f"phi_m                = {out['phi_m_V']:.6f} V")
-    print(f"n_swe_inf            = {out['n_swe_inf_m3']:.6e} m^-3")
-    print(f"z_m_hat              = {out['z_m_hat']:.6f}")
+    print(f"=== solved branch {out.branch} ===")
+    print(f"alpha                = {prm.sun_elevation_deg:.1f} deg")
+    print(f"phi0                 = {out.surface_potential_v:.6f} V")
+    print(f"phi_m                = {out.minimum_potential_v:.6f} V")
+    print(f"n_swe_inf            = {out.ambient_electron_density_m3:.6e} m^-3")
+    print(f"turning height       = {profile.turning_height_m:.6f} m")
     print(f"electron drift mode  = {prm.electron_drift_mode}")
     print(f"ion drift mode       = {prm.ion_drift_mode}")
 

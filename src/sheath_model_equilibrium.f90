@@ -4,11 +4,12 @@ module sheath_model_equilibrium
   use sheath_model_constants, only: dp, i32, pi, eps0, qe, electron_mass, proton_mass, lower_ascii
   use sheath_model_photoelectrons, only: maxwellian_photoelectrons
   use sheath_model_ions, only: ion_critical_potential, ion_density_ratio
-  use sheath_model_state, only: zhao_plasma_input, prepare_plasma_params
+  use sheath_model_state, only: plasma_input, prepare_plasma_params
   use sheath_model_core, only: zhao_params_type, &
       evaluate_zhao_density_hat, &
       evaluate_zhao_fluxes
-  use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, valid_search_options
+  use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, valid_search_options, &
+      sheath_continuation_options, valid_continuation_options
   use sheath_model_atlas, only: sheath_equilibrium_atlas
   use sheath_model_atlas_physics, only: equilibrium_key, atlas_equilibrium_seeds, continue_equilibrium_from_atlas
   use sheath_model_coordinates, only: encode_unknowns
@@ -20,25 +21,25 @@ module sheath_model_equilibrium
 
   private
 
-  public :: zhao_equilibrium_input, fixed_entry_equilibrium_input, zhao_equilibrium_result, zhao_density_result
-  public :: solve_equilibrium, evaluate_density, solve_profile
-  public :: zhao_profile_options, zhao_profile_result
+  public :: sheath_equilibrium_input, zhao_equilibrium_input, fixed_entry_equilibrium_input, &
+      sheath_equilibrium_result, sheath_density_result
+  public :: solve_equilibrium, evaluate_density, build_profile
+  public :: sheath_profile_options, sheath_profile_result
   public :: build_equilibrium_atlas, add_equilibrium_to_atlas, solve_equilibrium_candidates
 
-  type, abstract :: equilibrium_input
-    type(sheath_search_options) :: search
+  type, abstract :: sheath_equilibrium_input
     character(len=9) :: branch = 'auto'
-  end type equilibrium_input
+  end type sheath_equilibrium_input
 
   !> Fixed normal plasma state and emitted source for the J=0 closure.
   !! No wind projection or Bohm-speed adjustment is applied. Plasma units are SI except temperatures [eV].
-  type, extends(equilibrium_input) :: fixed_entry_equilibrium_input
-    type(zhao_plasma_input) :: plasma = zhao_plasma_input(electron_drift_mps=0.0_dp)
+  type, extends(sheath_equilibrium_input) :: fixed_entry_equilibrium_input
+    type(plasma_input) :: plasma = plasma_input(electron_drift_mps=0.0_dp)
   end type fixed_entry_equilibrium_input
 
   !> Plasma and illumination inputs for the J=0 closure; units are given by the component suffixes.
   !! branch selects A/B/C/auto; normal drift projects the wind speed along the surface normal.
-  type, extends(equilibrium_input) :: zhao_equilibrium_input
+  type, extends(sheath_equilibrium_input) :: zhao_equilibrium_input
     real(dp) :: sun_elevation_deg = 60.0_dp
     real(dp) :: ion_density_m3 = 8.7e6_dp
     real(dp) :: photoelectron_reference_density_m3 = 64.0e6_dp
@@ -55,7 +56,7 @@ module sheath_model_equilibrium
 
   !> Accepted J=0 root, fluxes and current in SI units, with dimensionless residual_norm.
   !! valid marks success; ambient_electron_density_m3 is the Maxwellian normalization, not total upstream density.
-  type :: zhao_equilibrium_result
+  type :: sheath_equilibrium_result
     logical :: valid = .false.
     character(len=1) :: branch = ' '
     real(dp) :: surface_potential_v = 0.0_dp
@@ -67,43 +68,47 @@ module sheath_model_equilibrium
     real(dp) :: ion_inward_flux_m2_s = 0.0_dp
     real(dp) :: photoelectron_escape_flux_m2_s = 0.0_dp
     real(dp) :: net_current_a_m2 = 0.0_dp ! Conventional electric current along +z
-  end type zhao_equilibrium_result
+  end type sheath_equilibrium_result
 
   !> Local species number densities [m^-3] and net charge density [C/m^3].
-  type :: zhao_density_result
+  type :: sheath_density_result
     real(dp) :: ion_m3 = 0.0_dp
     real(dp) :: electron_free_m3 = 0.0_dp
     real(dp) :: electron_reflected_m3 = 0.0_dp
     real(dp) :: photoelectron_free_m3 = 0.0_dp
     real(dp) :: photoelectron_captured_m3 = 0.0_dp
     real(dp) :: charge_c_m3 = 0.0_dp
-  end type zhao_density_result
+  end type sheath_density_result
 
   !> Profile sampling controls: points per monotonic segment, maximum height [m], and potential cutoff [V].
-  type :: zhao_profile_options
+  type :: sheath_profile_options
     integer :: points_per_segment = 4000
     real(dp) :: max_distance_m = 100.0_dp
     real(dp) :: potential_cutoff_v = 2.2e-3_dp
-  end type zhao_profile_options
+  end type sheath_profile_options
 
   !> J=0 equilibrium and sampled height [m], potential [V], field [V/m], and local densities.
   !! All arrays share the same node order; turning_height_m is -1 for branches without an internal minimum.
-  type :: zhao_profile_result
-    type(zhao_equilibrium_result) :: equilibrium
+  type :: sheath_profile_result
+    type(sheath_equilibrium_result) :: equilibrium
     real(dp) :: turning_height_m = -1.0_dp ! A only; -1 means no internal minimum
     real(dp), allocatable :: z_m(:), potential_v(:), electric_field_v_m(:)
-    type(zhao_density_result), allocatable :: density(:)
-  end type zhao_profile_result
+    type(sheath_density_result), allocatable :: density(:)
+  end type sheath_profile_result
 
 contains
 
-  subroutine prepare_params(input, p, status, message)
-    class(equilibrium_input), intent(in) :: input
+  subroutine prepare_params(input, p, status, message, search_options, continuation_options)
+    type(sheath_search_options), intent(in), optional :: search_options
+    type(sheath_continuation_options), intent(in), optional :: continuation_options
+    class(sheath_equilibrium_input), intent(in) :: input
     type(zhao_params_type), intent(out) :: p
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
 
     p = zhao_params_type()
+    if (present(search_options)) p%search = search_options
+    if (present(continuation_options)) p%continuation = continuation_options
     status = SHEATH_INVALID_ARGUMENT
     message = 'branch must be auto, A, B, or C.'
     select case (trim(lower_ascii(input%branch)))
@@ -113,13 +118,16 @@ contains
     end select
 
     message = 'Invalid search options; bracket is available only for explicit B/C equilibrium branches.'
-    if (.not. valid_search_options(input%search)) return
-    if (trim(lower_ascii(input%search%method)) == 'bracket' .and. &
+    if (.not. valid_search_options(p%search) .or. .not. valid_continuation_options(p%continuation)) return
+    if (trim(lower_ascii(p%search%method)) == 'bracket' .and. &
         trim(lower_ascii(input%branch)) /= 'b' .and. trim(lower_ascii(input%branch)) /= 'c') return
     select type (input)
     type is (fixed_entry_equilibrium_input)
       call prepare_plasma_params(input%plasma, p, status, message)
-      p%search = input%search
+      p%search = sheath_search_options()
+      p%continuation = sheath_continuation_options()
+      if (present(search_options)) p%search = search_options
+      if (present(continuation_options)) p%continuation = continuation_options
       p%search%method = lower_ascii(p%search%method)
       return
     type is (zhao_equilibrium_input)
@@ -142,7 +150,10 @@ contains
           input%electron_drift_mode /= 'zero') return
       if (input%ion_drift_mode /= 'normal' .and. input%ion_drift_mode /= 'full') return
 
-      p%search = input%search
+      p%search = sheath_search_options()
+      p%continuation = sheath_continuation_options()
+      if (present(search_options)) p%search = search_options
+      if (present(continuation_options)) p%continuation = continuation_options
       p%search%method = lower_ascii(p%search%method)
       p%alpha_rad = input%sun_elevation_deg*pi/180.0_dp
       p%n_swi_inf_m3 = input%ion_density_m3
@@ -197,15 +208,18 @@ contains
   !> Solve the J=0 closure for the plasma inputs and return a physically admissible equilibrium.
   !! branch='auto' returns the first admissible branch in the model's search order.
   !! status/message report the outcome; output%valid is false on failure. Physical outputs use SI units.
-  subroutine solve_equilibrium(input, output, status, message, diagnostics, initial_guesses, atlas)
-    class(equilibrium_input), intent(in) :: input
-    type(zhao_equilibrium_result), intent(out) :: output
+  subroutine solve_equilibrium(input, output, status, message, diagnostics, initial_guesses, atlas, &
+      search_options, continuation_options)
+    type(sheath_search_options), intent(in), optional :: search_options
+    type(sheath_continuation_options), intent(in), optional :: continuation_options
+    class(sheath_equilibrium_input), intent(in) :: input
+    type(sheath_equilibrium_result), intent(out) :: output
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
 
     type(zhao_params_type) :: p
     type(sheath_search_diagnostics), intent(out), optional :: diagnostics
-    type(zhao_equilibrium_result), intent(in), optional :: initial_guesses(:)
+    type(sheath_equilibrium_result), intent(in), optional :: initial_guesses(:)
     type(sheath_equilibrium_atlas), intent(in), optional :: atlas
     type(sheath_search_diagnostics) :: search
     real(dp), allocatable :: initial(:, :)
@@ -219,10 +233,11 @@ contains
     character(len=1) :: branch
     logical :: success
 
-    output = zhao_equilibrium_result()
+    output = sheath_equilibrium_result()
     search = sheath_search_diagnostics()
     if (present(diagnostics)) diagnostics = search
-    call prepare_params(input, p, status, message)
+    call prepare_params(input, p, status, message, &
+        search_options=search_options, continuation_options=continuation_options)
     if (status /= SHEATH_OK) return
     if (present(atlas)) then
       if (.not. atlas%valid()) then
@@ -303,18 +318,18 @@ contains
     type(zhao_params_type), intent(in) :: p
     character(len=1), intent(in) :: branch
     real(dp), intent(in) :: physical(3)
-    type(zhao_equilibrium_result), intent(out) :: output
+    type(sheath_equilibrium_result), intent(out) :: output
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
-    type(zhao_equilibrium_result) :: trial
+    type(sheath_equilibrium_result) :: trial
     real(dp) :: residual(3), outward, returning
-    output = zhao_equilibrium_result()
+    output = sheath_equilibrium_result()
     call equilibrium_residual(p, branch, physical, residual)
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Original equilibrium residual exceeds tolerance.'
     if (.not. all(ieee_is_finite(residual))) return
     if (maxval(abs(residual)) > p%search%residual_tolerance) return
-    trial = zhao_equilibrium_result(.false., branch, physical(1), physical(2), physical(3), p%length_scale_m, &
+    trial = sheath_equilibrium_result(.false., branch, physical(1), physical(2), physical(3), p%length_scale_m, &
         maxval(abs(residual)))
     call evaluate_zhao_fluxes(p, physical(1), physical(2), physical(3), trial%electron_inward_flux_m2_s, &
         trial%ion_inward_flux_m2_s, outward, trial%photoelectron_escape_flux_m2_s, returning)
@@ -334,19 +349,21 @@ contains
   !> Enumerate located physical roots with optional deflation; no completeness claim.
   !! max_roots is per A/B/C type, and initial_guesses/atlas supplement default seeds.
   subroutine solve_equilibrium_candidates(input, candidates, status, message, diagnostics, &
-      initial_guesses, atlas, deflation, max_roots)
-    class(equilibrium_input), intent(in) :: input
-    type(zhao_equilibrium_result), allocatable, intent(out) :: candidates(:)
+      initial_guesses, atlas, deflation, max_roots, search_options, continuation_options)
+    type(sheath_search_options), intent(in), optional :: search_options
+    type(sheath_continuation_options), intent(in), optional :: continuation_options
+    class(sheath_equilibrium_input), intent(in) :: input
+    type(sheath_equilibrium_result), allocatable, intent(out) :: candidates(:)
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     type(sheath_search_diagnostics), intent(out), optional :: diagnostics
-    type(zhao_equilibrium_result), intent(in), optional :: initial_guesses(:)
+    type(sheath_equilibrium_result), intent(in), optional :: initial_guesses(:)
     type(sheath_equilibrium_atlas), intent(in), optional :: atlas
     logical, intent(in), optional :: deflation
     integer, intent(in), optional :: max_roots
     type(sheath_search_diagnostics) :: search
     type(zhao_params_type) :: p
-    type(zhao_equilibrium_result) :: root
+    type(sheath_equilibrium_result) :: root
     real(dp), allocatable :: initial(:, :), atlas_initial(:, :), physical_roots(:, :)
     real(dp) :: first(3)
     integer :: k, i, seed_count, atlas_count, limit
@@ -356,7 +373,8 @@ contains
     allocate (candidates(0))
     search = sheath_search_diagnostics()
     if (present(diagnostics)) diagnostics = search
-    call prepare_params(input, p, status, message)
+    call prepare_params(input, p, status, message, &
+        search_options=search_options, continuation_options=continuation_options)
     if (status /= SHEATH_OK) return
     limit = 16
     if (present(max_roots)) limit = max_roots
@@ -422,9 +440,11 @@ contains
   end subroutine solve_equilibrium_candidates
 
   !> Store only an independently checked root, in dimensionless coordinates.
-  subroutine add_equilibrium_to_atlas(input, root, atlas, status, message, component)
-    class(equilibrium_input), intent(in) :: input
-    type(zhao_equilibrium_result), intent(in) :: root
+  subroutine add_equilibrium_to_atlas(input, root, atlas, status, message, component, search_options, continuation_options)
+    type(sheath_search_options), intent(in), optional :: search_options
+    type(sheath_continuation_options), intent(in), optional :: continuation_options
+    class(sheath_equilibrium_input), intent(in) :: input
+    type(sheath_equilibrium_result), intent(in) :: root
     type(sheath_equilibrium_atlas), intent(inout) :: atlas
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
@@ -433,7 +453,8 @@ contains
     real(dp) :: key(6), y(3), raw(3), physical(3), minimum_e2, boundary_e2
     real(dp), allocatable :: shape(:)
     logical :: valid
-    call prepare_params(input, p, status, message)
+    call prepare_params(input, p, status, message, &
+        search_options=search_options, continuation_options=continuation_options)
     if (status /= SHEATH_OK) return
     status = SHEATH_INVALID_ARGUMENT
     message = 'Atlas requires valid controls and a converged, physical A/B/C root.'
@@ -460,16 +481,18 @@ contains
 
   !> Build a table from a sweep, then retry unresolved points using later neighbors.
   !! report is ordered (A/B/C,input); unrequested branches have INVALID_ARGUMENT.
-  subroutine build_equilibrium_atlas(inputs, atlas, status, message, report, deflation)
-    class(equilibrium_input), intent(in) :: inputs(:)
+  subroutine build_equilibrium_atlas(inputs, atlas, status, message, report, deflation, search_options, continuation_options)
+    type(sheath_search_options), intent(in), optional :: search_options
+    type(sheath_continuation_options), intent(in), optional :: continuation_options
+    class(sheath_equilibrium_input), intent(in) :: inputs(:)
     type(sheath_equilibrium_atlas), intent(inout) :: atlas
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     integer(i32), allocatable, intent(out), optional :: report(:, :)
     logical, intent(in), optional :: deflation
-    class(equilibrium_input), allocatable :: current
-    type(zhao_equilibrium_result) :: root
-    type(zhao_equilibrium_result), allocatable :: candidates(:)
+    class(sheath_equilibrium_input), allocatable :: current
+    type(sheath_equilibrium_result) :: root
+    type(sheath_equilibrium_result), allocatable :: candidates(:)
     type(zhao_params_type) :: p
     integer(i32) :: outcomes(3, size(inputs)), local_status
     integer :: pass, i, k, j, size_before
@@ -489,7 +512,8 @@ contains
       do i = 1, size(inputs)
         if (allocated(current)) deallocate (current)
         allocate (current, source=inputs(i))
-        call prepare_params(current, p, local_status, message)
+        call prepare_params(current, p, local_status, message, &
+            search_options=search_options, continuation_options=continuation_options)
         if (local_status /= SHEATH_OK) then
           status = local_status
           if (present(report)) report = outcomes
@@ -504,9 +528,11 @@ contains
           current%branch = branches(k)
           if (discover) then
             call solve_equilibrium_candidates(current, candidates, local_status, message, diagnostics, &
-                atlas=atlas, deflation=.true.)
+                atlas=atlas, deflation=.true., &
+                search_options=search_options, continuation_options=continuation_options)
           else
-            call solve_equilibrium(current, root, local_status, message, diagnostics, atlas=atlas)
+            call solve_equilibrium(current, root, local_status, message, diagnostics, atlas=atlas, &
+                search_options=search_options, continuation_options=continuation_options)
             if (allocated(candidates)) deallocate (candidates)
             allocate (candidates(0))
             if (local_status == SHEATH_OK) candidates = [root]
@@ -520,7 +546,8 @@ contains
           end if
           if (local_status /= SHEATH_OK) cycle
           do j = 1, size(candidates)
-            call add_equilibrium_to_atlas(current, candidates(j), atlas, local_status, message)
+            call add_equilibrium_to_atlas(current, candidates(j), atlas, local_status, message, &
+                search_options=search_options, continuation_options=continuation_options)
             if (local_status /= SHEATH_OK) then
               status = local_status
               if (present(report)) report = outcomes
@@ -546,10 +573,10 @@ contains
       output, status, message, &
       side &
       )
-    class(equilibrium_input), intent(in) :: input
-    type(zhao_equilibrium_result), intent(in) :: solution
+    class(sheath_equilibrium_input), intent(in) :: input
+    type(sheath_equilibrium_result), intent(in) :: solution
     real(dp), intent(in) :: potential_v
-    type(zhao_density_result), intent(out) :: output
+    type(sheath_density_result), intent(out) :: output
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     character(len=*), intent(in), optional :: side
@@ -558,7 +585,7 @@ contains
     real(dp) :: d(5), upper
     character(len=9) :: region
 
-    output = zhao_density_result()
+    output = sheath_density_result()
     call prepare_params(input, p, status, message)
     if (status /= SHEATH_OK) return
 
@@ -602,25 +629,26 @@ contains
     message = 'Density evaluation is non-finite or negative.'
     if (.not. all(ieee_is_finite(d)) .or. any(d < 0.0_dp)) return
 
-    output = zhao_density_result(d(1), d(2), d(3), d(4), d(5), qe*(d(1) - sum(d(2:5))))
+    output = sheath_density_result(d(1), d(2), d(3), d(4), d(5), qe*(d(1) - sum(d(2:5))))
     status = SHEATH_OK
     message = ''
   end subroutine evaluate_density
 
-  !> Solve the J=0 equilibrium and reconstruct its 1D profile using the Poisson first integral.
+  !> Reconstruct an existing J=0 root using the Poisson first integral, without root search.
   !! options controls sampling and truncation of the semi-infinite domain; no forced zero tail is attached.
   !! On SHEATH_OK, output contains allocated arrays in SI units; otherwise inspect status and message.
-  subroutine solve_profile(input, options, output, status, message, atlas)
-    class(equilibrium_input), intent(in) :: input
-    type(sheath_equilibrium_atlas), intent(in), optional :: atlas
-    type(zhao_profile_options), intent(in) :: options
-    type(zhao_profile_result), intent(out) :: output
+  subroutine build_profile(input, root, options, output, status, message, residual_tolerance)
+    class(sheath_equilibrium_input), intent(in) :: input
+    type(sheath_profile_options), intent(in) :: options
+    type(sheath_profile_result), intent(out) :: output
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
+    real(dp), intent(in) :: residual_tolerance
 
     type(zhao_params_type) :: p
-    type(zhao_equilibrium_result) :: root
-    type(zhao_profile_result) :: trial
+    type(sheath_equilibrium_result), intent(in) :: root
+    real(dp) :: raw(3), minimum_e2, boundary_e2
+    type(sheath_profile_result) :: trial
     real(dp), allocatable :: phi(:), distance(:), rho(:), e2(:), z(:), v(:), e(:)
     real(dp) :: phi0, phim, cutoff, t, delta, turn, part, d(5)
     integer :: n, i, segment, total, kept
@@ -628,6 +656,10 @@ contains
 
     call prepare_params(input, p, status, message)
     if (status /= SHEATH_OK) return
+    status = SHEATH_INVALID_ARGUMENT
+    message = 'Profile residual tolerance must be finite and positive.'
+    if (.not. ieee_is_finite(residual_tolerance) .or. residual_tolerance <= 0.0_dp) return
+    p%search%residual_tolerance = residual_tolerance
 
     status = SHEATH_INVALID_ARGUMENT
     message = 'Profile requires at least 32 points per segment and finite positive distance/cutoff.'
@@ -635,7 +667,18 @@ contains
     if (.not. all(ieee_is_finite([options%max_distance_m, options%potential_cutoff_v]))) return
     if (min(options%max_distance_m, options%potential_cutoff_v) <= 0.0_dp) return
 
-    call solve_equilibrium(input, root, status, message, atlas=atlas)
+    status = SHEATH_INVALID_ARGUMENT
+    message = 'Profile requires a converged root for the supplied physical conditions.'
+    if (.not. root%valid .or. index('ABC', root%branch) == 0) return
+    if (root%branch == 'A' .and. root%minimum_potential_v >= min(root%surface_potential_v, 0.0_dp)) return
+    if (root%branch == 'B' .and. root%minimum_potential_v /= 0.0_dp) return
+    if (root%branch == 'C' .and. root%minimum_potential_v /= root%surface_potential_v) return
+    call equilibrium_residual(p, root%branch, &
+        [root%surface_potential_v, root%minimum_potential_v, root%ambient_electron_density_m3], raw)
+    if (.not. all(ieee_is_finite(raw)) .or. maxval(abs(raw)) > p%search%residual_tolerance) return
+    call validate_zhao_profile(p, root%branch, root%surface_potential_v/p%potential_scale_v, &
+        root%minimum_potential_v/p%potential_scale_v, root%ambient_electron_density_m3/p%density_scale_m3, &
+        minimum_e2, boundary_e2, status, message)
     if (status /= SHEATH_OK) return
 
     n = options%points_per_segment
@@ -770,6 +813,6 @@ contains
           values(1), values(2), values(3), values(4), values(5))
     end subroutine density_at
 
-  end subroutine solve_profile
+  end subroutine build_profile
 
 end module sheath_model_equilibrium

@@ -82,7 +82,7 @@ A+B などは同じ条件で複数の Type が得られたことを表し、安�
 CSV の Type はビット値 `A=1, B=2, C=4` の和です。例えば `types_found=3` は A+B を表します。
 `unresolved_types` と `rejected_types` も同じビット表現を使い、採用解の有無とは別に探索結果を記録します。
 `candidate_count` は報告された候補数です。
-E_H 側は枝ごとの `zhao_field_search_diagnostics` から未解決・棄却のビットを記録し、
+E_H 側は枝ごとの `sheath_search_diagnostics` から未解決・棄却のビットを記録し、
 採用候補がある格子点でも未解決の初期値を保持します。
 掲載マップでは各格子点を独立に探索し、近隣解は初期値に使っていません。
 低電場の浅い Type A や A/B の境界付近では初期値による検出差が残ります。
@@ -176,16 +176,16 @@ Python 3.10+ では NumPy / SciPy による独立した実装を利用できま�
 リポジトリ直下で `python -m pip install -e '.[plot]'` を実行してください。
 
 ```python
-from sheath_model import ZhaoParams, ZhaoSheathSolver
+from sheath_model import ZhaoParams, SheathSolver, ProfileOptions
 
-solver = ZhaoSheathSolver(
-    ZhaoParams(alpha_deg=60.0, electron_drift_mode="zero", zmax_hat=120.0)
-)
-profile = solver.solve_profile("A")
-print(profile["phi0_V"], profile["phi_m_V"])
+inputs = ZhaoParams(sun_elevation_deg=60.0, electron_drift_mode="zero")
+solver = SheathSolver(profile=ProfileOptions(zmax_hat=120.0))
+profile = solver.solve_profile(inputs, branch="A")
+print(profile.equilibrium.surface_potential_v, profile.equilibrium.minimum_potential_v)
 ```
 
 Fortran とのバインディングはなく、Python は Maxwell 源の J=0 モデルに対応します。
+入力・結果・マップの操作は [Python API](python-api.md) を参照してください。
 任意スペクトルと静的電位評価は [Fortran API](spectral-api.md) で利用できます。
 
 ```bash

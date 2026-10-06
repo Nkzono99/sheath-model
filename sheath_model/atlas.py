@@ -5,9 +5,6 @@ from pathlib import Path
 import numpy as np
 
 from .params import FixedEntryParams
-from ._constants import ME
-from .search import SearchFailure
-from .continuation import ContinuationOptions
 
 
 @dataclass(frozen=True)
@@ -15,12 +12,15 @@ class AtlasOptions:
     neighbors: int = 8
     max_distance: float = 1.
     interpolate: bool = True
+    component_distance: float = .75
 
     def __post_init__(self):
         if not isinstance(self.neighbors, int) or isinstance(self.neighbors, bool) or self.neighbors < 1:
             raise ValueError("neighbors must be a positive integer")
         if not math.isfinite(self.max_distance) or self.max_distance <= 0:
             raise ValueError("max_distance must be finite and positive")
+        if not math.isfinite(self.component_distance) or self.component_distance <= 0:
+            raise ValueError("component_distance must be finite and positive")
         if not isinstance(self.interpolate, bool):
             raise ValueError("interpolate must be a bool")
 
@@ -32,7 +32,7 @@ def parameter_key(p):
     log1p(pressure_factor*Ti/Tpe), log1p(npe/ni).
     """
     return np.array([math.log(p.tau), math.asinh(p.u), math.log(p.ion_entry_speed_mps/p.v_phe_th_mps),
-                     math.log(p.ion_mass_kg/ME), math.log1p(p.ion_pressure_factor*p.ion_temperature_ev/
+                     math.log(p.ion_mass_kg/p.electron_mass_kg), math.log1p(p.ion_pressure_factor*p.ion_temperature_ev/
                      p.photoelectron_temperature_ev), math.log1p(p.photoelectron_density_m3/p.ion_density_m3)])
 
 
@@ -45,7 +45,8 @@ def params_from_key(key, reference):
     return FixedEntryParams(
         ion_density_m3=reference.ion_density_m3,
         ion_entry_speed_mps=reference.v_phe_th_mps*math.exp(key[2]),
-        ion_mass_kg=ME*math.exp(key[3]),
+        ion_mass_kg=reference.electron_mass_kg*math.exp(key[3]),
+        electron_mass_kg=reference.electron_mass_kg,
         ion_temperature_ev=temperature*math.expm1(key[4]), ion_pressure_factor=1.,
         electron_temperature_ev=electron_temperature,
         electron_drift_mps=math.sinh(key[1])*reference.v_phe_th_mps*math.sqrt(math.exp(key[0])),
@@ -85,11 +86,10 @@ class EquilibriumAtlas:
     predictions never mix component labels. Blank regions mean that no
     root was stored, not that a root does not exist.
     """
-    def __init__(self, points=(), *, options=None, continuation=None):
+    def __init__(self, points=(), *, options=None):
         self.options = options if options is not None else AtlasOptions()
-        self.continuation = continuation if continuation is not None else ContinuationOptions()
-        if not isinstance(self.options, AtlasOptions) or not isinstance(self.continuation, ContinuationOptions):
-            raise TypeError("invalid atlas/continuation options")
+        if not isinstance(self.options, AtlasOptions):
+            raise TypeError("invalid atlas options")
         self._points = list(points)
         if not all(isinstance(point, AtlasPoint) for point in self._points):
             raise TypeError("points must be AtlasPoint objects")
@@ -131,13 +131,17 @@ class EquilibriumAtlas:
                 unique.append(prediction)
         return unique
 
-    def add(self, params, result, *, component=None, search=None):
+    def add(self, result, *, component=None, search=None):
         """Store a root after checking its original equations and profile."""
-        from .solver import _SheathSolver
-        solver = _SheathSolver(params, search=search)
-        branch = result["branch"]
+        from ._equilibrium import EquilibriumProblem
+        from .results import EquilibriumResult
+        if not isinstance(result, EquilibriumResult):
+            raise TypeError("result must be EquilibriumResult")
+        params = result.inputs
+        solver = EquilibriumProblem(params, search=search)
+        branch = result.branch
         solver._validate_params_for_branch(branch)
-        physical = np.array([result["phi0_V"], result["phi_m_V"], result["n_swe_inf_m3"]])
+        physical = np.array([result.surface_potential_v, result.minimum_potential_v, result.ambient_electron_density_m3])
         if (branch == "B" and physical[1] != 0.) or (branch == "C" and physical[1] != physical[0]):
             raise ValueError("minimum potential is inconsistent with the branch")
         encoded = solver._encode_unknowns(branch, physical)
@@ -158,7 +162,7 @@ class EquilibriumAtlas:
         nearby = self.neighbors(params, branch)
         if component is None:
             matched = [point for point in nearby if np.linalg.norm(coordinates-point.coordinates) <=
-                       self.continuation.max_root_distance and not any(
+                       self.options.component_distance and not any(
                        other.component == point.component and other.branch == branch and
                        np.linalg.norm(key-other.key) < 1e-12 for other in self._points)]
             component = (min(matched, key=lambda p: np.linalg.norm(coordinates-p.coordinates)).component
@@ -168,53 +172,6 @@ class EquilibriumAtlas:
                    np.linalg.norm(key-p.key) < 1e-12 and np.linalg.norm(coordinates-p.coordinates) < 1e-6
                    for p in self._points):
             self._points.append(point)
-
-    @classmethod
-    def build(cls, parameters, *, branches=("A", "B", "C"), search=None, options=None, continuation=None, deflation=False):
-        """Sweep inputs, then retry holes using all neighbors found in the sweep."""
-        from .solver import _SheathSolver
-        atlas = cls(options=options, continuation=continuation)
-        if not isinstance(deflation, bool):
-            raise ValueError("deflation must be a bool")
-        branches = tuple(branches)
-        if not branches or any(branch not in {"A", "B", "C"} for branch in branches):
-            raise ValueError("branches must contain A/B/C")
-        inputs = tuple(parameters)
-        pending = [(index, branch) for index in range(len(inputs)) for branch in branches]
-        records = {}
-        for _ in range(len(pending)+1):
-            size_before = len(atlas.points)
-            failed = []
-            for index, branch in pending:
-                solver = _SheathSolver(inputs[index], search=search)
-                try:
-                    if deflation:
-                        found = solver.solve_candidates(branch, atlas=atlas, deflation=True)
-                        if not found["candidates"]:
-                            raise SearchFailure("finite search found no admissible root", found["search_diagnostics"])
-                        results, diagnostics = found["candidates"], found["search_diagnostics"]
-                    else:
-                        result = solver.solve_unknowns(branch, atlas=atlas)
-                        results, diagnostics = [result], result["search_diagnostics"]
-                    for result in results:
-                        atlas.add(inputs[index], result, search=search)
-                    if (index, branch) in records:
-                        diagnostics.include(records[index, branch]["diagnostics"])
-                    records[index, branch] = {"index": index, "branch": branch, "status": "accepted",
-                                              "diagnostics": diagnostics}
-                except SearchFailure as exc:
-                    status = "excluded" if exc.diagnostics.excluded["ABC".index(branch)] else "unresolved"
-                    if (index, branch) in records:
-                        exc.diagnostics.include(records[index, branch]["diagnostics"])
-                    records[index, branch] = {"index": index, "branch": branch, "status": status,
-                                              "diagnostics": exc.diagnostics}
-                    if status == "unresolved":
-                        failed.append((index, branch))
-            if not failed or len(atlas.points) == size_before:
-                break
-            pending = failed
-        atlas.attempts = [records[index, branch] for index in range(len(inputs)) for branch in branches]
-        return atlas
 
     def save(self, path):
         """Write the same versioned text format as the Fortran atlas."""
@@ -228,7 +185,7 @@ class EquilibriumAtlas:
         Path(path).write_text("\n".join(lines)+"\n", encoding="ascii")
 
     @classmethod
-    def load(cls, path, *, options=None, continuation=None):
+    def load(cls, path, *, options=None):
         lines = Path(path).read_text(encoding="ascii").splitlines()
         if not lines:
             raise ValueError("empty atlas")
@@ -262,4 +219,4 @@ class EquilibriumAtlas:
             points.append(AtlasPoint(fields[0], int(fields[1]), values[:6], values[6:9], shape))
         if position != len(lines):
             raise ValueError("unexpected atlas records")
-        return cls(points, options=options, continuation=continuation)
+        return cls(points, options=options)

@@ -1,3 +1,6 @@
+from sheath_model import SheathSolver, ProfileOptions
+from sheath_model._equilibrium import EquilibriumProblem
+from sheath_model._profile import ProfilePhysics
 import math
 import unittest
 
@@ -5,7 +8,7 @@ import numpy as np
 from scipy.integrate import quad
 from scipy.special import erfcx
 
-from sheath_model import ZhaoParams, ZhaoSheathSolver
+from sheath_model import ZhaoParams
 from sheath_model._orbits import electron_density
 
 
@@ -53,7 +56,7 @@ class OrbitTests(unittest.TestCase):
             self.assertEqual(float(bounced), 0.0)
 
     def test_a_to_b_density_limit(self):
-        solver = ZhaoSheathSolver(ZhaoParams())
+        solver = EquilibriumProblem(ZhaoParams())
         phi = np.array([0.0, 0.2, 1.0])
         b = solver._densities_hat("B", phi, 1.5, 0.12)
         a = solver._densities_hat_type_a_side(phi, 1.5, 0.12, -1e-14, "lower")
@@ -61,7 +64,7 @@ class OrbitTests(unittest.TestCase):
             np.testing.assert_allclose(a[name], b[name], atol=1e-7, rtol=1e-6)
 
     def test_vdf_support_and_orbit_invariance(self):
-        solver = ZhaoSheathSolver(ZhaoParams())
+        solver = EquilibriumProblem(ZhaoParams())
         # Follow one incoming orbit from infinity into positive and negative potentials.
         upstream = 0.8
         amplitudes = []
@@ -75,9 +78,7 @@ class OrbitTests(unittest.TestCase):
                 vcut_swe_mps=cutoff * solver.p.v_swe_th_mps,
                 swe_reflected_active=False,
             )
-            vdf = solver._swe_vdf_components(
-                state, np.array([-w, 0.0]) * solver.p.v_swe_th_mps
-            )
+            vdf = ProfilePhysics(solver.p, ProfileOptions())._swe_vdf_components(state, np.array([-w, 0.0]) * solver.p.v_swe_th_mps)
             amplitudes.append(vdf["g_free_incoming"][0])
             self.assertEqual(vdf["g_total"][1], 0.0)
         np.testing.assert_allclose(amplitudes, amplitudes[0], rtol=1e-13)
@@ -86,9 +87,7 @@ class OrbitTests(unittest.TestCase):
         # Keep ion drift nonzero while electron normal drift tends to zero.
         values = []
         for alpha in (0.0, 1e-12, 1e-8, 1e-4):
-            solver = ZhaoSheathSolver(
-                ZhaoParams(alpha_deg=alpha, ion_drift_mode="full")
-            )
+            solver = EquilibriumProblem(ZhaoParams(sun_elevation_deg=alpha, ion_drift_mode='full'))
             value = solver._type_a_e2_sum_at_infinity(3.0, -1.0, 8e6)
             self.assertTrue(math.isfinite(value))
             values.append(value)
@@ -96,13 +95,11 @@ class OrbitTests(unittest.TestCase):
 
     def test_public_fluxes_are_position_independent(self):
         for branch, alpha in [("A", 19.0), ("B", 20.0), ("C", 10.0)]:
-            solver = ZhaoSheathSolver(
-                ZhaoParams(alpha_deg=alpha, electron_drift_mode="zero")
-            )
-            profile = solver.solve_profile(branch)
+            solver = EquilibriumProblem(ZhaoParams(sun_elevation_deg=alpha, electron_drift_mode='zero'))
+            profile = SheathSolver(search=solver.search).solve_profile(solver.p, branch=branch)
             currents, passing = [], []
-            for z in np.linspace(profile["z_hat"][0], profile["z_hat"][-1], 7):
-                flux = solver.fluxes_at_z(profile, float(z))
+            for z in np.linspace(profile.z_hat[0], profile.z_hat[-1], 7):
+                flux = profile.fluxes(float(z), unit='hat')
                 currents.append(flux["J_net_Apm2"])
                 passing.append(flux["Gamma_swe_free_incoming_m2s"])
             np.testing.assert_allclose(passing, passing[0], rtol=1e-13)
@@ -110,25 +107,21 @@ class OrbitTests(unittest.TestCase):
 
     def test_reject_inadmissible_algebraic_roots(self):
         with self.assertRaises(RuntimeError) as caught:
-            ZhaoSheathSolver(ZhaoParams()).solve_unknowns("A")
+            SheathSolver().solve_equilibrium(ZhaoParams(), branch='A')
         self.assertTrue(caught.exception.diagnostics.excluded[0])
         with self.assertRaises(RuntimeError) as caught:
-            ZhaoSheathSolver(
-                ZhaoParams(alpha_deg=1.0, electron_drift_mode="zero")
-            ).solve_unknowns("C")
+            SheathSolver().solve_equilibrium(ZhaoParams(sun_elevation_deg=1.0, electron_drift_mode='zero'), branch='C')
         self.assertGreater(caught.exception.diagnostics.rejected[2], 0)
-        root = ZhaoSheathSolver(
-            ZhaoParams(alpha_deg=19.0, electron_drift_mode="zero")
-        ).solve_unknowns("A")
-        self.assertLess(root["phi_m_V"], root["phi0_V"])
-        self.assertLess(root["phi0_V"], 0.0)
+        root = SheathSolver().solve_equilibrium(ZhaoParams(sun_elevation_deg=19.0, electron_drift_mode='zero'), branch='A')
+        self.assertLess(root.minimum_potential_v, root.surface_potential_v)
+        self.assertLess(root.surface_potential_v, 0.0)
 
     def test_negative_upstream_field_integral_independent_of_acceptance_guard(self):
         # Fixed algebraic A root at the original 60-degree drift. Integrate its
         # upstream VDF with SciPy quad, without either production quadrature.
         p = ZhaoParams()
-        phi0 = 2.6544268139403324 / p.T_phe_eV
-        phim = -1.1897238115913789 / p.T_phe_eV
+        phi0 = 2.6544268139403324 / p.photoelectron_temperature_ev
+        phim = -1.1897238115913789 / p.photoelectron_temperature_ev
         density = 7923268.55824609 / p.density_scale_m3
 
         def rho(phi):
@@ -161,9 +154,9 @@ class OrbitTests(unittest.TestCase):
         self.assertLess(field_squared, -1e-7)
 
     def test_b_upstream_obstruction_despite_positive_boundary_integral(self):
-        p = ZhaoParams(alpha_deg=60.0, electron_drift_mode="zero")
-        solver = ZhaoSheathSolver(p)
-        phi0 = 10.0 / p.T_phe_eV
+        p = ZhaoParams(sun_elevation_deg=60.0, electron_drift_mode="zero")
+        solver = EquilibriumProblem(p)
+        phi0 = 10.0 / p.photoelectron_temperature_ev
         # At infinity B has one incoming half-Maxwellian and escaping PE.
         density = 2 * (p.ion_density_m3 - 0.5 * p.photoelectron_density_m3 * math.exp(-phi0)) / p.density_scale_m3
         field_squared = 2 * solver._integrate_rho("B", "monotonic", phi0, 0.0, phi0, 0.0, density)

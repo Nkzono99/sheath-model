@@ -1,6 +1,6 @@
 """Evaluate a warm-ion sheath with the entrance speed and emitted source fixed."""
 
-from sheath_model import FixedEntryParams, FixedEntrySheathSolver, SearchOptions
+from sheath_model import FixedEntryParams, SheathSolver, SearchOptions
 
 
 def main():
@@ -11,12 +11,12 @@ def main():
         photoelectron_density_m3=55.42562584220407e6, photoelectron_temperature_ev=2.2,
     )
     # Select auto, newton or lm here; bracket is available for B/C.
-    solver = FixedEntrySheathSolver(params, search=SearchOptions(method="newton"))
-    profile = solver.solve_profile("A")
-    fluxes = solver.fluxes_at_z(profile, 0., unit="m")
-    print(f"Surface potential [V]: {profile['phi0_V']:.8f}")
-    print(f"Minimum potential [V]: {profile['phi_m_V']:.8f}")
-    print(f"Surface field [V/m]: {profile['E_Vpm'][0]:.6e}")
+    solver = SheathSolver(search=SearchOptions(method="newton"))
+    profile = solver.solve_profile(params, branch="A")
+    fluxes = profile.fluxes(0.)
+    print(f"Surface potential [V]: {profile.equilibrium.surface_potential_v:.8f}")
+    print(f"Minimum potential [V]: {profile.equilibrium.minimum_potential_v:.8f}")
+    print(f"Surface field [V/m]: {profile.electric_field_v_m[0]:.6e}")
     print(f"Inward ion flux [m^-2 s^-1]: {-fluxes['Gamma_swi_signed_m2s']:.6e}")
 
 

@@ -2,10 +2,11 @@
 program solution_atlas
   use sheath_model
   implicit none
+  type(sheath_solver) :: solver
   type(fixed_entry_equilibrium_input) :: inputs(2), query
   type(sheath_equilibrium_atlas) :: atlas
-  type(zhao_equilibrium_result) :: root
-  type(zhao_equilibrium_result), allocatable :: candidates(:)
+  type(sheath_equilibrium_result) :: root
+  type(sheath_equilibrium_result), allocatable :: candidates(:)
   type(sheath_search_diagnostics) :: diagnostics
   integer(i32) :: status
   integer :: i, unit, io
@@ -18,12 +19,12 @@ program solution_atlas
     inputs(i)%plasma%photoelectrons = maxwellian_photoelectrons(real(51 + 3*i, dp)*1e6_dp, 2.2_dp)
   end do
   ! Select 'arclength' to follow simple folds along the dimensionless input path.
-  atlas%continuation%method = 'parameter'
+  solver%continuation%method = 'parameter'
   call get_command_argument(1, path)
   exists = .false.
   if (len_trim(path) > 0) inquire (file=trim(path), exist=exists)
   if (.not. exists) then
-    call build_equilibrium_atlas(inputs, atlas, status, message)
+    call solver%build_equilibrium_atlas(inputs, atlas, status, message)
     if (status /= SHEATH_OK) then
       print *, trim(message)
       stop 1
@@ -46,9 +47,11 @@ program solution_atlas
   end if
   query = inputs(1)
   query%plasma%photoelectrons = maxwellian_photoelectrons(55.42562584220407e6_dp, 2.2_dp)
-  query%search%method = 'newton'
-  query%search%max_starts = 1
-  call solve_equilibrium(query, root, status, message, diagnostics, atlas=atlas)
+  solver%search%method = 'newton'
+  solver%search%max_starts = 1
+  solver%equilibrium_atlas = atlas
+  call solver%solve_equilibrium(query, root, status, message, diagnostics)
+  deallocate (solver%equilibrium_atlas)
   if (status /= SHEATH_OK) then
     print *, trim(message)
     stop 1
@@ -56,7 +59,9 @@ program solution_atlas
   print '(a,i0)', 'Stored roots: ', atlas%size()
   print '(a,2f14.8)', 'Surface / minimum potential [V]: ', root%surface_potential_v, root%minimum_potential_v
   print '(a,i0)', 'Starts using the atlas: ', diagnostics%atlas_starts(1)
-  call solve_equilibrium_candidates(query, candidates, status, message, atlas=atlas, deflation=.true.)
+  solver%equilibrium_atlas = atlas
+  call solver%solve_equilibrium_candidates(query, candidates, status, message, deflation=.true.)
+  deallocate (solver%equilibrium_atlas)
   if (status /= SHEATH_OK) stop 1
   print '(a,i0)', 'Located admissible candidates: ', size(candidates)
 end program solution_atlas

@@ -4,12 +4,16 @@ submodule(sheath_model_field) sheath_model_field_atlas
   implicit none
 contains
 
-  module subroutine prepare_field_params(input, params, status, message)
-    type(zhao_field_input), intent(in) :: input
+  module subroutine prepare_field_params(input, params, status, message, search_options, continuation_options)
+    type(sheath_search_options), intent(in), optional :: search_options
+    type(sheath_continuation_options), intent(in), optional :: continuation_options
+    type(prescribed_field_input), intent(in) :: input
     type(zhao_params_type), intent(out) :: params
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     params = zhao_params_type()
+    if (present(search_options)) params%search = search_options
+    if (present(continuation_options)) params%continuation = continuation_options
     status = SHEATH_INVALID_ARGUMENT
     message = 'branch must be auto, A, B, or C.'
     select case (trim(lower_ascii(input%branch)))
@@ -20,9 +24,13 @@ contains
     message = 'The prescribed field must be finite.'
     if (.not. ieee_is_finite(input%electric_field_v_m)) return
     message = 'Invalid search options; prescribed-field search supports auto, newton, or lm.'
-    if (.not. valid_search_options(input%search) .or. trim(lower_ascii(input%search%method)) == 'bracket') return
+    if (.not. valid_search_options(params%search) .or. &
+        .not. valid_continuation_options(params%continuation) .or. trim(lower_ascii(params%search%method)) == 'bracket') return
     call prepare_plasma_params(input, params, status, message)
-    params%search = input%search
+    params%search = sheath_search_options()
+    params%continuation = sheath_continuation_options()
+    if (present(search_options)) params%search = search_options
+    if (present(continuation_options)) params%continuation = continuation_options
     params%search%method = lower_ascii(params%search%method)
   end subroutine
 
@@ -54,9 +62,11 @@ contains
   end subroutine
 
   !> Recheck the input field, original equations and physical profile before storage.
-  module subroutine add_field_to_atlas(input, root, atlas, status, message, component)
-    type(zhao_field_input), intent(in) :: input
-    type(zhao_field_result), intent(in) :: root
+  module subroutine add_field_to_atlas(input, root, atlas, status, message, component, search_options, continuation_options)
+    type(sheath_search_options), intent(in), optional :: search_options
+    type(sheath_continuation_options), intent(in), optional :: continuation_options
+    type(prescribed_field_input), intent(in) :: input
+    type(prescribed_field_result), intent(in) :: root
     type(sheath_field_atlas), intent(inout) :: atlas
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
@@ -66,7 +76,8 @@ contains
     real(dp) :: key(7), y(3), raw(3), target
     real(dp), allocatable :: shape(:)
     logical :: valid
-    call prepare_field_params(input, params, status, message)
+    call prepare_field_params(input, params, status, message, &
+        search_options=search_options, continuation_options=continuation_options)
     if (status /= SHEATH_OK) return
     call validate_field_search(atlas, status=status, message=message)
     if (status /= SHEATH_OK) return
@@ -102,17 +113,20 @@ contains
 
   !> report(A/B/C,input) distinguishes stored roots, exclusions and finite-search holes.
   !! The flat E=0 state is checked analytically at every query and is not log encoded.
-  module subroutine build_field_atlas(inputs, atlas, status, message, report, deflation, max_roots)
-    type(zhao_field_input), intent(in) :: inputs(:)
+  module subroutine build_field_atlas(inputs, atlas, status, message, report, deflation, max_roots, &
+      search_options, continuation_options)
+    type(sheath_search_options), intent(in), optional :: search_options
+    type(sheath_continuation_options), intent(in), optional :: continuation_options
+    type(prescribed_field_input), intent(in) :: inputs(:)
     type(sheath_field_atlas), intent(inout) :: atlas
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     integer(i32), allocatable, intent(out), optional :: report(:, :)
     logical, intent(in), optional :: deflation
     integer, intent(in), optional :: max_roots
-    type(zhao_field_input) :: current
+    type(prescribed_field_input) :: current
     type(zhao_params_type) :: params
-    type(zhao_field_result), allocatable :: candidates(:)
+    type(prescribed_field_result), allocatable :: candidates(:)
     type(sheath_search_diagnostics) :: diagnostics
     integer(i32) :: outcomes(3, size(inputs)), local_status
     logical :: excluded(3, size(inputs))
@@ -125,7 +139,8 @@ contains
     do pass = 1, 3*size(inputs) + 1
       before = atlas%size()
       do i = 1, size(inputs)
-        call prepare_field_params(inputs(i), params, local_status, message)
+        call prepare_field_params(inputs(i), params, local_status, message, &
+            search_options=search_options, continuation_options=continuation_options)
         if (local_status /= SHEATH_OK) then
           status = local_status
           if (present(report)) report = outcomes
@@ -140,7 +155,8 @@ contains
           current = inputs(i)
           current%branch = branches(k)
           call solve_prescribed_field_candidates(current, candidates, local_status, message, diagnostics, &
-              atlas=atlas, deflation=deflation, max_roots=max_roots)
+              atlas=atlas, deflation=deflation, max_roots=max_roots, &
+              search_options=search_options, continuation_options=continuation_options)
           outcomes(k, i) = local_status
           excluded(k, i) = diagnostics%excluded(k)
           if (local_status == SHEATH_INVALID_ARGUMENT) then
@@ -152,7 +168,8 @@ contains
           do j = 1, size(candidates)
             if (candidates(j)%boundary_potential_v == 0.0_dp .and. &
                 candidates(j)%minimum_potential_v == 0.0_dp) cycle
-            call add_field_to_atlas(current, candidates(j), atlas, local_status, message)
+            call add_field_to_atlas(current, candidates(j), atlas, local_status, message, &
+                search_options=search_options, continuation_options=continuation_options)
             if (local_status /= SHEATH_OK) then
               status = local_status
               if (present(report)) report = outcomes
@@ -194,7 +211,7 @@ contains
       start = point%key
       y = 0.0_dp
       iterations_before = diagnostics%iterations(k)
-      call continue_guarded_system(n, residual, point%coordinates(:n), params%search, atlas%continuation, &
+      call continue_guarded_system(n, residual, point%coordinates(:n), params%search, params%continuation, &
           diagnostics, k, y(:n), success, accept)
       if (.not. success) then
         diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1

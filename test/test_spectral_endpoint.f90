@@ -4,8 +4,8 @@ program test_spectral_endpoint
   use sheath_model
   use sheath_model_constants, only: qe, eps0
   implicit none
-  type(zhao_plasma_input) :: input
-  type(zhao_state_result) :: state, left, right
+  type(plasma_input) :: input
+  type(sheath_state_result) :: state, left, right
   real(dp) :: edges(145), flux(144), lo, phi, density
   integer :: unit, ios, i
   integer(i32) :: status
@@ -24,7 +24,7 @@ program test_spectral_endpoint
   input%ion_density_m3 = 5e6_dp
   input%electron_temperature_ev = 10.0_dp*1.160451812e4_dp*1.380649e-23_dp/qe
   input%electron_drift_mps = 4e5_dp
-  input%ion_drift_mps = 4e5_dp
+  input%ion_entry_speed_mps = 4e5_dp
   input%electron_mass_kg = 9.1093837139e-31_dp
   input%photoelectrons = binned_photoelectrons(edges, flux)
   phi = 6.43321741907773337_dp

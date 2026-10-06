@@ -3,7 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 import sys
 
-from sheath_model import (FixedEntryParams, FixedEntrySheathSolver, EquilibriumAtlas,
+from sheath_model import (FixedEntryParams, SheathSolver, EquilibriumAtlas,
                           SearchOptions, ContinuationOptions)
 
 
@@ -16,19 +16,19 @@ def main():
     if path is not None and path.exists():
         atlas = EquilibriumAtlas.load(path)
     else:
-        atlas = EquilibriumAtlas.build(inputs, branches=("A",),
-                                       continuation=ContinuationOptions(method="parameter"))
+        atlas = SheathSolver().build_equilibrium_atlas(inputs, branches=("A",))
     if path is not None and not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         atlas.save(path)
-    solver = FixedEntrySheathSolver(base, search=SearchOptions(method="newton", max_starts=1))
-    root = solver.solve_unknowns("A", atlas=atlas)
+    solver = SheathSolver(search=SearchOptions(method="newton", max_starts=1),
+                          continuation=ContinuationOptions(method="parameter"), equilibrium_atlas=atlas)
+    root = solver.solve_equilibrium(base, branch="A")
     print(f"Stored roots: {len(atlas.points)}")
-    print(f"Surface / minimum potential [V]: {root['phi0_V']:.8f} / {root['phi_m_V']:.8f}")
-    print(f"Starts using the atlas: {root['search_diagnostics'].atlas_starts[0]}")
+    print(f"Surface / minimum potential [V]: {root.surface_potential_v:.8f} / {root.minimum_potential_v:.8f}")
+    print(f"Starts using the atlas: {root.diagnostics.atlas_starts[0]}")
     # Enumerate additional located roots with deflation; this does not prove completeness.
-    found = solver.solve_candidates("A", atlas=atlas, deflation=True)
-    print(f"Located admissible candidates: {len(found['candidates'])}")
+    found = solver.solve_equilibrium_candidates(base, branch="A", deflation=True)
+    print(f"Located admissible candidates: {len(found.candidates)}")
 
 
 if __name__ == "__main__":

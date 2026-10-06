@@ -8,7 +8,7 @@ Type A/B/C の密度規格化・電場積分・流束・電流を評価できま
 ## 光電子源を指定する
 
 ```fortran
-type(zhao_plasma_input) :: plasma
+type(plasma_input) :: plasma
 
 ! 境界を外向きに通過する法線運動エネルギーの分布
 plasma%photoelectrons = binned_photoelectrons( &
@@ -47,8 +47,8 @@ bin 源から密度・温度を推定して Maxwell に近似する処理はあ�
 program static_example
   use sheath_model
   implicit none
-  type(zhao_plasma_input) :: plasma
-  type(zhao_state_result) :: state
+  type(plasma_input) :: plasma
+  type(sheath_state_result) :: state
   integer(i32) :: status
   character(len=256) :: message
 
@@ -71,12 +71,12 @@ end program
 A では `minimum_potential_v` が必須です。B/C への指定や `branch='auto'` は入力エラーです。
 A の呼び出し例は `call evaluate_sheath_state(plasma, 'A', phi_H, state, status, message, minimum_potential_v=phi_m)` です。
 
-`zhao_plasma_input` で固定するのは、上流イオン密度・速度、電子温度・ドリフト、粒子質量、光電子源です。
-既定値と制約は [E_H 入力表](fortran-api.md#e_h-指定の入力-zhao_field_input) の共通項と同じです。
+`plasma_input` で固定するのは、上流イオン密度・速度、電子温度・ドリフト、粒子質量、光電子源です。
+既定値と制約は [E_H 入力表](fortran-api.md#物理入力) の共通項と同じです。
 背景電子 Maxwell 集団の規格化 `N_e` は、指定した電位での上流準中性から求めます。
 実際の上流総電子密度を固定するモデルではありません。
 
-| `zhao_state_result` の出力 | 単位・意味 |
+| `sheath_state_result` の出力 | 単位・意味 |
 | --- | --- |
 | `evaluated` | 有限の評価に成功したか |
 | `admissible` | 共通の物理解判定に合格したか。A は upper 接続も必要 |
@@ -100,15 +100,16 @@ A の呼び出し例は `call evaluate_sheath_state(plasma, 'A', phi_H, state, s
 
 ## E_H 指定の解法にも同じ分布を使う
 
-`zhao_field_input` は `zhao_plasma_input` を継承し、`branch` と `electric_field_v_m` を追加します。
+`prescribed_field_input` は `plasma_input` を継承し、`branch` と `electric_field_v_m` を追加します。
 
 ```fortran
-type(zhao_field_input) :: input
-type(zhao_field_result), allocatable :: candidates(:)
+type(sheath_solver) :: solver
+type(prescribed_field_input) :: input
+type(prescribed_field_result), allocatable :: candidates(:)
 
-input%zhao_plasma_input = plasma
+input%plasma_input = plasma
 input%electric_field_v_m = 0.1_dp
-call solve_prescribed_field_candidates(input, candidates, status, message)
+call solver%solve_prescribed_field_candidates(input, candidates, status, message)
 ```
 
 各共通項を `input%electron_temperature_ev` などで直接設定することもできます。

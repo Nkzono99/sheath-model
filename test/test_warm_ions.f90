@@ -2,13 +2,14 @@ program test_warm_ions
   use sheath_model
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
+  type(sheath_solver) :: solver
   type(zhao_equilibrium_input) :: input
-  type(zhao_equilibrium_result) :: cold, warm
-  type(zhao_density_result) :: density
-  type(zhao_plasma_input) :: plasma
-  type(zhao_state_result) :: state
-  type(zhao_field_input) :: field_input
-  type(zhao_field_result), allocatable :: candidates(:)
+  type(sheath_equilibrium_result) :: cold, warm
+  type(sheath_density_result) :: density
+  type(plasma_input) :: plasma
+  type(sheath_state_result) :: state
+  type(prescribed_field_input) :: field_input
+  type(prescribed_field_result), allocatable :: candidates(:)
   real(dp) :: ratio, phi, critical, pressure, expected, gap
   real(dp), parameter :: ratios(5) = [0.6_dp, 0.9_dp, 1.0_dp, 1.2_dp, 2.0_dp]
   integer(i32) :: status
@@ -39,11 +40,11 @@ program test_warm_ions
         error stop 'paper critical voltage'
   end do
   input = zhao_equilibrium_input(branch='A', electron_drift_mode='zero')
-  call solve_equilibrium(input, cold, status, message)
+  call solver%solve_equilibrium(input, cold, status, message)
   if (status /= SHEATH_OK) error stop 'cold reference'
   input%ion_temperature_ev = 12.0_dp
   input%ion_pressure_factor = 3.0_dp
-  call solve_equilibrium(input, warm, status, message)
+  call solver%solve_equilibrium(input, warm, status, message)
   if (status /= SHEATH_OK) then
     print *, trim(message)
     error stop 'warm equilibrium'
@@ -66,7 +67,7 @@ program test_warm_ions
   field_input%photoelectrons = plasma%photoelectrons
   field_input%branch = 'A'
   field_input%electric_field_v_m = state%electric_field_v_m
-  call solve_prescribed_field_candidates(field_input, candidates, status, message)
+  call solver%solve_prescribed_field_candidates(field_input, candidates, status, message)
   if (status /= SHEATH_OK) error stop 'warm prescribed field'
   recovered = .false.
   do i = 1, size(candidates)
@@ -77,16 +78,16 @@ program test_warm_ions
   input%branch = 'B'
   input%sun_elevation_deg = 20.0_dp
   input%ion_temperature_ev = 1.0_dp
-  call solve_equilibrium(input, warm, status, message)
+  call solver%solve_equilibrium(input, warm, status, message)
   if (status /= SHEATH_OK) error stop 'warm B'
   input%branch = 'C'
   input%sun_elevation_deg = 10.0_dp
-  call solve_equilibrium(input, warm, status, message)
+  call solver%solve_equilibrium(input, warm, status, message)
   if (status /= SHEATH_OK) error stop 'warm C'
   input%ion_temperature_ev = -1.0_dp
-  call solve_equilibrium(input, warm, status, message)
+  call solver%solve_equilibrium(input, warm, status, message)
   if (status /= SHEATH_INVALID_ARGUMENT) error stop 'negative ion temperature'
-  plasma%ion_drift_mps = 1.0_dp
+  plasma%ion_entry_speed_mps = 1.0_dp
   call evaluate_sheath_state(plasma, 'C', -1.0_dp, state, status, message)
   if (status /= SHEATH_INVALID_ARGUMENT) error stop 'subsonic input'
 end program test_warm_ions

@@ -2,12 +2,13 @@ program test_sheath_model
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use sheath_model
   implicit none
+  type(sheath_solver) :: solver
   real(dp), parameter :: eps0 = 8.8541878128e-12_dp, qe = 1.602176634e-19_dp
   type(zhao_equilibrium_input) :: equilibrium_input
-  type(zhao_equilibrium_result) :: root
-  type(zhao_density_result) :: density
-  type(zhao_profile_options) :: options
-  type(zhao_profile_result) :: profile
+  type(sheath_equilibrium_result) :: root
+  type(sheath_density_result) :: density
+  type(sheath_profile_options) :: options
+  type(sheath_profile_result) :: profile
   real(dp) :: derivative, midpoint
   integer(i32) :: status
   integer :: i, n, branch_index
@@ -21,7 +22,7 @@ program test_sheath_model
     equilibrium_input = zhao_equilibrium_input(branch=branches(branch_index), electron_drift_mode='zero')
     if (branch_index == 2) equilibrium_input%sun_elevation_deg = 20.0_dp
     if (branch_index == 3) equilibrium_input%sun_elevation_deg = 10.0_dp
-    call solve_equilibrium(equilibrium_input, root, status, message)
+    call solver%solve_equilibrium(equilibrium_input, root, status, message)
     call ok('equilibrium '//branches(branch_index))
     call check(root%valid .and. root%branch == branches(branch_index), 'equilibrium branch')
     call near(root%surface_potential_v, phi_reference(branch_index), 1e-7_dp, 'Python reference potential')
@@ -31,7 +32,8 @@ program test_sheath_model
     call near(density%charge_c_m3, 0.0_dp, qe*equilibrium_input%ion_density_m3*1e-8_dp, 'charge neutrality')
     write (*, '(a,1x,a,3es25.16)') 'equilibrium', root%branch, root%surface_potential_v, &
         root%minimum_potential_v, root%ambient_electron_density_m3
-    call solve_profile(equilibrium_input, options, profile, status, message)
+    solver%profile = options
+    call solver%solve_profile(equilibrium_input, profile, status, message)
     call ok('profile '//branches(branch_index))
     n = size(profile%z_m)
     call check(n > 30, 'profile size')
@@ -58,15 +60,16 @@ program test_sheath_model
     equilibrium_input = zhao_equilibrium_input(branch='A', electron_drift_mode='zero')
     equilibrium_input%ion_density_m3 = equilibrium_input%ion_density_m3*10.0_dp**i
     equilibrium_input%photoelectron_reference_density_m3 = equilibrium_input%photoelectron_reference_density_m3*10.0_dp**i
-    call solve_equilibrium(equilibrium_input, root, status, message)
+    call solver%solve_equilibrium(equilibrium_input, root, status, message)
     call ok('density scale invariance')
     call near(root%surface_potential_v, phi_reference(1), 1e-6_dp, 'density scaling voltage')
     call near(root%ambient_electron_density_m3/10.0_dp**i, density_reference(1), 0.1_dp, 'density scaling electron density')
   end do
   equilibrium_input%sun_elevation_deg = 0.0_dp
-  call solve_equilibrium(equilibrium_input, root, status, message)
+  call solver%solve_equilibrium(equilibrium_input, root, status, message)
   call check(status == SHEATH_INVALID_ARGUMENT .and. .not. root%valid, 'zero-elevation degeneracy')
-  call solve_profile(equilibrium_input, options, profile, status, message)
+  solver%profile = options
+  call solver%solve_profile(equilibrium_input, profile, status, message)
   call check(.not. allocated(profile%z_m), 'failed profile clears old allocation')
   print *, 'All sheath model contract and physics checks passed.'
 contains

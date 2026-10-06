@@ -3,10 +3,11 @@
 program field_atlas
   use sheath_model
   implicit none
-  type(zhao_field_input) :: inputs(2), query
+  type(sheath_solver) :: solver
+  type(prescribed_field_input) :: inputs(2), query
   type(sheath_field_atlas) :: atlas
   type(sheath_search_diagnostics) :: diagnostics
-  type(zhao_field_result), allocatable :: candidates(:)
+  type(prescribed_field_result), allocatable :: candidates(:)
   integer(i32) :: status
   integer :: i, unit, io
   logical :: exists
@@ -28,7 +29,7 @@ program field_atlas
       inputs(i) = query
       inputs(i)%electric_field_v_m = 1.56_dp + 0.04_dp*i
     end do
-    call build_field_atlas(inputs, atlas, status, message)
+    call solver%build_field_atlas(inputs, atlas, status, message)
     if (status /= SHEATH_OK) then
       print *, trim(message)
       error stop 'Cannot build the prescribed-field atlas.'
@@ -41,11 +42,13 @@ program field_atlas
     end if
   end if
   ! Choose parameter or arclength; steps use dimensionless plasma/field coordinates.
-  atlas%continuation%method = 'arclength'
-  query%search%method = 'newton'
-  query%search%max_starts = 8
-  call solve_prescribed_field_candidates(query, candidates, status, message, diagnostics, &
-      atlas=atlas, deflation=.true.)
+  solver%continuation%method = 'arclength'
+  solver%search%method = 'newton'
+  solver%search%max_starts = 8
+  solver%field_atlas = atlas
+  call solver%solve_prescribed_field_candidates(query, candidates, status, message, diagnostics, &
+      deflation=.true.)
+  deallocate (solver%field_atlas)
   if (status /= SHEATH_OK) then
     print *, trim(message)
     error stop 'No admissible candidate located.'

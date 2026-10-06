@@ -98,7 +98,7 @@ contains
       point = atlas%point(indices(i))
       start = point%key
       y = 0.0_dp
-      call continue_guarded_system(n, path_residual, point%coordinates(:n), p%search, atlas%continuation, &
+      call continue_guarded_system(n, path_residual, point%coordinates(:n), p%search, p%continuation, &
           diagnostics, k, y(:n), success, accept)
       if (.not. success) cycle
       call decode_unknowns(p, branch, y, physical(1), physical(2), physical(3), valid)

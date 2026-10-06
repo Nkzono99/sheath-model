@@ -2,7 +2,6 @@
 !> Caller-owned dimensionless root tables. Every query still solves the original equations.
 module sheath_model_atlas
   use sheath_model_constants, only: dp
-  use sheath_model_search, only: sheath_continuation_options, valid_continuation_options
   use sheath_model_numerics, only: solve_guarded_linear_system
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -13,6 +12,7 @@ module sheath_model_atlas
     integer :: neighbors = 8
     real(dp) :: max_distance = 1.0_dp
     logical :: interpolate = .true.
+    real(dp) :: component_distance = 0.75_dp
   end type
 
   type :: sheath_atlas_point
@@ -28,7 +28,6 @@ module sheath_model_atlas
 
   type, abstract :: sheath_root_atlas
     type(sheath_atlas_options) :: options
-    type(sheath_continuation_options) :: continuation
     type(sheath_atlas_point), allocatable, private :: points(:)
   contains
     procedure :: size => atlas_size
@@ -113,7 +112,8 @@ contains
   logical function atlas_valid(self) result(valid)
     class(sheath_root_atlas), intent(in) :: self
     valid = self%options%neighbors > 0 .and. ieee_is_finite(self%options%max_distance) .and. &
-        self%options%max_distance > 0.0_dp .and. valid_continuation_options(self%continuation)
+        self%options%max_distance > 0.0_dp .and. ieee_is_finite(self%options%component_distance) .and. &
+        self%options%component_distance > 0.0_dp
   end function
 
   logical function same_shape(a, b) result(same)
@@ -255,7 +255,7 @@ contains
       best_distance = huge(1.0_dp)
       do i = 1, size(indices)
         distance = sqrt(sum((coordinates - self%points(indices(i))%coordinates)**2))
-        if (distance > self%continuation%max_root_distance .or. distance >= best_distance) cycle
+        if (distance > self%options%component_distance .or. distance >= best_distance) cycle
         occupied = .false.
         do j = 1, self%size()
           if (self%points(j)%component /= self%points(indices(i))%component .or. self%points(j)%branch /= branch) cycle

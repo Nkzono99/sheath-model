@@ -5,6 +5,7 @@ program readme_data
   use, intrinsic :: iso_fortran_env, only: output_unit
   use sheath_model
   implicit none
+  type(sheath_solver) :: solver
   character(len=512) :: directory, argument
   integer :: nx, ny, i, j, unit, kind, first_map, last_map, started, finished, clock_rate
   integer, allocatable :: types(:, :), unresolved(:, :), rejected(:, :), candidates(:, :)
@@ -92,14 +93,15 @@ contains
     character(len=1), intent(in) :: branch
     real(dp), intent(in) :: alpha
     type(zhao_equilibrium_input) :: input
-    type(zhao_profile_options) :: options
-    type(zhao_profile_result) :: profile
+    type(sheath_profile_options) :: options
+    type(sheath_profile_result) :: profile
     integer(i32) :: status
     integer :: k, file, turning
     character(len=512) :: message
     input = zhao_equilibrium_input(branch=branch, sun_elevation_deg=alpha, electron_drift_mode='zero')
-    options = zhao_profile_options(points_per_segment=8000, max_distance_m=150.0_dp, potential_cutoff_v=2.2e-4_dp)
-    call solve_profile(input, options, profile, status, message)
+    options = sheath_profile_options(points_per_segment=8000, max_distance_m=150.0_dp, potential_cutoff_v=2.2e-4_dp)
+    solver%profile = options
+    call solver%solve_profile(input, profile, status, message)
     if (status /= SHEATH_OK) then
       print *, trim(message)
       error stop 'README representative profile failed.'
@@ -126,7 +128,7 @@ contains
     integer, intent(out) :: found, unknown, refused
     character(len=1), parameter :: branches(3) = ['A', 'B', 'C']
     type(zhao_equilibrium_input) :: input
-    type(zhao_equilibrium_result) :: result
+    type(sheath_equilibrium_result) :: result
     integer(i32) :: status
     integer :: k
     character(len=512) :: message
@@ -137,7 +139,7 @@ contains
     refused = 0
     do k = 1, 3
       input%branch = branches(k)
-      call solve_equilibrium(input, result, status, message)
+      call solver%solve_equilibrium(input, result, status, message)
       select case (status)
       case (SHEATH_OK)
         found = ibset(found, k - 1)
@@ -154,16 +156,16 @@ contains
   subroutine field_point(field, source_ratio, found, unknown, refused, count)
     real(dp), intent(in) :: field, source_ratio
     integer, intent(out) :: found, unknown, refused, count
-    type(zhao_field_input) :: input
-    type(zhao_field_result), allocatable :: roots(:)
+    type(prescribed_field_input) :: input
+    type(prescribed_field_result), allocatable :: roots(:)
     type(sheath_search_diagnostics) :: diagnostics
     integer(i32) :: status
     integer :: k
     character(len=512) :: message
-    input = zhao_field_input(electric_field_v_m=field, electron_drift_mps=0.0_dp)
-    input%ion_drift_mps = 468.0e3_dp*sin(alpha_field*pi/180.0_dp)
+    input = prescribed_field_input(electric_field_v_m=field, electron_drift_mps=0.0_dp)
+    input%ion_entry_speed_mps = 468.0e3_dp*sin(alpha_field*pi/180.0_dp)
     input%photoelectrons = maxwellian_photoelectrons(input%ion_density_m3*source_ratio*sin(alpha_field*pi/180.0_dp), 2.2_dp)
-    call solve_prescribed_field_candidates(input, roots, status, message, diagnostics)
+    call solver%solve_prescribed_field_candidates(input, roots, status, message, diagnostics)
     found = 0
     unknown = 0
     refused = 0

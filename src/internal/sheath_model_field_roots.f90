@@ -22,7 +22,7 @@ contains
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     type(sheath_search_diagnostics), intent(out) :: diagnostics
-    type(zhao_field_result), intent(in), optional :: initial_guesses(:)
+    type(prescribed_field_result), intent(in), optional :: initial_guesses(:)
     type(sheath_field_atlas), intent(in), optional :: atlas
     logical, intent(in), optional :: deflation
     integer, intent(in), optional :: max_roots
@@ -54,7 +54,7 @@ contains
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     type(sheath_search_diagnostics), intent(out) :: diagnostics
-    type(zhao_field_result), intent(in), optional :: initial_guesses(:)
+    type(prescribed_field_result), intent(in), optional :: initial_guesses(:)
     type(sheath_field_atlas), intent(in), optional :: atlas
     logical, intent(in), optional :: deflation
     integer, intent(in), optional :: max_roots
@@ -186,7 +186,7 @@ contains
     type(zhao_field_root), allocatable, intent(out) :: unique_roots(:)
     integer, intent(out) :: unique_count
     type(sheath_search_diagnostics), intent(inout) :: diagnostics
-    type(zhao_field_result), intent(in), optional :: initial_guesses(:)
+    type(prescribed_field_result), intent(in), optional :: initial_guesses(:)
     type(sheath_field_atlas), intent(in), optional :: atlas
     logical, intent(in), optional :: deflation
     integer, intent(in) :: max_roots

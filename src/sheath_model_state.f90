@@ -11,17 +11,17 @@ module sheath_model_state
   use sheath_model_ions, only: ion_critical_potential, ion_density_ratio
   implicit none
   private
-  public :: zhao_plasma_input, zhao_state_result, evaluate_sheath_state, prepare_plasma_params
+  public :: plasma_input, sheath_state_result, evaluate_sheath_state, prepare_plasma_params
 
   !> Fixed upstream ion state, electron distribution and outward boundary photoelectron source.
   !! SI units except temperatures [eV]. Normal drifts are positive inward.
-  type :: zhao_plasma_input
+  type :: plasma_input
     real(dp) :: ion_density_m3 = 8.7e6_dp
     real(dp) :: electron_temperature_ev = 12.0_dp
     real(dp) :: ion_temperature_ev = 0.0_dp
     real(dp) :: ion_pressure_factor = 1.0_dp
     real(dp) :: electron_drift_mps = 4.0529988897111727e5_dp
-    real(dp) :: ion_drift_mps = 4.0529988897111727e5_dp
+    real(dp) :: ion_entry_speed_mps = 4.0529988897111727e5_dp
     real(dp) :: ion_mass_kg = proton_mass
     real(dp) :: electron_mass_kg = electron_mass
     type(photoelectron_source) :: photoelectrons
@@ -30,7 +30,7 @@ module sheath_model_state
   !> Evaluation of a trial state, not necessarily a complete physical sheath solution.
   !! Signed E^2 integrals use V^2/m^2. electric_field_v_m is NaN when boundary E^2 is negative.
   !! admissible requires physical_status=SHEATH_OK, including the Type-A upper connection.
-  type :: zhao_state_result
+  type :: sheath_state_result
     logical :: evaluated = .false., admissible = .false.
     character(len=1) :: branch = ' '
     real(dp) :: boundary_potential_v = 0.0_dp, minimum_potential_v = 0.0_dp
@@ -52,7 +52,7 @@ contains
   !> Prepare internal scales and validate the fixed plasma/source input.
   !! Spectra use a binary numerical scale near T_e to preserve energy-bin edges; no Maxwellian fit is made.
   subroutine prepare_plasma_params(input, params, status, message)
-    class(zhao_plasma_input), intent(in) :: input
+    class(plasma_input), intent(in) :: input
     type(zhao_params_type), intent(out) :: params
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
@@ -61,9 +61,9 @@ contains
     status = SHEATH_INVALID_ARGUMENT
     message = 'Plasma inputs must be finite, with positive ion density, temperature, ion speed and masses.'
     if (.not. all(ieee_is_finite([input%ion_density_m3, input%electron_temperature_ev, &
-        input%electron_drift_mps, input%ion_drift_mps, input%ion_mass_kg, input%electron_mass_kg, &
+        input%electron_drift_mps, input%ion_entry_speed_mps, input%ion_mass_kg, input%electron_mass_kg, &
         input%ion_temperature_ev, input%ion_pressure_factor]))) return
-    if (min(input%ion_density_m3, input%electron_temperature_ev, input%ion_drift_mps, &
+    if (min(input%ion_density_m3, input%electron_temperature_ev, input%ion_entry_speed_mps, &
         input%ion_mass_kg, input%electron_mass_kg) <= 0.0_dp) return
     message = 'Ion temperature must be nonnegative and pressure factor positive.'
     if (input%ion_temperature_ev < 0.0_dp .or. input%ion_pressure_factor <= 0.0_dp) return
@@ -77,7 +77,7 @@ contains
     params%ion_pressure_factor = input%ion_pressure_factor
     params%potential_scale_v = input%photoelectrons%potential_scale(input%electron_temperature_ev)
     params%v_d_electron_mps = input%electron_drift_mps
-    params%v_d_ion_mps = input%ion_drift_mps
+    params%v_d_ion_mps = input%ion_entry_speed_mps
     params%m_i_kg = input%ion_mass_kg
     params%m_e_kg = input%electron_mass_kg
     params%v_swe_th_mps = sqrt(2.0_dp*qe*params%t_swe_ev/params%m_e_kg)
@@ -111,10 +111,10 @@ contains
   !! at the immediately neighboring binary64 potentials. All fields/fluxes use that same density; no tolerance is relaxed.
   subroutine evaluate_sheath_state(input, branch, boundary_potential_v, output, status, message, &
       minimum_potential_v, electron_normalization_m3)
-    class(zhao_plasma_input), intent(in) :: input
+    class(plasma_input), intent(in) :: input
     character(len=*), intent(in) :: branch
     real(dp), intent(in) :: boundary_potential_v
-    type(zhao_state_result), intent(out) :: output
+    type(sheath_state_result), intent(out) :: output
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     real(dp), intent(in), optional :: minimum_potential_v
@@ -123,7 +123,7 @@ contains
     real(dp) :: phi0, phim, density, factor, minimum_e2, boundary_e2
     real(dp) :: left_phi, right_phi, left_density, right_density, minimum, rho
     character(len=1) :: selected
-    output = zhao_state_result()
+    output = sheath_state_result()
     call prepare_plasma_params(input, p, status, message)
     if (status /= SHEATH_OK) return
     status = SHEATH_INVALID_ARGUMENT

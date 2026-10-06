@@ -7,9 +7,10 @@ module sheath_model_field
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NO_PHYSICAL_SOLUTION, SHEATH_NUMERICAL_FAILURE, &
       SHEATH_AMBIGUOUS_SOLUTION
   use sheath_model_core, only: zhao_params_type, neutral_electron_density, evaluate_zhao_fluxes
-  use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, valid_search_options
+  use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, valid_search_options, &
+      sheath_continuation_options, valid_continuation_options
   use sheath_model_coordinates, only: encode_unknowns, decode_unknowns, make_branch_guesses
-  use sheath_model_state, only: zhao_plasma_input, prepare_plasma_params
+  use sheath_model_state, only: plasma_input, prepare_plasma_params
   use sheath_model_atlas, only: sheath_field_atlas, sheath_atlas_point
   use sheath_model_atlas_physics, only: equilibrium_key, params_from_key
   use sheath_model_continuation, only: continue_guarded_system, find_guarded_roots
@@ -18,7 +19,7 @@ module sheath_model_field
 
   private
 
-  public :: zhao_field_input, zhao_field_result, solve_prescribed_field, solve_prescribed_field_candidates
+  public :: prescribed_field_input, prescribed_field_result, solve_prescribed_field, solve_prescribed_field_candidates
   public :: sheath_search_diagnostics
   public :: build_field_atlas, add_field_to_atlas
 
@@ -26,16 +27,15 @@ module sheath_model_field
 
   !> Plasma inputs and prescribed normal field E_H [V/m]; branch selects A/B/C/auto.
   !! Other quantities use SI units except temperatures/normal energies [eV]; field is positive outward, drift positive inward.
-  type, extends(zhao_plasma_input) :: zhao_field_input
-    type(sheath_search_options) :: search
+  type, extends(plasma_input) :: prescribed_field_input
     character(len=9) :: branch = 'auto'
     real(dp) :: electric_field_v_m = 0.0_dp
-  end type zhao_field_input
+  end type prescribed_field_input
 
   !> Accepted prescribed-field root with potentials, densities, particle fluxes and current in SI units.
   !! valid marks success; residual_norm and minimum_field_squared_hat are dimensionless.
   !! ambient_electron_density_m3 is the Maxwellian normalization, not total upstream density.
-  type :: zhao_field_result
+  type :: prescribed_field_result
     logical :: valid = .false.
     character(len=1) :: branch = ' '
     real(dp) :: boundary_potential_v = 0.0_dp
@@ -50,7 +50,7 @@ module sheath_model_field
     real(dp) :: residual_norm = huge(1.0_dp)
     real(dp) :: minimum_field_squared_hat = huge(1.0_dp)
     integer(i32) :: nonlinear_iterations = 0_i32
-  end type zhao_field_result
+  end type prescribed_field_result
 
   type :: zhao_field_root
     character(len=1) :: branch = ' '
@@ -63,8 +63,10 @@ module sheath_model_field
   end type zhao_field_root
 
   interface
-    module subroutine prepare_field_params(input, params, status, message)
-      type(zhao_field_input), intent(in) :: input
+    module subroutine prepare_field_params(input, params, status, message, search_options, continuation_options)
+      type(sheath_search_options), intent(in), optional :: search_options
+      type(sheath_continuation_options), intent(in), optional :: continuation_options
+      type(prescribed_field_input), intent(in) :: input
       type(zhao_params_type), intent(out) :: params
       integer(i32), intent(out) :: status
       character(len=*), intent(out) :: message
@@ -89,7 +91,7 @@ module sheath_model_field
       integer(i32), intent(out) :: status
       character(len=*), intent(out) :: message
       type(sheath_search_diagnostics), intent(out) :: diagnostics
-      type(zhao_field_result), intent(in), optional :: initial_guesses(:)
+      type(prescribed_field_result), intent(in), optional :: initial_guesses(:)
       type(sheath_field_atlas), intent(in), optional :: atlas
       logical, intent(in), optional :: deflation
       integer, intent(in), optional :: max_roots
@@ -107,7 +109,7 @@ module sheath_model_field
       integer(i32), intent(out) :: status
       character(len=*), intent(out) :: message
       type(sheath_search_diagnostics), intent(out) :: diagnostics
-      type(zhao_field_result), intent(in), optional :: initial_guesses(:)
+      type(prescribed_field_result), intent(in), optional :: initial_guesses(:)
       type(sheath_field_atlas), intent(in), optional :: atlas
       logical, intent(in), optional :: deflation
       integer, intent(in), optional :: max_roots
@@ -165,17 +167,22 @@ module sheath_model_field
       type(sheath_search_diagnostics), intent(inout) :: diagnostics
     end subroutine
 
-    module subroutine add_field_to_atlas(input, root, atlas, status, message, component)
-      type(zhao_field_input), intent(in) :: input
-      type(zhao_field_result), intent(in) :: root
+    module subroutine add_field_to_atlas(input, root, atlas, status, message, component, search_options, continuation_options)
+      type(sheath_search_options), intent(in), optional :: search_options
+      type(sheath_continuation_options), intent(in), optional :: continuation_options
+      type(prescribed_field_input), intent(in) :: input
+      type(prescribed_field_result), intent(in) :: root
       type(sheath_field_atlas), intent(inout) :: atlas
       integer(i32), intent(out) :: status
       character(len=*), intent(out) :: message
       integer, intent(in), optional :: component
     end subroutine
 
-    module subroutine build_field_atlas(inputs, atlas, status, message, report, deflation, max_roots)
-      type(zhao_field_input), intent(in) :: inputs(:)
+    module subroutine build_field_atlas(inputs, atlas, status, message, report, deflation, max_roots, &
+        search_options, continuation_options)
+      type(sheath_search_options), intent(in), optional :: search_options
+      type(sheath_continuation_options), intent(in), optional :: continuation_options
+      type(prescribed_field_input), intent(in) :: inputs(:)
       type(sheath_field_atlas), intent(inout) :: atlas
       integer(i32), intent(out) :: status
       character(len=*), intent(out) :: message
@@ -196,13 +203,15 @@ contains
       input, output, &
       status, message, &
       diagnostics, initial_guesses, atlas, deflation, max_roots &
-      )
-    type(zhao_field_input), intent(in) :: input
-    type(zhao_field_result), intent(out) :: output
+      , search_options, continuation_options)
+    type(sheath_search_options), intent(in), optional :: search_options
+    type(sheath_continuation_options), intent(in), optional :: continuation_options
+    type(prescribed_field_input), intent(in) :: input
+    type(prescribed_field_result), intent(out) :: output
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     type(sheath_search_diagnostics), intent(out), optional :: diagnostics
-    type(zhao_field_result), intent(in), optional :: initial_guesses(:)
+    type(prescribed_field_result), intent(in), optional :: initial_guesses(:)
     type(sheath_field_atlas), intent(in), optional :: atlas
     logical, intent(in), optional :: deflation
     integer, intent(in), optional :: max_roots
@@ -212,11 +221,12 @@ contains
     type(sheath_search_diagnostics) :: search
     character(len=256) :: search_message
 
-    output = zhao_field_result()
+    output = prescribed_field_result()
     if (present(diagnostics)) then
       diagnostics = sheath_search_diagnostics()
     end if
-    call prepare_field_params(input, params, status, message)
+    call prepare_field_params(input, params, status, message, &
+        search_options=search_options, continuation_options=continuation_options)
     if (status /= SHEATH_OK) return
     call validate_field_search(atlas, max_roots, status, message)
     if (status /= SHEATH_OK) return
@@ -247,13 +257,15 @@ contains
       input, outputs, &
       status, message, &
       diagnostics, initial_guesses, atlas, deflation, max_roots &
-      )
-    type(zhao_field_input), intent(in) :: input
-    type(zhao_field_result), allocatable, intent(out) :: outputs(:)
+      , search_options, continuation_options)
+    type(sheath_search_options), intent(in), optional :: search_options
+    type(sheath_continuation_options), intent(in), optional :: continuation_options
+    type(prescribed_field_input), intent(in) :: input
+    type(prescribed_field_result), allocatable, intent(out) :: outputs(:)
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     type(sheath_search_diagnostics), intent(out), optional :: diagnostics
-    type(zhao_field_result), intent(in), optional :: initial_guesses(:)
+    type(prescribed_field_result), intent(in), optional :: initial_guesses(:)
     type(sheath_field_atlas), intent(in), optional :: atlas
     logical, intent(in), optional :: deflation
     integer, intent(in), optional :: max_roots
@@ -267,7 +279,8 @@ contains
     if (present(diagnostics)) then
       diagnostics = sheath_search_diagnostics()
     end if
-    call prepare_field_params(input, params, status, message)
+    call prepare_field_params(input, params, status, message, &
+        search_options=search_options, continuation_options=continuation_options)
     if (status /= SHEATH_OK) return
     call validate_field_search(atlas, max_roots, status, message)
     if (status /= SHEATH_OK) return
@@ -297,13 +310,13 @@ contains
   subroutine compose_result(params, root, output, status, message)
     type(zhao_params_type), intent(in) :: params
     type(zhao_field_root), intent(in) :: root
-    type(zhao_field_result), intent(out) :: output
+    type(prescribed_field_result), intent(out) :: output
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
 
-    type(zhao_field_result) :: trial
+    type(prescribed_field_result) :: trial
 
-    output = zhao_field_result()
+    output = prescribed_field_result()
     status = SHEATH_OK
     message = ''
 

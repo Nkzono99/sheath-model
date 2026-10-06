@@ -3,11 +3,12 @@ program test_orbits
   use sheath_model_orbits, only: electron_density
   use sheath_model_core, only: zhao_params_type, type_a_e2_sum_at_infinity
   implicit none
+  type(sheath_solver) :: solver
   type(zhao_equilibrium_input) :: input
-  type(zhao_equilibrium_result) :: root
-  type(zhao_profile_result) :: profile
-  type(zhao_field_input) :: field_input
-  type(zhao_field_result), allocatable :: candidates(:)
+  type(sheath_equilibrium_result) :: root
+  type(sheath_profile_result) :: profile
+  type(prescribed_field_input) :: field_input
+  type(prescribed_field_result), allocatable :: candidates(:)
   type(zhao_params_type) :: p
   real(dp) :: free, reflected, psi, previous_phi, direct, a, width, weight, cutoff
   real(dp), parameter :: states(3) = [0.25_dp, -0.03_dp, -0.3_dp]
@@ -55,18 +56,19 @@ program test_orbits
     if (abs(free - direct) > 1e-10_dp) error stop 'orbit density vs independent upstream integral'
   end do
   input = zhao_equilibrium_input(branch='A')
-  call solve_equilibrium(input, root, status, message)
+  call solver%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_NO_PHYSICAL_SOLUTION .or. root%valid) error stop 'drifting A asymptotic obstruction'
   input%branch = 'auto'
-  call solve_equilibrium(input, root, status, message)
+  call solver%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_OK .or. root%branch /= 'B') error stop 'auto must skip inadmissible roots'
   input = zhao_equilibrium_input(branch='A', electron_drift_mode='zero')
-  call solve_equilibrium(input, root, status, message)
+  call solver%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_OK) error stop 'A60 acceptance'
   input%sun_elevation_deg = 19.0_dp
-  call solve_equilibrium(input, root, status, message)
+  call solver%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_OK .or. root%surface_potential_v >= 0.0_dp) error stop 'negative surface A'
-  call solve_profile(input, zhao_profile_options(), profile, status, message)
+  solver%profile = sheath_profile_options()
+  call solver%solve_profile(input, profile, status, message)
   if (status /= SHEATH_OK) then
     print *, trim(message)
     error stop 'accepted A profile'
@@ -74,15 +76,15 @@ program test_orbits
   if (profile%potential_v(1) /= profile%equilibrium%surface_potential_v) error stop 'exact surface endpoint'
   if (minval(profile%potential_v) /= profile%equilibrium%minimum_potential_v) error stop 'exact turning endpoint'
   input = zhao_equilibrium_input(branch='C', sun_elevation_deg=1.0_dp, electron_drift_mode='zero')
-  call solve_equilibrium(input, root, status, message)
+  call solver%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_NO_PHYSICAL_SOLUTION .or. root%valid) error stop 'unphysical C accepted'
-  field_input = zhao_field_input()
+  field_input = prescribed_field_input()
   field_input%photoelectrons = maxwellian_photoelectrons(64e6_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp), 2.2_dp)
   field_input%electron_drift_mps = 0.0_dp
-  field_input%ion_drift_mps = 468e3_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
+  field_input%ion_entry_speed_mps = 468e3_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
   do i = -1, 1
     field_input%electric_field_v_m = real(i, dp)*0.01_dp
-    call solve_prescribed_field_candidates(field_input, candidates, status, message)
+    call solver%solve_prescribed_field_candidates(field_input, candidates, status, message)
     if (status /= SHEATH_OK) error stop 'field transition candidate search'
     if (size(candidates) /= 1) error stop 'transition duplicates must coalesce'
     if (candidates(1)%boundary_potential_v >= 0.0_dp) error stop 'transition is nonflat'

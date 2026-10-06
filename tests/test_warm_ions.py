@@ -1,10 +1,12 @@
+from sheath_model import SheathSolver
+from sheath_model._equilibrium import EquilibriumProblem
 import math
 import unittest
 
 import numpy as np
 from scipy.special import lambertw
 
-from sheath_model import ZhaoParams, ZhaoSheathSolver, ion_density_ratio, ion_critical_potential
+from sheath_model import ZhaoParams, ion_density_ratio, ion_critical_potential
 
 
 class WarmIonTests(unittest.TestCase):
@@ -55,36 +57,34 @@ class WarmIonTests(unittest.TestCase):
                                    expected, delta=2e-13)
 
     def test_public_solver_density_current_and_local_speed(self):
-        params = ZhaoParams(electron_drift_mode="zero", T_swi_eV=12., ion_pressure_factor=3.,
-                            n_type_a_grid=800)
-        solver = ZhaoSheathSolver(params)
-        profile = solver.solve_profile("A")
-        heights = profile["z_m_array_m"]
+        params = ZhaoParams(electron_drift_mode='zero', ion_temperature_ev=12.0, ion_pressure_factor=3.0)
+        solver = EquilibriumProblem(params)
+        profile = SheathSolver(search=solver.search).solve_profile(solver.p, branch='A')
+        heights = profile.z_m
         for height in (0., float(heights[len(heights)//2])):
-            state = solver.sample_at_z(profile, height, unit="m")
+            state = profile.sample(height, unit='m')
             self.assertAlmostEqual(state["n_swi_m3"]*state["v_i_mps"]/(params.ion_density_m3*params.ion_entry_speed_mps),
                                    1., delta=3e-15)
-            self.assertAlmostEqual(solver.fluxes_at_z(profile, height, unit="m")["J_net_Apm2"],
-                                   0., delta=1e-12)
-        cold = ZhaoSheathSolver(ZhaoParams(electron_drift_mode="zero")).solve_unknowns("A")
-        self.assertGreater(abs(float(profile["phi_m_V"])-float(cold["phi_m_V"])), 1e-6)
+            self.assertAlmostEqual(profile.fluxes(height, unit='m')['J_net_Apm2'], 0.0, delta=1e-12)
+        cold = SheathSolver().solve_equilibrium(ZhaoParams(electron_drift_mode='zero'), branch='A')
+        self.assertGreater(abs(float(profile.equilibrium.minimum_potential_v) - float(cold.minimum_potential_v)), 1e-06)
         with self.assertRaisesRegex(ValueError, "does not define an ion VDF"):
-            solver.vdf_1d_at_z(profile, 0., species="swi", unit="m")
+            profile.vdf(0.0, species='swi', unit='m')
 
     def test_invalid_temperature_and_entry_speed(self):
-        for extra in ({"T_swi_eV": -1.}, {"T_swi_eV": math.nan}, {"ion_pressure_factor": 0.},
-                      {"alpha_deg": 1., "T_swi_eV": 100.}):
+        for extra in ({"ion_temperature_ev": -1.}, {"ion_temperature_ev": math.nan}, {"ion_pressure_factor": 0.},
+                      {"sun_elevation_deg": 1., "ion_temperature_ev": 100.}):
             with self.assertRaises(ValueError):
-                ZhaoSheathSolver(ZhaoParams(**extra))
+                EquilibriumProblem(ZhaoParams(**extra))
 
     def test_warm_monotonic_profiles(self):
         for branch, elevation in (("B", 20.), ("C", 10.)):
-            params = ZhaoParams(alpha_deg=elevation, electron_drift_mode="zero", T_swi_eV=1.,
+            params = ZhaoParams(sun_elevation_deg=elevation, electron_drift_mode="zero", ion_temperature_ev=1.,
                                 ion_pressure_factor=3.)
-            solver = ZhaoSheathSolver(params)
-            profile = solver.solve_profile(branch)
-            for height in (0., float(profile["z_m_array_m"][-1])):
-                flux = solver.fluxes_at_z(profile, height, unit="m")
+            solver = EquilibriumProblem(params)
+            profile = SheathSolver(search=solver.search).solve_profile(solver.p, branch=branch)
+            for height in (0., float(profile.z_m[-1])):
+                flux = profile.fluxes(height, unit='m')
                 self.assertAlmostEqual(flux["J_net_Apm2"], 0., delta=1e-12)
                 self.assertAlmostEqual(flux["Gamma_swi_signed_m2s"]/(params.ion_density_m3*params.ion_entry_speed_mps),
                                        -1., delta=3e-15)
