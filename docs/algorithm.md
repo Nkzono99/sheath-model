@@ -65,11 +65,15 @@ nearly equal primitives for narrow bins or adjacent floating-point endpoints.
 Only the ion/background-electron contribution uses potential quadrature for a bin
 source. No Maxwellian moment fit enters either density or current.
 
-Spectral Type A root searches and acceptance divide the upper connection residual by
+Type A root searches, static evaluation and acceptance divide the upper connection residual by
 `(-phi_min_hat)^(3/2)`, so a shallow minimum alone cannot make that residual appear
 converged. Numerical potential scales are T_PE for a Maxwellian source and T_e for
 a bin source, rounded down to a power of two. Binary scaling preserves spectral
 bin edges through normalization round trips; it is not an inferred source temperature.
+For a shallow zero-drift A segment, the connection integral uses density differences
+from neutral infinity with factored square-root and exponential differences.
+This retains the finite depth-normalized residual when individual densities round
+to upstream values; the dimensional static residual is reconstructed from it.
 
 Type A permits `phi_min < min(phi_H,0)`; it is not restricted to positive surface
 potentials. Unknown transformations for the field solve use a positive gap
@@ -119,10 +123,19 @@ search responsibility. Maps are read during queries and changed only explicitly.
 
 The auto method uses guarded Newton corrections with an LM fallback, logarithmic
 unknowns, domain checks and backtracking. Explicit newton/lm choices use the same
-guards. J=0 B/C additionally permits a scalar bracket method after eliminating
-electron normalization; prescribed-field searches do not use that reduction.
+guards. Both closures permit a scalar bracket method for an explicit B/C branch.
+J=0 eliminates electron normalization using the current equation; prescribed-field
+search eliminates it using upstream neutrality. The prescribed-field auto method
+combines the scalar scan with independent multistart corrections.
 Acceptance requires the original residual tolerance, not a small step or a
 least-squares stationary point.
+
+The prescribed-field scalar scan includes energy-bin boundaries and their immediate
+floating-point neighbors, logarithmic and linear potential knots, and bounded
+curvature-driven subdivision. Interior extrema reveal narrow root pairs and
+permit tangency searches. Bracket refinement never bridges an invalid sample;
+an interval-width cutoff or a positive residual minimum does not count as convergence.
+Every located candidate passes the original equations and the shared profile gate.
 
 Maps use six dimensionless plasma/source coordinates, with a seventh prescribed
 field coordinate for field maps. A/B/C types, proximity-based component labels
@@ -140,7 +153,7 @@ of absence, and no global branch-coverage guarantee is provided.
 
 ## Multiple solutions and numerical limits
 
-The prescribed-field solve returns a solution only when the finite multistart
+The prescribed-field solve returns a solution only when the finite candidate
 search finds one admissible root. Multiple roots produce an ambiguity status;
 candidate enumeration lets callers inspect their potentials, densities, and fluxes.
 No stability ranking or automatic change of the input drift is performed.

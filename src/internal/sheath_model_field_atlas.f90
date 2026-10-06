@@ -23,9 +23,12 @@ contains
     end select
     message = 'The prescribed field must be finite.'
     if (.not. ieee_is_finite(input%electric_field_v_m)) return
-    message = 'Invalid search options; prescribed-field search supports auto, newton, or lm.'
+    message = 'Invalid search options; bracket requires an explicit B/C branch.'
     if (.not. valid_search_options(params%search) .or. &
-        .not. valid_continuation_options(params%continuation) .or. trim(lower_ascii(params%search%method)) == 'bracket') return
+        .not. valid_continuation_options(params%continuation)) return
+    if (trim(lower_ascii(params%search%method)) == 'bracket') then
+      if (trim(lower_ascii(input%branch)) /= 'b' .and. trim(lower_ascii(input%branch)) /= 'c') return
+    end if
     call prepare_plasma_params(input, params, status, message)
     params%search = sheath_search_options()
     params%continuation = sheath_continuation_options()

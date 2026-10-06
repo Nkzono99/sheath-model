@@ -3,7 +3,7 @@ program test_photoelectrons
   use sheath_model
   use sheath_model_constants, only: qe, pi, electron_mass
   use sheath_model_photoelectrons, only: validate_photoelectrons, photoelectron_density, photoelectron_fluxes, &
-      photoelectron_density_integral, photoelectron_sqrt_coefficient
+      photoelectron_density_integral, photoelectron_sqrt_coefficient, photoelectron_upper_delta_scaled
   implicit none
   type(photoelectron_source) :: source, analytic
   real(dp) :: edges(5), flux(4), outward, escape, returning, free, captured, exact_free, exact_captured
@@ -134,6 +134,25 @@ program test_photoelectrons
   source = binned_photoelectrons([0.0_dp, 1.0_dp], [ieee_value(0.0_dp, ieee_quiet_nan)])
   call validate_photoelectrons(source, status, message)
   call check(status == SHEATH_INVALID_ARGUMENT, 'NaN flux rejected')
+  ! Compare factored upper-segment differences against separate orbit-density
+  ! evaluations at a resolvable depth, then an independent zero-depth limit.
+  do j = 1, 2
+    source = maxwellian_photoelectrons(6.4e7_dp, 2.2_dp)
+    if (j == 2) source = binned_photoelectrons([0.0_dp, 0.3_dp, 1.2_dp, 4.0_dp], [2e12_dp, 7e12_dp, 3e12_dp])
+    do i = 1, 4
+      phi = 0.3_dp + 0.3_dp*i
+      h = 1e-4_dp
+      call photoelectron_density(source, electron_mass, phi, -h, 0.0_dp, .false., exact_free, captured)
+      call photoelectron_density(source, electron_mass, phi, -h, -0.75_dp*h, .false., free, captured)
+      reference = (free - exact_free)/sqrt(h)
+      integral = photoelectron_upper_delta_scaled(source, electron_mass, phi, h, 0.75_dp)
+      call near(integral, reference, 2e-10_dp, 'upper delta agrees with independent density evaluations')
+    end do
+  end do
+  source = binned_photoelectrons([0.0_dp, 3.0_dp], [2e12_dp])
+  integral = photoelectron_upper_delta_scaled(source, electron_mass, 0.5_dp, 1e-100_dp, 0.75_dp)
+  reference = (2e12_dp/3.0_dp)/sqrt(2*qe/electron_mass)
+  call near(integral, reference, 1e-14_dp, 'bin upper delta retains the leading-depth limit')
   print *, 'Photoelectron spectrum moments and precision checks passed.'
 contains
   subroutine check(condition, label)

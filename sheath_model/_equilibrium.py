@@ -113,8 +113,8 @@ class EquilibriumProblem(SheathPhysics):
         raw = getattr(self, "_residuals_type_"+branch.lower())(physical if branch == "A" else physical[[0, 2]])
         raw[:2] /= self.p.ion_density_m3
         if branch == "A":
-            raw[2] *= self.p.density_scale_m3/self.p.ion_density_m3/(-physical[1]/
-                       self.p.photoelectron_temperature_ev)**1.5
+            raw[2] = self._type_a_connection_residual(physical[0]/self.p.photoelectron_temperature_ev,
+                       physical[1]/self.p.photoelectron_temperature_ev, physical[2]/self.p.density_scale_m3)
         return raw if np.all(np.isfinite(raw)) else None
 
 

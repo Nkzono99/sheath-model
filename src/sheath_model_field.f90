@@ -140,6 +140,15 @@ module sheath_model_field
       logical, intent(out) :: valid
     end subroutine evaluate_charge_residual
 
+    module subroutine evaluate_physical_field_residual(params, branch, target_field_hat, phi0_v, phi_m_v, &
+        density_m3, residual, valid)
+      type(zhao_params_type), intent(in) :: params
+      character(len=1), intent(in) :: branch
+      real(dp), intent(in) :: target_field_hat, phi0_v, phi_m_v, density_m3
+      real(dp), intent(out) :: residual(3)
+      logical, intent(out) :: valid
+    end subroutine
+
     module subroutine validate_field_root_profile( &
         params, root, target_field_hat, &
         status, message &

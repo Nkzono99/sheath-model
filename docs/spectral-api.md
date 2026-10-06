@@ -86,6 +86,7 @@ A の呼び出し例は `call evaluate_sheath_state(plasma, 'A', phi_H, state, s
 | `neutrality_residual_m3` | 上流での `n_i-n_e-n_PE` [m⁻³] |
 | `boundary_field_squared_v2_m2` | 符号を保持した境界の E² 積分 [V²/m²] |
 | `connection_residual_v2_m2` | A の `-2/eps0 ∫(phi_min..0) rho_upper dphi` [V²/m²]、B/C は 0 |
+| `connection_residual_normalized` | A の接続残差を内部電場尺度の二乗と `(-phi_min_hat)^(3/2)` で割った無次元量。B/C は 0 |
 | `electric_field_v_m` | 枝の符号を持つ境界電場 [V/m]。E² 積分が負なら NaN |
 | `electron_inward_flux_m2_s`, `ion_inward_flux_m2_s` | 境界への電子・イオン数流束 [m⁻² s⁻¹] |
 | `photoelectron_outward_flux_m2_s` | 総放出数流束 [m⁻² s⁻¹] |
@@ -97,6 +98,12 @@ A の呼び出し例は `call evaluate_sheath_state(plasma, 'A', phi_H, state, s
 負の E² をゼロに置き換えません。A は通常の試行点では upper 接続残差が非ゼロで、完成した解ではありません。
 許容誤差の範囲で判定するため、`electric_field_v_m` を使う処理では実数電場が得られたことも確認してください。
 不正入力・数値評価失敗時には `evaluated=.false.` です。
+
+外側の連立方程式には `connection_residual_normalized` を使えます。
+`V_s=plasma%photoelectrons%potential_scale(plasma%electron_temperature_ev)` とすると、
+SI 残差との関係は `R_A=connection_residual_v2_m2*eps0*sqrt(V_s)/(e*n_i*(-phi_min)^(3/2))` です。
+この規格化は浅い極小で区間が縮む効果を取り除き、Maxwell・bin の求解と最終判定で共通に使います。
+外側で課す電場、電流、時間更新式の残差は、利用側でも検査してください。
 
 ## E_H 指定の解法にも同じ分布を使う
 
@@ -113,17 +120,17 @@ call solver%solve_prescribed_field_candidates(input, candidates, status, message
 ```
 
 各共通項を `input%electron_temperature_ev` などで直接設定することもできます。
-従来の `photoelectron_source_density_m3` と E_H 用の `photoelectron_temperature_ev` は
-`input%photoelectrons=maxwellian_photoelectrons(N_PE,T_PE)` に置き換えました。旧フィールドは残していません。
-太陽高度を入力する `zhao_equilibrium_input` の J=0 API は、従来どおり Maxwell 源を使います。
+太陽高度を入力する `zhao_equilibrium_input` の J=0 API は Maxwell 源を使います。
 全ての解法が同じ密度・流束・積分・物理解判定を呼びます。
 
 ## 浮動小数点端点の扱い
 
 狭い bin の平方根差・3/2 乗差は差分を因数分解して評価します。
 bin 源の内部電位尺度は T_e 以下で最大の 2 の冪を使い、規格化の往復で bin 端が 1 ulp ずれることを防ぎます。
-Type A のスペクトル源の探索・採用判定では、浅い極小の upper 残差を `(-phi_min_hat)^(3/2)` で規格化し、
+Type A の探索・採用判定では、すべての源で浅い極小の upper 残差を `(-phi_min_hat)^(3/2)` で規格化し、
 極小が浅いだけで残差が小さく見える問題を避けます。電子ドリフトが厳密にゼロなら背景電子密度は解析式です。
+無ドリフトの浅い A では、上流からの密度差と平方根差を因数分解して積分し、
+密度同士の桁落ちを避けます。SI 接続残差もこの規格化残差から戻します。
 
 非常に急な応答では、利用側の方程式を満たす電位が隣接する binary64 値の間に入り得ます。
 この場合のために、静的評価は省略可能な `electron_normalization_m3` を受け取ります。
@@ -141,6 +148,8 @@ BEACH の batch-154 スペクトルと独立な高精度静的参照値を回帰
 共通モデルの軌道分布・単位・Type B 上流条件・無ドリフト解析式を Fortran と揃えています。
 
 ヒストグラムの生成・蓄積、時間更新式とその根探索、前回状態の保存、候補の選択、MPI・checkpoint は利用側で扱います。
+利用側の配置や粒子種から法線条件を作る処理、変位電場から E_H への換算も利用側で行います。
+静的評価の電流は外向き通常電流なので、利用側の表面電荷収支に合わせて符号を換算してください。
 ライブラリの判定は有限の積分・経路検査を含み、全パラメータ域の存在証明や動的安定性の判定ではありません。
 電位を走査する実行例は [potential_scan.f90](../example/potential_scan.f90) です。
 

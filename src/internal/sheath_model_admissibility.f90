@@ -3,7 +3,7 @@ module sheath_model_admissibility
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use sheath_model_constants, only: dp, i32, pi
   use sheath_model_status, only: SHEATH_OK, SHEATH_NO_PHYSICAL_SOLUTION, SHEATH_NUMERICAL_FAILURE
-  use sheath_model_core, only: zhao_params_type, integrate_zhao_rho, evaluate_zhao_rho_hat
+  use sheath_model_core, only: zhao_params_type, integrate_zhao_rho, evaluate_zhao_rho_hat, type_a_connection_residual
   use sheath_model_photoelectrons, only: photoelectron_sqrt_coefficient
   use sheath_model_ions, only: ion_density_ratio
 
@@ -30,7 +30,7 @@ contains
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
 
-    real(dp) :: phi, e2, upper_e2, rho, fraction
+    real(dp) :: phi, e2, rho, fraction
     real(dp) :: ambient_edge, photo_edge, connection_residual
     integer :: j, segment
     character(len=9) :: side
@@ -69,12 +69,8 @@ contains
     if (abs(rho) > 1e-7_dp*max(1.0_dp, density, p%n_swi_inf_m3/p%density_scale_m3)) return
 
     if (branch == 'A') then
-      upper_e2 = -2.0_dp*integrate_zhao_rho(p, branch, 'upper', phim, 0.0_dp, phi0, phim, density)
       message = 'The internal minimum does not connect to zero field at infinity.'
-      connection_residual = upper_e2
-      if (p%photoelectrons%is_binned()) then
-        connection_residual = upper_e2/(-phim)**1.5_dp
-      end if
+      connection_residual = type_a_connection_residual(p, phi0, phim, density)
       if (.not. ieee_is_finite(connection_residual)) then
         status = SHEATH_NUMERICAL_FAILURE
         message = 'The upper connection residual is non-finite.'

@@ -4,7 +4,7 @@
 !> Zhao 系シースの物理量、残差、および枝ごとの初期値・探索。
 module sheath_model_core
   use sheath_model_photoelectrons, only: photoelectron_source, photoelectron_density, photoelectron_fluxes, &
-      photoelectron_density_integral
+      photoelectron_density_integral, photoelectron_upper_delta_scaled
   use sheath_model_orbits, only: electron_density, gauss_x, gauss_w
   use sheath_model_ions, only: ion_density_ratio
   use sheath_model_constants, only: dp
@@ -50,7 +50,7 @@ module sheath_model_core
   public :: zhao_residuals_type_b
   public :: zhao_residuals_type_c
   public :: swe_free_current_term
-  public :: type_a_e2_sum_at_infinity, integrate_zhao_rho
+  public :: type_a_e2_sum_at_infinity, type_a_connection_residual, integrate_zhao_rho
 
 contains
 
@@ -235,6 +235,75 @@ contains
     e2_sum = -2.0_dp*integrate_zhao_rho(p, 'A', 'upper', phi_m_v/p%potential_scale_v, 0.0_dp, &
         phi0_v/p%potential_scale_v, phi_m_v/p%potential_scale_v, n_swe_inf_m3/p%density_scale_m3)
   end function type_a_e2_sum_at_infinity
+
+  !> Upper-connection residual normalized to ion density and the leading depth^(3/2).
+  !! Shared by equation solvers, trial-state evaluation and final profile acceptance.
+  !! Divide successively rather than forming a potentially underflowed depth**1.5.
+  real(dp) function type_a_connection_residual(p, phi0, phim, density) result(value)
+    type(zhao_params_type), intent(in) :: p
+    real(dp), intent(in) :: phi0, phim, density ! normalized potentials and density
+    real(dp) :: energy, pressure, sound, ion_scale
+    value = ieee_value(0.0_dp, ieee_quiet_nan)
+    if (phim >= 0.0_dp) return
+    if (p%u == 0.0_dp) then
+      energy = 0.5_dp*p%t_swe_ev*p%mach**2
+      pressure = p%ion_pressure_factor*p%t_swi_ev
+      sound = 2.0_dp*energy - pressure
+      ion_scale = sound*(sound/(6.0_dp*energy + pressure))
+      if (-phim*p%potential_scale_v < 1e-8_dp*min(p%t_swe_ev, p%potential_scale_v, &
+          ion_scale)) then
+        value = shallow_type_a_connection(p, phi0, phim, density)
+        return
+      end if
+    end if
+    value = (-2.0_dp*integrate_zhao_rho(p, 'A', 'upper', phim, 0.0_dp, phi0, phim, density)/(-phim))* &
+        (p%density_scale_m3/p%n_swi_inf_m3)/sqrt(-phim)
+  end function
+
+  ! Integrate differences from neutral infinity, rather than cancel O(1)
+  ! densities and then divide by sqrt(depth). No asymptotic zero is accepted.
+  real(dp) function shallow_type_a_connection(p, phi0, phim, density) result(value)
+    type(zhao_params_type), intent(in) :: p
+    real(dp), intent(in) :: phi0, phim, density
+    real(dp) :: d, root_d, t, f, psi, s, s0, polynomial, electron_delta, ion_delta, photo_delta
+    real(dp) :: energy, pressure, sound, phi, ratio, neutral_density, coefficient, rho0
+    integer :: panel, j
+    d = -phim
+    root_d = sqrt(d)
+    energy = 0.5_dp*p%t_swe_ev*p%mach**2
+    pressure = p%ion_pressure_factor*p%t_swi_ev
+    sound = 2.0_dp*energy - pressure
+    s0 = sqrt(d/p%tau)
+    coefficient = 0.5_dp*(1.0_dp + erf(s0))
+    neutral_density = neutral_electron_density(p, 'A', phi0*p%potential_scale_v, phim*p%potential_scale_v)/p%density_scale_m3
+    rho0 = (neutral_density - density)*coefficient/root_d
+    value = 0.0_dp
+    do panel = 0, 3
+      do j = 1, 16
+        t = (real(panel, dp) + 0.5_dp*(1.0_dp + gauss_x(j)))/4.0_dp
+        f = cos(0.5_dp*pi*t)**2
+        phi = -d*f*p%potential_scale_v
+        if (pressure == 0.0_dp) then
+          ratio = sqrt(1.0_dp - phi/energy)
+          ion_delta = -root_d*f*p%potential_scale_v/(energy*ratio*(1.0_dp + ratio))
+        else
+          ion_delta = -root_d*f*p%potential_scale_v*(1.0_dp/sound + &
+              (6.0_dp*energy - pressure)*phi/(2.0_dp*sound**3))
+        end if
+        ion_delta = ion_delta*p%n_swi_inf_m3/p%density_scale_m3
+        psi = -d*f/p%tau
+        s = s0*sqrt(1.0_dp - f)
+        polynomial = 1.0_dp - (s*s + s*s0 + s0*s0)/3.0_dp + &
+            (s**4 + s**3*s0 + s*s*s0*s0 + s*s0**3 + s0**4)/10.0_dp
+        electron_delta = 0.5_dp*density*(-root_d*f/p%tau*(1.0_dp + psi*(0.5_dp + psi*(1.0_dp/6.0_dp + psi/24.0_dp)))* &
+            (1.0_dp + erf(s0)) - exp(psi)*2.0_dp*f*polynomial/(sqrt(pi*p%tau)*(1.0_dp + sqrt(1.0_dp - f))))
+        photo_delta = photoelectron_upper_delta_scaled(p%photoelectrons, p%m_e_kg, phi0*p%potential_scale_v, &
+            d*p%potential_scale_v, f)*sqrt(p%potential_scale_v)/p%density_scale_m3
+        value = value + gauss_w(j)*(ion_delta - electron_delta - photo_delta)*0.5_dp*pi*sin(pi*t)
+      end do
+    end do
+    value = -2.0_dp*(value/8.0_dp + rho0)*p%density_scale_m3/p%n_swi_inf_m3
+  end function
 
   !> Integrate dimensionless charge density over potential from lo to hi on the selected branch and side.
   !! lo, hi, phi0 and phim are potentials / p%potential_scale_v; density is electron normalization / p%density_scale_m3.

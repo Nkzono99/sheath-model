@@ -5,8 +5,9 @@
 !! 根の探索順・選択方針を持たず、与えられた状態の物理量と成立条件を評価する。
 submodule(sheath_model_field) sheath_model_field_physics
   use sheath_model_admissibility, only: validate_zhao_profile
-  use sheath_model_core, only: integrate_zhao_rho, &
+  use sheath_model_core, only: integrate_zhao_rho, type_a_connection_residual, &
       zhao_residuals_type_a, zhao_residuals_type_b, zhao_residuals_type_c
+  use sheath_model_ions, only: ion_density_ratio
   implicit none
 
 contains
@@ -21,15 +22,29 @@ contains
     real(dp), intent(out) :: residual(3)
     logical, intent(out) :: valid
 
-    real(dp) :: phi0_v, phi_m_v, density_m3, phi0_hat, phi_m_hat, density_hat
+    real(dp) :: phi0_v, phi_m_v, density_m3
+
+    residual = 0.0_dp
+    call decode_unknowns(params, branch, y, phi0_v, phi_m_v, density_m3, valid)
+    if (.not. valid) return
+    call evaluate_physical_field_residual(params, branch, target_field_hat, phi0_v, phi_m_v, density_m3, residual, valid)
+  end subroutine evaluate_charge_residual
+
+  ! Physical coordinates preserve exact energy-bin endpoints through final acceptance.
+  module subroutine evaluate_physical_field_residual(params, branch, target_field_hat, phi0_v, phi_m_v, &
+      density_m3, residual, valid)
+    type(zhao_params_type), intent(in) :: params
+    character(len=1), intent(in) :: branch
+    real(dp), intent(in) :: target_field_hat, phi0_v, phi_m_v, density_m3
+    real(dp), intent(out) :: residual(3)
+    logical, intent(out) :: valid
+    real(dp) :: phi0_hat, phi_m_hat, density_hat
     real(dp) :: raw(3), integral, field_squared, field_residual_scale
     real(dp) :: x3(3), x2(2)
     logical :: integral_ok
 
     residual = 0.0_dp
-    call decode_unknowns( &
-        params, branch, y, phi0_v, phi_m_v, density_m3, valid &
-        )
+    valid = all(ieee_is_finite([phi0_v, phi_m_v, density_m3])) .and. density_m3 > 0.0_dp
     if (.not. valid) return
 
     phi0_hat = phi0_v/params%potential_scale_v
@@ -58,7 +73,7 @@ contains
       residual(2) = (field_squared - target_field_hat*target_field_hat)/field_residual_scale
       ! A shrinking upper segment makes the unscaled integral vanish even
       ! without a connection. Scale every source by its leading depth^(3/2).
-      residual(3) = raw(3)/(-phi_m_hat)**1.5_dp
+      residual(3) = type_a_connection_residual(params, phi0_hat, phi_m_hat, density_hat)
     case ('B', 'C')
       x2 = [phi0_v, density_m3]
       if (branch == 'B') then
@@ -84,7 +99,7 @@ contains
     end select
 
     valid = all(ieee_is_finite(residual))
-  end subroutine evaluate_charge_residual
+  end subroutine evaluate_physical_field_residual
 
   subroutine integrate_field_rho_hat( &
       params, branch, side, &
@@ -131,8 +146,8 @@ contains
     type(zhao_params_type), intent(in) :: params
     real(dp), intent(in) :: phi_hat
 
-    accessible = params%tau > 0.0_dp .and. params%mach > 0.0_dp .and. &
-        1.0_dp - 2.0_dp*phi_hat/(params%tau*params%mach*params%mach) > 0.0_dp
+    accessible = ieee_is_finite(ion_density_ratio(phi_hat*params%potential_scale_v, &
+        0.5_dp*params%t_swe_ev*params%mach**2, params%ion_pressure_factor*params%t_swi_ev))
   end function ion_accessible
 
 end submodule sheath_model_field_physics

@@ -4,6 +4,9 @@
 !> Enumerate Zhao roots and select a physical solution.
 !! 数値解法と物理式は numerics / physics に委譲し、選択順と縮退判定をここに集める。
 submodule(sheath_model_field) sheath_model_field_roots
+  use sheath_model_scalar_search, only: find_scalar_roots
+  use sheath_model_core, only: integrate_zhao_rho
+  use sheath_model_ions, only: ion_critical_potential
   implicit none
 
   real(dp), parameter :: root_cluster_tolerance = 1.0e-6_dp
@@ -251,7 +254,10 @@ contains
 
     use_deflation = .false.
     if (present(deflation)) use_deflation = deflation
-    if (use_deflation) then
+    if (branch /= 'A' .and. (params%search%method == 'auto' .or. params%search%method == 'bracket')) &
+        call collect_scalar_roots()
+    if (params%search%method == 'bracket') return
+    if (use_deflation .and. unique_count < max_roots) then
       call find_guarded_roots(merge(3, 2, branch == 'A'), field_residual, guesses(:merge(3, 2, branch == 'A'), :guess_count), &
           params%search, diagnostics, k, algebraic, max_roots, .true., &
           atlas_flags=atlas_flags(:guess_count), origins=origins, root_iterations=root_iterations)
@@ -260,11 +266,10 @@ contains
         y(:size(algebraic, 1)) = algebraic(:, guess_index)
         call evaluate_charge_residual(params, branch, target_field_hat, y, raw, success)
         if (.not. success) cycle
-        norm = maxval(abs(raw))
         iterations = root_iterations(guess_index)
-        call accept_candidate(y, norm, iterations, atlas_flags(origins(guess_index)))
+        call accept_candidate(y, iterations, atlas_flags(origins(guess_index)))
       end do
-    else
+    else if (unique_count < max_roots) then
 
       do guess_index = 1, min(guess_count, params%search%max_starts)
         if (unique_count >= max_roots) exit
@@ -285,7 +290,7 @@ contains
           cycle
         end if
 
-        call accept_candidate(y, norm, iterations, atlas_flags(guess_index))
+        call accept_candidate(y, iterations, atlas_flags(guess_index))
       end do
     end if
 
@@ -297,11 +302,86 @@ contains
         call encode_unknowns(params, branch, candidate_root%phi0_v, candidate_root%phi_m_v, &
             candidate_root%ambient_electron_density_m3, y, success)
         if (.not. success) cycle
-        call accept_candidate(y, continued(guess_index)%residual_norm, &
-            int(continued(guess_index)%nonlinear_iterations), .true.)
+        call accept_candidate(y, int(continued(guess_index)%nonlinear_iterations), .true.)
       end do
     end if
   contains
+    subroutine collect_scalar_roots()
+      real(dp), allocatable :: knots(:), edges(:), potentials(:)
+      real(dp) :: limit, temporary
+      integer :: ngrid, point, j, remaining
+      limit = params%search%potential_extent
+      if (branch == 'B') limit = min(limit, nearest(ion_critical_potential(0.5_dp*params%t_swe_ev*params%mach**2, &
+          params%ion_pressure_factor*params%t_swi_ev)/params%potential_scale_v, -1.0_dp))
+      if (limit <= 0.0_dp) return
+      edges = params%photoelectrons%search_breakpoints()/params%potential_scale_v
+      allocate (knots(2*params%search%bracket_points + 3*size(edges)))
+      ngrid = 0
+      do point = 1, params%search%bracket_points
+        ngrid = ngrid + 1
+        knots(ngrid) = limit*exp(-28.0_dp + 28.0_dp*real(point - 1, dp)/real(params%search%bracket_points - 1, dp))
+        ngrid = ngrid + 1
+        knots(ngrid) = limit*real(point, dp)/real(params%search%bracket_points, dp)
+      end do
+      if (branch == 'B') then
+        do point = 1, size(edges)
+          if (edges(point) <= 0.0_dp .or. edges(point) >= limit) cycle
+          knots(ngrid + 1:ngrid + 3) = [nearest(edges(point), -1.0_dp), edges(point), nearest(edges(point), 1.0_dp)]
+          ngrid = ngrid + 3
+        end do
+      else
+        knots(:ngrid) = -knots(:ngrid)
+      end if
+      do point = 2, ngrid
+        temporary = knots(point)
+        j = point - 1
+        do while (j >= 1)
+          if (knots(j) <= temporary) exit
+          knots(j + 1) = knots(j)
+          j = j - 1
+        end do
+        knots(j + 1) = temporary
+      end do
+      remaining = max_roots - unique_count
+      call find_scalar_roots(scalar_residual, knots(:ngrid), params%search, potentials, diagnostics, k, remaining, scalar_candidate)
+      ! Rejected algebraic candidates provide physical evidence; no located
+      ! candidate at all remains an unresolved finite search.
+      if (size(potentials) == 0 .and. diagnostics%rejected(k) == 0) &
+          diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1
+    end subroutine
+
+    subroutine scalar_candidate(phi_hat, iterations, accepted)
+      real(dp), intent(in) :: phi_hat
+      integer, intent(in) :: iterations
+      logical, intent(out) :: accepted
+      real(dp) :: physical(3)
+      integer :: before
+      before = unique_count
+      physical(1) = phi_hat*params%potential_scale_v
+      physical(2) = min(physical(1), 0.0_dp)
+      physical(3) = neutral_electron_density(params, branch, physical(1), physical(2))
+      ! No logarithmic encode/decode round trip at spectral boundaries.
+      call accept_candidate([0.0_dp, 0.0_dp, 0.0_dp], iterations, .false., physical)
+      accepted = unique_count > before
+    end subroutine
+
+    subroutine scalar_residual(phi_hat, f, valid)
+      real(dp), intent(in) :: phi_hat
+      real(dp), intent(out) :: f
+      logical, intent(out) :: valid
+      real(dp) :: phi, phim, density, integral
+      f = huge(1.0_dp)
+      valid = .false.
+      phi = phi_hat*params%potential_scale_v
+      phim = min(phi, 0.0_dp)
+      density = neutral_electron_density(params, branch, phi, phim)
+      if (.not. ieee_is_finite(density) .or. density <= 0.0_dp) return
+      integral = integrate_zhao_rho(params, branch, 'monotonic', phi_hat, 0.0_dp, phi_hat, &
+          phim/params%potential_scale_v, density/params%density_scale_m3)
+      f = (2.0_dp*integral - target_field_hat**2)/max(1.0_dp, target_field_hat**2)
+      valid = ieee_is_finite(f)
+    end subroutine
+
     subroutine field_residual(value, f, valid)
       real(dp), intent(in) :: value(:)
       real(dp), intent(out) :: f(:)
@@ -313,24 +393,34 @@ contains
       f = residual(:size(value))
     end subroutine
 
-    subroutine accept_candidate(coordinates, norm, iterations, from_atlas)
-      real(dp), intent(in) :: coordinates(3), norm
+    subroutine accept_candidate(coordinates, iterations, from_atlas, physical)
+      real(dp), intent(in) :: coordinates(3)
       integer, intent(in) :: iterations
       logical, intent(in) :: from_atlas
+      real(dp), intent(in), optional :: physical(3)
       real(dp) :: original(3)
-      call evaluate_charge_residual(params, branch, target_field_hat, coordinates, original, success)
+      candidate_root = zhao_field_root()
+      candidate_root%branch = branch
+      if (present(physical)) then
+        candidate_root%phi0_v = physical(1)
+        candidate_root%phi_m_v = physical(2)
+        candidate_root%ambient_electron_density_m3 = physical(3)
+      else
+        call decode_unknowns(params, branch, coordinates, candidate_root%phi0_v, candidate_root%phi_m_v, &
+            candidate_root%ambient_electron_density_m3, success)
+        if (.not. success) then
+          diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1
+          return
+        end if
+      end if
+      call evaluate_physical_field_residual(params, branch, target_field_hat, candidate_root%phi0_v, &
+          candidate_root%phi_m_v, candidate_root%ambient_electron_density_m3, original, success)
       diagnostics%evaluations(k) = diagnostics%evaluations(k) + 1
-      if (.not. success) return
-      if (maxval(abs(original)) > params%search%residual_tolerance) then
+      if (.not. success) then
         diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1
         return
       end if
-
-      candidate_root = zhao_field_root()
-      candidate_root%branch = branch
-      call decode_unknowns(params, branch, coordinates, candidate_root%phi0_v, candidate_root%phi_m_v, &
-          candidate_root%ambient_electron_density_m3, success)
-      if (.not. success) then
+      if (maxval(abs(original)) > params%search%residual_tolerance) then
         diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1
         return
       end if
@@ -340,7 +430,7 @@ contains
         candidate_root%branch = 'C'
         candidate_root%phi0_v = candidate_root%phi_m_v
       end if
-      candidate_root%residual_norm = norm
+      candidate_root%residual_norm = maxval(abs(original))
       candidate_root%nonlinear_iterations = int(iterations, i32)
       call validate_field_root_profile(params, candidate_root, target_field_hat, profile_status, profile_message)
       if (profile_status == SHEATH_NO_PHYSICAL_SOLUTION) then

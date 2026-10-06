@@ -86,6 +86,49 @@ class SheathPhysics:
         return float(np.sum(POTENTIAL_WEIGHTS * self._rho_hat_from_densities(dens) *
                             (hi - lo) * 0.5 * np.pi * np.sin(np.pi * t)))
 
+    def _type_a_connection_residual(self, phi0, phim, density):
+        if phim >= 0:
+            return math.nan
+        p = self.p
+        depth = -phim
+        energy = .5*p.electron_temperature_ev*p.mach**2
+        pressure = p.ion_pressure_factor*p.ion_temperature_ev
+        sound = 2*energy-pressure
+        if p.u == 0 and depth*p.photoelectron_temperature_ev < 1e-8*min(
+                p.electron_temperature_ev, p.photoelectron_temperature_ev, sound*(sound/(6*energy+pressure))):
+            # Integrate density differences from neutral infinity. Factoring
+            # sqrt(depth) retains the residual when individual densities round
+            # to their upstream values.
+            f = np.cos(.5*np.pi*POTENTIAL_NODES)**2
+            root_depth = math.sqrt(depth)
+            phi = -depth*f*p.photoelectron_temperature_ev
+            if pressure == 0:
+                ratio = np.sqrt(1-phi/energy)
+                ions = -root_depth*f*p.photoelectron_temperature_ev/(energy*ratio*(1+ratio))
+            else:
+                ions = -root_depth*f*p.photoelectron_temperature_ev*(1/sound+(6*energy-pressure)*phi/(2*sound**3))
+            ions *= p.ion_density_m3/p.density_scale_m3
+
+            def scaled_delta(temperature_ratio, sign):
+                psi = -depth*f/temperature_ratio
+                s0 = math.sqrt(depth/temperature_ratio)
+                s = s0*np.sqrt(1-f)
+                polynomial = 1-(s*s+s*s0+s0*s0)/3+(s**4+s**3*s0+s*s*s0*s0+s*s0**3+s0**4)/10
+                delta_erf = -2*f*polynomial/(np.sqrt(np.pi*temperature_ratio)*(1+np.sqrt(1-f)))
+                delta_exp = -root_depth*f/temperature_ratio*(1+psi*(.5+psi*(1/6+psi/24)))
+                return delta_exp*(1+sign*erf(s0))+sign*np.exp(psi)*delta_erf
+
+            electrons = .5*density*scaled_delta(p.tau, 1)
+            photos = .5*p.photoelectron_density_m3/p.density_scale_m3*math.exp(-phi0)*scaled_delta(1., -1)
+            coefficient = .5*(1+erf(math.sqrt(depth/p.tau)))
+            pe0 = .5*p.photoelectron_density_m3*math.exp(-phi0)*erfc(math.sqrt(depth))
+            neutral = (p.ion_density_m3-pe0)/coefficient/p.density_scale_m3
+            rho0 = (neutral-density)*coefficient/root_depth
+            integral = float(np.sum(POTENTIAL_WEIGHTS*(ions-electrons-photos)*.5*np.pi*np.sin(np.pi*POTENTIAL_NODES)))
+            return -2*(integral+rho0)*p.density_scale_m3/p.ion_density_m3
+        return (-2*self._integrate_rho("A", "upper", phim, 0., phi0, phim, density)/(-phim))*\
+               (self.p.density_scale_m3/self.p.ion_density_m3)/math.sqrt(-phim)
+
 
     def _residuals_type_a(self, x: np.ndarray) -> np.ndarray:
         p = self.p
@@ -196,6 +239,12 @@ class SheathPhysics:
             self._ion_density_hat(max(phi0, 0))
         except ValueError as exc:
             raise RuntimeError("algebraic root blocks the upstream-connected ion flow") from exc
+        if branch == "A":
+            connection = self._type_a_connection_residual(phi0, phim, density)
+            if not math.isfinite(connection):
+                raise FloatingPointError("upper connection residual is non-finite")
+            if abs(connection) > 1e-7:
+                raise RuntimeError("internal minimum does not connect to zero field at infinity")
         segments = [("monotonic", phi0, 0.)] if branch != "A" else [("lower", phim, phi0), ("upper", phim, 0.)]
         values = []
         for side, lo, hi in segments:

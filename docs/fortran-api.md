@@ -91,11 +91,17 @@ Solver の `search`、`continuation`、`profile` に設定します。
 
 | `search` の設定 | 既定値 | 意味 |
 | --- | --- | --- |
-| `method` | auto | auto / newton / lm。J=0 の明示した B/C のみ bracket も可 |
+| `method` | auto | auto / newton / lm / bracket。bracket は J=0・電場固定とも明示した B/C で使用 |
 | `residual_tolerance` | 1e-10 | 元の規格化方程式の最大絶対残差 |
 | `max_iterations`, `max_backtracks`, `max_starts` | 100, 24, 32 | 有限探索の反復・減速・開始点予算 |
 | `use_default_guesses` | true | 標準初期値を追加 |
 | `bracket_points`, `potential_extent` | 96, 200 | bracket 格子数、規格化電位の探索範囲 |
+| `scalar_max_depth` | 8 | 電場固定 B/C の各初期区間の細分化深さ。1〜16 |
+
+電場固定の auto は、B/C の電子密度を準中性から消去したスカラー探索と
+Newton/LM の複数初期値探索を併用します。bracket はスカラー探索を選び、標準初期値を必要としません。
+スカラー探索は bin 境界、曲率に応じた細分化、符号変化と接する根を扱います。
+無効な評価点を挟んで区間を結びません。候補は元の電場・準中性方程式と物理プロファイルで検査します。
 
 `continuation%method` は parameter（既定）または arclength。
 初期・最小・最大刻みは 0.25 / 1e-4 / 0.5、`max_steps=128`、`max_root_distance=0.75` です。
@@ -136,7 +142,8 @@ J=0 は 6、電場固定は 7 次元の無次元キーを使い、スペクト�
 `sheath_search_diagnostics` はすべて A/B/C 順の長さ 3 の配列です。
 searched/excluded、starts/unconverged/rejected/profile_failures、roots_found、
 evaluations/iterations/lm_steps/brackets/best_residual、
-atlas_starts/atlas_hits/continuation_steps/continuation_retries/deflations を返します。
+atlas_starts/atlas_hits/continuation_steps/continuation_retries/deflations、
+subdivisions/tangencies/invalid_evaluations を返します。
 呼び出しごとに初期化し、採用解があっても未収束の試行を残します。
 
 成功は `status == SHEATH_OK` で判定します。INVALID_ARGUMENT は入力不正、

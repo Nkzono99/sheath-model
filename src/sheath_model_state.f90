@@ -6,7 +6,7 @@ module sheath_model_state
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NUMERICAL_FAILURE
   use sheath_model_photoelectrons, only: photoelectron_source, validate_photoelectrons, photoelectron_density
   use sheath_model_core, only: zhao_params_type, neutral_electron_density, integrate_zhao_rho, evaluate_zhao_fluxes, &
-      evaluate_zhao_rho_hat
+      evaluate_zhao_rho_hat, type_a_connection_residual
   use sheath_model_admissibility, only: validate_zhao_profile
   use sheath_model_ions, only: ion_critical_potential, ion_density_ratio
   implicit none
@@ -29,6 +29,7 @@ module sheath_model_state
 
   !> Evaluation of a trial state, not necessarily a complete physical sheath solution.
   !! Signed E^2 integrals use V^2/m^2. electric_field_v_m is NaN when boundary E^2 is negative.
+  !! connection_residual_normalized uses ion density, the source potential scale and minimum depth^(3/2).
   !! admissible requires physical_status=SHEATH_OK, including the Type-A upper connection.
   type :: sheath_state_result
     logical :: evaluated = .false., admissible = .false.
@@ -38,6 +39,7 @@ module sheath_model_state
     real(dp) :: neutrality_residual_m3 = 0.0_dp
     real(dp) :: boundary_field_squared_v2_m2 = 0.0_dp
     real(dp) :: connection_residual_v2_m2 = 0.0_dp
+    real(dp) :: connection_residual_normalized = 0.0_dp
     real(dp) :: electric_field_v_m = 0.0_dp
     real(dp) :: electron_inward_flux_m2_s = 0.0_dp, ion_inward_flux_m2_s = 0.0_dp
     real(dp) :: photoelectron_outward_flux_m2_s = 0.0_dp
@@ -179,8 +181,8 @@ contains
     if (selected == 'A') then
       output%boundary_field_squared_v2_m2 = -2.0_dp*factor*integrate_zhao_rho(p, selected, 'lower', &
           phim, phi0, phi0, phim, density/p%density_scale_m3)
-      output%connection_residual_v2_m2 = -2.0_dp*factor*integrate_zhao_rho(p, selected, 'upper', &
-          phim, 0.0_dp, phi0, phim, density/p%density_scale_m3)
+      output%connection_residual_normalized = type_a_connection_residual(p, phi0, phim, density/p%density_scale_m3)
+      output%connection_residual_v2_m2 = output%connection_residual_normalized*(-phim)*sqrt(-phim)*factor
     else
       output%boundary_field_squared_v2_m2 = 2.0_dp*factor*integrate_zhao_rho(p, selected, 'monotonic', &
           phi0, 0.0_dp, phi0, phim, density/p%density_scale_m3)
@@ -200,7 +202,7 @@ contains
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Trial state has non-finite integrals, density, or fluxes.'
     if (.not. all(ieee_is_finite([density, output%neutrality_residual_m3, &
-        output%boundary_field_squared_v2_m2, output%connection_residual_v2_m2, &
+        output%boundary_field_squared_v2_m2, output%connection_residual_v2_m2, output%connection_residual_normalized, &
         output%electron_inward_flux_m2_s, output%ion_inward_flux_m2_s, output%photoelectron_outward_flux_m2_s, &
         output%photoelectron_escape_flux_m2_s, output%photoelectron_return_flux_m2_s, output%net_current_a_m2]))) return
     call validate_zhao_profile(p, selected, phi0, phim, density/p%density_scale_m3, minimum_e2, boundary_e2, &

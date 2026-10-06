@@ -1,7 +1,8 @@
 ! SPDX-License-Identifier: MIT
 module sheath_model_equilibrium_physics
   use sheath_model_constants, only: dp
-  use sheath_model_core, only: zhao_params_type, zhao_residuals_type_a, zhao_residuals_type_b, zhao_residuals_type_c
+  use sheath_model_core, only: zhao_params_type, zhao_residuals_type_a, zhao_residuals_type_b, zhao_residuals_type_c, &
+      type_a_connection_residual
   use sheath_model_coordinates, only: decode_unknowns
   use sheath_model_ions, only: ion_density_ratio
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -25,8 +26,8 @@ contains
       call zhao_residuals_type_c(p, physical([1, 3]), raw(1:2))
     end select
     raw(1:2) = raw(1:2)/p%n_swi_inf_m3
-    if (branch == 'A') raw(3) = raw(3)*p%density_scale_m3/p%n_swi_inf_m3/ &
-        (-physical(2)/p%potential_scale_v)**1.5_dp
+    if (branch == 'A') raw(3) = type_a_connection_residual(p, physical(1)/p%potential_scale_v, &
+        physical(2)/p%potential_scale_v, physical(3)/p%density_scale_m3)
   end subroutine
 
   subroutine encoded_equilibrium_residual(p, branch, value, f, valid)

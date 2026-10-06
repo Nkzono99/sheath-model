@@ -9,6 +9,7 @@ module sheath_model_photoelectrons
   public :: photoelectron_source, maxwellian_photoelectrons, binned_photoelectrons
   public :: validate_photoelectrons, photoelectron_density, photoelectron_fluxes
   public :: photoelectron_density_integral, photoelectron_sqrt_coefficient
+  public :: photoelectron_upper_delta_scaled
 
   !> Outward boundary distribution: analytic Maxwellian or piecewise constant dGamma/dK.
   !! Construct with maxwellian_photoelectrons or binned_photoelectrons; no history is stored.
@@ -131,6 +132,44 @@ contains
     status = SHEATH_OK
     message = ''
   end subroutine
+
+  !> [n_PE(-depth*f)-n_PE(0)]/sqrt(depth) on an A upper segment [m^-3 V^-1/2].
+  !! The Maxwellian expression is for depth/T << 1; bin differences are exact.
+  !! Factored square-root differences retain small depths and narrow bin widths.
+  pure real(dp) function photoelectron_upper_delta_scaled(source, mass_kg, boundary, depth, f) result(value)
+    type(photoelectron_source), intent(in) :: source
+    real(dp), intent(in) :: mass_kg, boundary, depth, f
+    real(dp) :: a, b, sa, sb, ta, tb, g, w, ratio, psi, s, s0, polynomial, erf_delta, exp_delta
+    integer :: i
+    value = 0.0_dp
+    if (.not. source%binned) then
+      ratio = depth/source%temperature_ev
+      psi = -ratio*f
+      s0 = sqrt(ratio)
+      s = s0*sqrt(1.0_dp - f)
+      polynomial = 1.0_dp - (s*s + s*s0 + s0*s0)/3.0_dp + &
+          (s**4 + s**3*s0 + s*s*s0*s0 + s*s0**3 + s0**4)/10.0_dp
+      erf_delta = -2.0_dp*f*polynomial/(sqrt(pi*source%temperature_ev)*(1.0_dp + sqrt(1.0_dp - f)))
+      exp_delta = -sqrt(depth)*f/source%temperature_ev*(1.0_dp + psi*(0.5_dp + psi*(1.0_dp/6.0_dp + psi/24.0_dp)))
+      value = 0.5_dp*source%density_m3*exp(-boundary/source%temperature_ev)* &
+          (exp_delta*erfc(s0) - exp(psi)*erf_delta)
+      return
+    end if
+    do i = 1, size(source%flux_m2_s)
+      a = max(source%edges_ev(i) - boundary, depth)
+      b = source%edges_ev(i + 1) - boundary
+      if (b <= a) cycle
+      w = b - a
+      if (source%edges_ev(i) - boundary >= depth) w = source%edges_ev(i + 1) - source%edges_ev(i)
+      sa = sqrt(a)
+      sb = sqrt(b)
+      ta = sqrt(max(0.0_dp, a - depth*f))
+      tb = sqrt(max(0.0_dp, b - depth*f))
+      g = source%flux_m2_s(i)/(source%edges_ev(i + 1) - source%edges_ev(i))
+      value = value + 2.0_dp*g/sqrt(2.0_dp*qe/mass_kg)* &
+          (sqrt(depth)*f/(ta + sa))*(w/(tb + sb))*(1.0_dp/(ta + tb) + 1.0_dp/(sa + sb))
+    end do
+  end function
 
   !> Return outward, escaping and returning number fluxes [m^-2 s^-1] for a validated source.
   !! barrier_v >= 0 is the boundary-to-minimum potential drop [V]; return counts one inward crossing.
