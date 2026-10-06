@@ -6,6 +6,7 @@ module sheath_model_core
   use sheath_model_photoelectrons, only: photoelectron_source, photoelectron_density, photoelectron_fluxes, &
       photoelectron_density_integral
   use sheath_model_orbits, only: electron_density, gauss_x, gauss_w
+  use sheath_model_ions, only: ion_density_ratio
   use sheath_model_constants, only: dp
   use sheath_model_numerics, only: solve_nonlinear_system, residual_norm, NONLINEAR_TOL
   use sheath_model_constants, only: pi, eps0, qe
@@ -22,6 +23,8 @@ module sheath_model_core
     real(dp) :: density_scale_m3 = 0.0d0
     real(dp) :: emission_density_scale_m3 = 0.0d0
     real(dp) :: t_swe_ev = 0.0d0
+    real(dp) :: t_swi_ev = 0.0_dp
+    real(dp) :: ion_pressure_factor = 1.0_dp
     real(dp) :: potential_scale_v = 0.0d0
     real(dp) :: v_d_electron_mps = 0.0d0
     real(dp) :: v_d_ion_mps = 0.0d0
@@ -69,7 +72,7 @@ contains
 
   !> Return ion, free/reflected electron, and free/captured photoelectron densities / p%density_scale_m3.
   !! Potentials are divided by p%potential_scale_v; n_swe_inf_hat uses the same density normalization as the outputs.
-  !! branch is A/B/C; Type A requires side='lower' or 'upper'. A blocked ion beam produces NaN densities.
+  !! branch is A/B/C; Type A requires side='lower' or 'upper'. A blocked ion flow produces NaN densities.
   subroutine evaluate_zhao_density_hat( &
       p, branch, side, phi_hat, phi0_hat, phi_m_hat, n_swe_inf_hat, &
       n_swi_hat, n_swe_f_hat, n_swe_r_hat, n_phe_f_hat, n_phe_c_hat &
@@ -540,12 +543,18 @@ contains
     real(dp), intent(in) :: phi, phim, density
     real(dp), intent(out) :: ni, ne, nr
     real(dp) :: arg, free, reflected
-    arg = 1.0_dp - 2.0_dp*phi/(p%tau*p%mach**2)
     ni = ieee_value(0.0_dp, ieee_quiet_nan)
     ne = ni
     nr = ni
-    if (arg <= 0.0_dp) return
-    ni = (p%n_swi_inf_m3/p%density_scale_m3)/sqrt(arg)
+    if (p%t_swi_ev == 0.0_dp) then
+      arg = 1.0_dp - 2.0_dp*phi/(p%tau*p%mach**2)
+      if (arg <= 0.0_dp) return
+      ni = (p%n_swi_inf_m3/p%density_scale_m3)/sqrt(arg)
+    else
+      ni = (p%n_swi_inf_m3/p%density_scale_m3)*ion_density_ratio(phi*p%potential_scale_v, &
+          0.5_dp*p%t_swe_ev*p%mach**2, p%ion_pressure_factor*p%t_swi_ev)
+      if (.not. ieee_is_finite(ni)) return
+    end if
     call electron_density(phi/p%tau, phim/p%tau, p%u, free, reflected)
     ne = density*free
     nr = density*reflected

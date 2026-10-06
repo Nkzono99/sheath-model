@@ -1,12 +1,11 @@
 """One-dimensional sheath model with orbit-mapped background electrons.
 
-Zhao A/B/C population topology, cold ions and a Maxwell photoelectron source.
+Zhao A/B/C population topology, ion fluid transport and a Maxwell photoelectron source.
 See docs/kinetic-model.md for the reservoir closure and admissibility conditions.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
 from typing import Dict, Iterable, Literal
 
@@ -15,134 +14,62 @@ from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import root
 from scipy.special import erf, erfc
 from ._orbits import electron_density, POTENTIAL_NODES, POTENTIAL_WEIGHTS
+from ._ions import ion_density_ratio, ion_critical_potential
 
-EPS0 = 8.8541878128e-12
-QE = 1.602176634e-19
-ME = 9.1093837015e-31
-MP = 1.67262192369e-27
+from ._constants import QE, ME
+from .params import FixedEntryParams, ZhaoParams
 
 Branch = Literal["A", "B", "C"]
-DriftMode = Literal["full", "normal"]
 TypeASide = Literal["lower", "upper"]
 Species = Literal["swi", "swe", "phe", "all"]
 ZUnit = Literal["hat", "m"]
 
 
-@dataclass(frozen=True)
-class ZhaoParams:
-    alpha_deg: float = 60.0
-
-    # Table-I values from Zhao et al.
-    n_swi_inf_cm3: float = 8.7
-    n_phe_ref_cm3: float = 64.0
-    T_swe_eV: float = 12.0
-    T_phe_eV: float = 2.2
-    v_sw_total_mps: float = 468e3
-    m_i_kg: float = MP
-
-    # Choice of which drift component enters the 1-D algebra.
-    # The Zhao model is 1-D along the sheath normal, so the projected normal
-    # drift is the paper-consistent default.
-    # "full"   : use the full solar-wind speed in the 1-D formulas.
-    # "normal" : use v_sw * sin(alpha).
-    electron_drift_mode: Literal["full", "normal", "zero"] = "normal"
-    ion_drift_mode: DriftMode = "normal"
-
-    zmax_hat: float = 80.0
-    n_profile_grid: int = 600
-    n_type_a_grid: int = 8000
-    profile_phi_tol_hat: float = 1.0e-3
-    type_a_phi_m_eps_hat: float = 1.0e-5
-
-    @property
-    def alpha_rad(self) -> float:
-        return math.radians(self.alpha_deg)
-
-    @property
-    def n_swi_inf_m3(self) -> float:
-        return self.n_swi_inf_cm3 * 1e6
-
-    @property
-    def n_phe_ref_m3(self) -> float:
-        return self.n_phe_ref_cm3 * 1e6
-
-    @property
-    def n_phe0_m3(self) -> float:
-        return self.n_phe_ref_m3 * math.sin(self.alpha_rad)
-
-    @property
-    def v_swe_th_mps(self) -> float:
-        return math.sqrt(2.0 * QE * self.T_swe_eV / ME)
-
-    @property
-    def v_phe_th_mps(self) -> float:
-        return math.sqrt(2.0 * QE * self.T_phe_eV / ME)
-
-    @property
-    def cs_mps(self) -> float:
-        return math.sqrt(QE * self.T_swe_eV / self.m_i_kg)
-
-    @property
-    def v_sw_normal_mps(self) -> float:
-        return self.v_sw_total_mps * math.sin(self.alpha_rad)
-
-    @property
-    def v_d_electron_mps(self) -> float:
-        if self.electron_drift_mode == "zero":
-            return 0.0
-        return (
-            self.v_sw_total_mps
-            if self.electron_drift_mode == "full"
-            else self.v_sw_normal_mps
-        )
-
-    @property
-    def v_d_ion_mps(self) -> float:
-        return (
-            self.v_sw_total_mps
-            if self.ion_drift_mode == "full"
-            else self.v_sw_normal_mps
-        )
-
-    @property
-    def mach(self) -> float:
-        return self.v_d_ion_mps / self.cs_mps
-
-    @property
-    def u(self) -> float:
-        return self.v_d_electron_mps / self.v_swe_th_mps
-
-    @property
-    def tau(self) -> float:
-        return self.T_swe_eV / self.T_phe_eV
-
-    @property
-    def lambda_d_phe_ref_m(self) -> float:
-        return math.sqrt(EPS0 * QE * self.T_phe_eV / (self.n_phe_ref_m3 * QE * QE))
-
-
-class ZhaoSheathSolver:
-    def __init__(self, params: ZhaoParams):
+class _SheathSolver:
+    def __init__(self, params: FixedEntryParams | ZhaoParams):
         self.p = params
+        if isinstance(params, ZhaoParams):
+            if not math.isfinite(params.alpha_deg) or not 0 <= params.alpha_deg <= 90:
+                raise ValueError("alpha_deg must be finite and in [0, 90]")
+            if params.electron_drift_mode not in {"zero", "normal", "full"}:
+                raise ValueError("electron_drift_mode must be zero, normal, or full")
+            if params.ion_drift_mode not in {"normal", "full"}:
+                raise ValueError("ion_drift_mode must be normal or full")
+        for name in ("ion_density_m3", "density_scale_m3", "electron_temperature_ev",
+                     "photoelectron_temperature_ev", "ion_mass_kg", "ion_pressure_factor"):
+            value = getattr(params, name)
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and positive")
+        for name in ("ion_temperature_ev", "photoelectron_density_m3"):
+            value = getattr(params, name)
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
+        if not math.isfinite(params.electron_drift_mps):
+            raise ValueError("electron_drift_mps must be finite")
+        if not math.isfinite(params.ion_entry_speed_mps) or params.ion_entry_speed_mps <= 0:
+            raise ValueError("Zero or negative ion entry speed is degenerate; specify a positive normal speed")
+        ion_critical_potential(0.5*params.electron_temperature_ev*params.mach**2,
+                               params.ion_pressure_factor*params.ion_temperature_ev)
+
+    def _ion_density_hat(self, phi_hat):
+        p = self.p
+        return (p.ion_density_m3/p.density_scale_m3)*ion_density_ratio(
+            np.asarray(phi_hat)*p.photoelectron_temperature_ev, 0.5*p.electron_temperature_ev*p.mach**2,
+            p.ion_pressure_factor*p.ion_temperature_ev)
 
     # ------------------------------------------------------------------
     # Algebraic unknown solver
     # ------------------------------------------------------------------
     def _validate_params_for_branch(self, branch: Branch) -> None:
-        p = self.p
-        if abs(p.v_d_ion_mps) < 1.0e-12:
-            raise ValueError(
-                f"branch {branch} is degenerate with ion_drift_mode={p.ion_drift_mode!r} at alpha={p.alpha_deg:g} deg: "
-                "the 1-D normal ion drift is zero, so the Zhao ion-density model is undefined. "
-                "Use alpha > 0 or switch to the full-drift modes explicitly."
-            )
+        if branch not in {"A", "B", "C"}:
+            raise ValueError(f"unknown branch: {branch}")
 
     def _swe_free_current_term(self, n_swe_inf_m3: float, a_swe: float) -> float:
         """Normalized free solar-wind electron current term from Eq. (16)."""
         p = self.p
         return n_swe_inf_m3 * (
-            math.sqrt(p.T_swe_eV / p.T_phe_eV) * math.exp(-(a_swe**2))
-            + math.sqrt(math.pi) * (p.v_d_electron_mps / p.v_phe_th_mps) * erfc(a_swe)
+            math.sqrt(p.electron_temperature_ev / p.photoelectron_temperature_ev) * math.exp(-(a_swe**2))
+            + math.sqrt(math.pi) * (p.electron_drift_mps / p.v_phe_th_mps) * erfc(a_swe)
         )
 
     def _type_a_e2_sum_at_infinity(
@@ -150,9 +77,9 @@ class ZhaoSheathSolver:
     ) -> float:
         """First integral of the orbit-mapped charge density; regular at u=0."""
         p = self.p
-        return -2 * self._integrate_rho("A", "upper", phi_m_V / p.T_phe_eV, 0.0,
-                                      phi0_V / p.T_phe_eV, phi_m_V / p.T_phe_eV,
-                                      n_swe_inf_m3 / p.n_phe_ref_m3)
+        return -2 * self._integrate_rho("A", "upper", phi_m_V / p.photoelectron_temperature_ev, 0.0,
+                                      phi0_V / p.photoelectron_temperature_ev, phi_m_V / p.photoelectron_temperature_ev,
+                                      n_swe_inf_m3 / p.density_scale_m3)
 
     def _integrate_rho(self, branch, side, lo, hi, phi0, phim, density):
         t = POTENTIAL_NODES
@@ -169,25 +96,28 @@ class ZhaoSheathSolver:
         phi0_V, phi_m_V, n_swe_inf_m3 = x
         if phi_m_V >= 0.0 or phi_m_V >= phi0_V or n_swe_inf_m3 <= 0.0:
             return np.array([1e6, 1e6, 1e6], dtype=float)
+        if phi0_V > ion_critical_potential(0.5*p.electron_temperature_ev*p.mach**2,
+                                          p.ion_pressure_factor*p.ion_temperature_ev):
+            return np.array([1e6, 1e6, 1e6], dtype=float)
 
-        a_swe = math.sqrt(max(0.0, -phi_m_V / p.T_swe_eV)) - p.u
-        a_phe = math.sqrt(max(0.0, -phi_m_V / p.T_phe_eV))
+        a_swe = math.sqrt(max(0.0, -phi_m_V / p.electron_temperature_ev)) - p.u
+        a_phe = math.sqrt(max(0.0, -phi_m_V / p.photoelectron_temperature_ev))
         ion_term = (
-            p.n_swi_inf_m3
-            * math.sqrt(2.0 * math.pi * p.T_swe_eV / p.T_phe_eV * ME / p.m_i_kg)
+            p.ion_density_m3
+            * math.sqrt(2.0 * math.pi * p.electron_temperature_ev / p.photoelectron_temperature_ev * ME / p.ion_mass_kg)
             * p.mach
         )
 
         # Eq. (14) Charge Neutrality at Infinity
         r1 = (
             0.5 * n_swe_inf_m3 * (1.0 + 2.0 * erf(p.u) + erf(a_swe))
-            + 0.5 * p.n_phe0_m3 * math.exp(-phi0_V / p.T_phe_eV) * (1.0 - erf(a_phe))
-            - p.n_swi_inf_m3
+            + 0.5 * p.photoelectron_density_m3 * math.exp(-phi0_V / p.photoelectron_temperature_ev) * (1.0 - erf(a_phe))
+            - p.ion_density_m3
         )
 
         # Eq. (16) Zero Net Current Density at Infinity (equivalent: at Z = 0)
         r2 = (
-            p.n_phe0_m3 * math.exp((phi_m_V - phi0_V) / p.T_phe_eV)
+            p.photoelectron_density_m3 * math.exp((phi_m_V - phi0_V) / p.photoelectron_temperature_ev)
             - self._swe_free_current_term(n_swe_inf_m3, a_swe)
             + ion_term
         )
@@ -204,21 +134,21 @@ class ZhaoSheathSolver:
             return np.array([1e6, 1e6], dtype=float)
 
         ion_term = (
-            p.n_swi_inf_m3
-            * math.sqrt(2.0 * math.pi * p.T_swe_eV / p.T_phe_eV * ME / p.m_i_kg)
+            p.ion_density_m3
+            * math.sqrt(2.0 * math.pi * p.electron_temperature_ev / p.photoelectron_temperature_ev * ME / p.ion_mass_kg)
             * p.mach
         )
 
         # Eq. (14) Charge Neutrality at Infinity
         r1 = (
             0.5 * n_swe_inf_m3 * (1.0 + erf(p.u))
-            + 0.5 * p.n_phe0_m3 * math.exp(-phi0_V / p.T_phe_eV)
-            - p.n_swi_inf_m3
+            + 0.5 * p.photoelectron_density_m3 * math.exp(-phi0_V / p.photoelectron_temperature_ev)
+            - p.ion_density_m3
         )
 
         # Eq. (16) Zero Net Current Density at Infinity (equivalent: at Z = 0)
         r2 = (
-            p.n_phe0_m3 * math.exp(-phi0_V / p.T_phe_eV)
+            p.photoelectron_density_m3 * math.exp(-phi0_V / p.photoelectron_temperature_ev)
             - self._swe_free_current_term(n_swe_inf_m3, -p.u)
             + ion_term
         )
@@ -230,30 +160,30 @@ class ZhaoSheathSolver:
         if phi0_V >= 0.0 or n_swe_inf_m3 <= 0.0:
             return np.array([1e6, 1e6], dtype=float)
 
-        a_swe = math.sqrt(max(0.0, -phi0_V / p.T_swe_eV)) - p.u
-        a_phe = math.sqrt(max(0.0, -phi0_V / p.T_phe_eV))
+        a_swe = math.sqrt(max(0.0, -phi0_V / p.electron_temperature_ev)) - p.u
+        a_phe = math.sqrt(max(0.0, -phi0_V / p.photoelectron_temperature_ev))
         ion_term = (
-            p.n_swi_inf_m3
-            * math.sqrt(2.0 * math.pi * p.T_swe_eV / p.T_phe_eV * ME / p.m_i_kg)
+            p.ion_density_m3
+            * math.sqrt(2.0 * math.pi * p.electron_temperature_ev / p.photoelectron_temperature_ev * ME / p.ion_mass_kg)
             * p.mach
         )
 
         # Eq. (14) Charge Neutrality at Infinity
         r1 = (
             0.5 * n_swe_inf_m3 * (1.0 + 2.0 * erf(p.u) + erf(a_swe))
-            + 0.5 * p.n_phe0_m3 * math.exp(-phi0_V / p.T_phe_eV) * erfc(a_phe)
-            - p.n_swi_inf_m3
+            + 0.5 * p.photoelectron_density_m3 * math.exp(-phi0_V / p.photoelectron_temperature_ev) * erfc(a_phe)
+            - p.ion_density_m3
         )
 
         # Eq. (16) Zero Net Current Density at Infinity (equivalent: at Z = 0)
-        r2 = p.n_phe0_m3 - self._swe_free_current_term(n_swe_inf_m3, a_swe) + ion_term
+        r2 = p.photoelectron_density_m3 - self._swe_free_current_term(n_swe_inf_m3, a_swe) + ion_term
 
         return np.array([r1, r2], dtype=float)
 
     def _try_root_guesses(self, func, guesses: Iterable[np.ndarray]) -> np.ndarray:
         def scaled(x):
             values = func(x).copy()
-            values[:2] /= self.p.n_phe_ref_m3
+            values[:2] /= self.p.density_scale_m3
             return values
         best = None
         best_norm = float("inf")
@@ -307,7 +237,7 @@ class ZhaoSheathSolver:
             phi0_V, n_swe_inf_m3 = self._try_root_guesses(
                 self._residuals_type_b, guesses
             )
-            phi_m_V = math.nan
+            phi_m_V = 0.0
         elif branch == "C":
             guesses = (
                 [np.array(guess, dtype=float)]
@@ -327,40 +257,40 @@ class ZhaoSheathSolver:
         else:
             raise ValueError(f"unknown branch: {branch}")
 
-        self._validate_profile_root(branch, phi0_V / p.T_phe_eV,
-                                    0.0 if branch == "B" else phi_m_V / p.T_phe_eV,
-                                    n_swe_inf_m3 / p.n_phe_ref_m3)
+        self._validate_profile_root(branch, phi0_V / p.photoelectron_temperature_ev,
+                                    0.0 if branch == "B" else phi_m_V / p.photoelectron_temperature_ev,
+                                    n_swe_inf_m3 / p.density_scale_m3)
         return {
             "branch": branch,
             "phi0_V": float(phi0_V),
             "phi_m_V": float(phi_m_V),
             "n_swe_inf_m3": float(n_swe_inf_m3),
-            "phi0_hat": float(phi0_V / p.T_phe_eV),
+            "phi0_hat": float(phi0_V / p.photoelectron_temperature_ev),
             "phi_m_hat": (
-                float(phi_m_V / p.T_phe_eV) if math.isfinite(phi_m_V) else math.nan
+                float(phi_m_V / p.photoelectron_temperature_ev) if math.isfinite(phi_m_V) else math.nan
             ),
-            "n_swe_inf_hat": float(n_swe_inf_m3 / p.n_phe_ref_m3),
-            "electron_drift_mode": p.electron_drift_mode,
-            "ion_drift_mode": p.ion_drift_mode,
-            "v_d_electron_mps": p.v_d_electron_mps,
-            "v_d_ion_mps": p.v_d_ion_mps,
+            "n_swe_inf_hat": float(n_swe_inf_m3 / p.density_scale_m3),
+            "electron_drift_mps": p.electron_drift_mps,
+            "ion_entry_speed_mps": p.ion_entry_speed_mps,
         }
 
     def _validate_profile_root(self, branch, phi0, phim, density):
         if branch == "B" and phi0 > 0:
             ambient_edge = (
-                density * self.p.n_phe_ref_m3 * math.exp(-self.p.u**2)
-                / math.sqrt(math.pi * self.p.T_swe_eV)
+                density * self.p.density_scale_m3 * math.exp(-self.p.u**2)
+                / math.sqrt(math.pi * self.p.electron_temperature_ev)
             )
-            photo_edge = self.p.n_phe0_m3 * math.exp(-phi0) / math.sqrt(math.pi * self.p.T_phe_eV)
+            photo_edge = self.p.photoelectron_density_m3 * math.exp(-phi0) / math.sqrt(math.pi * self.p.photoelectron_temperature_ev)
             if ambient_edge - photo_edge > 128 * np.finfo(float).eps * max(abs(ambient_edge), abs(photo_edge)):
                 raise RuntimeError("Type B has negative field squared arbitrarily near upstream infinity")
         if branch in ("A", "C") and self.p.u > 0:
             raise RuntimeError("algebraic root has no semi-infinite profile: inward drift with reflected slow "
-                               "electrons makes E^2 negative near neutral infinity; use electron_drift_mode='zero' "
+                               "electrons makes E^2 negative near neutral infinity; specify zero electron drift "
                                "for the nondrifting model")
-        if 1 - 2 * max(phi0, 0) / (self.p.tau * self.p.mach**2) <= 0:
-            raise RuntimeError("algebraic root blocks cold ions")
+        try:
+            self._ion_density_hat(max(phi0, 0))
+        except ValueError as exc:
+            raise RuntimeError("algebraic root blocks the upstream-connected ion flow") from exc
         segments = [("monotonic", phi0, 0.)] if branch != "A" else [("lower", phim, phi0), ("upper", phim, 0.)]
         values = []
         for side, lo, hi in segments:
@@ -385,21 +315,18 @@ class ZhaoSheathSolver:
         p = self.p
         phi_hat = np.asarray(phi_hat, dtype=float)
         tau = p.tau
-        sin_alpha = math.sin(p.alpha_rad)
+        source_density_hat = p.photoelectron_density_m3 / p.density_scale_m3
 
-        arg_ion = 1.0 - 2.0 * phi_hat / (tau * p.mach * p.mach)
-        if np.any(arg_ion <= 0.0):
-            raise ValueError("ion density argument became non-positive")
-        n_swi_hat = (p.n_swi_inf_m3 / p.n_phe_ref_m3) * arg_ion ** (-0.5)
+        n_swi_hat = self._ion_density_hat(phi_hat)
 
         free, reflected = electron_density(phi_hat / tau, phi_m_hat / tau, p.u)
         n_swe_f_hat = n_swe_inf_hat * free
         s_phe = np.sqrt(np.maximum(0.0, phi_hat - phi_m_hat))
-        n_phe_f_hat = 0.5 * sin_alpha * np.exp(phi_hat - phi0_hat) * (1.0 - erf(s_phe))
+        n_phe_f_hat = 0.5 * source_density_hat * np.exp(phi_hat - phi0_hat) * (1.0 - erf(s_phe))
 
         if side == "lower":
             n_swe_r_hat = np.zeros_like(phi_hat)
-            n_phe_c_hat = sin_alpha * np.exp(phi_hat - phi0_hat) * erf(s_phe)
+            n_phe_c_hat = source_density_hat * np.exp(phi_hat - phi0_hat) * erf(s_phe)
         elif side == "upper":
             n_swe_r_hat = n_swe_inf_hat * reflected
             n_phe_c_hat = np.zeros_like(phi_hat)
@@ -425,10 +352,8 @@ class ZhaoSheathSolver:
         p = self.p
         phi_hat = np.asarray(phi_hat, dtype=float)
         tau = p.tau
-        sin_alpha = math.sin(p.alpha_rad)
-        n_swi_hat = (p.n_swi_inf_m3 / p.n_phe_ref_m3) * (
-            1.0 - 2.0 * phi_hat / (tau * p.mach * p.mach)
-        ) ** (-0.5)
+        source_density_hat = p.photoelectron_density_m3 / p.density_scale_m3
+        n_swi_hat = self._ion_density_hat(phi_hat)
 
         if branch == "A":
             raise ValueError(
@@ -440,15 +365,15 @@ class ZhaoSheathSolver:
             n_swe_f_hat = n_swe_inf_hat * free
             n_swe_r_hat = np.zeros_like(phi_hat)
             n_phe_f_hat = (
-                0.5 * sin_alpha * np.exp(phi_hat - phi0_hat) * (1.0 - erf(s_phe))
+                0.5 * source_density_hat * np.exp(phi_hat - phi0_hat) * (1.0 - erf(s_phe))
             )
-            n_phe_c_hat = sin_alpha * np.exp(phi_hat - phi0_hat) * erf(s_phe)
+            n_phe_c_hat = source_density_hat * np.exp(phi_hat - phi0_hat) * erf(s_phe)
         elif branch == "C":
             free, reflected = electron_density(phi_hat / tau, phi0_hat / tau, p.u)
             s_phe = np.sqrt(np.maximum(0.0, phi_hat - phi0_hat))
             n_swe_f_hat = n_swe_inf_hat * free
             n_swe_r_hat = n_swe_inf_hat * reflected
-            n_phe_f_hat = 0.5 * sin_alpha * np.exp(phi_hat - phi0_hat) * erfc(s_phe)
+            n_phe_f_hat = 0.5 * source_density_hat * np.exp(phi_hat - phi0_hat) * erfc(s_phe)
             n_phe_c_hat = np.zeros_like(phi_hat)
         else:
             raise ValueError(f"unknown branch: {branch}")
@@ -598,13 +523,13 @@ class ZhaoSheathSolver:
             **uk,
             "z_hat": z_hat,
             "z_m_hat": z_m_hat,
-            "z_m_m": z_m_hat * p.lambda_d_phe_ref_m,
-            "z_m_array_m": z_hat * p.lambda_d_phe_ref_m,
+            "z_m_m": z_m_hat * p.length_scale_m,
+            "z_m_array_m": z_hat * p.length_scale_m,
             "phi_hat": phi_hat,
-            "phi_V": phi_hat * p.T_phe_eV,
+            "phi_V": phi_hat * p.photoelectron_temperature_ev,
             "dphi_dzhat": ehat,
-            "E_Vpm": -(p.T_phe_eV / p.lambda_d_phe_ref_m) * ehat,
-            "lambda_d_phe_ref_m": p.lambda_d_phe_ref_m,
+            "E_Vpm": -(p.photoelectron_temperature_ev / p.length_scale_m) * ehat,
+            "length_scale_m": p.length_scale_m,
             **dens,
         }
         out["n_total_hat"] = (
@@ -657,13 +582,13 @@ class ZhaoSheathSolver:
             **uk,
             "z_hat": z_hat,
             "z_m_hat": float(z_hat[np.argmin(phi_hat)]),
-            "z_m_m": float(z_hat[np.argmin(phi_hat)] * p.lambda_d_phe_ref_m),
-            "z_m_array_m": z_hat * p.lambda_d_phe_ref_m,
+            "z_m_m": float(z_hat[np.argmin(phi_hat)] * p.length_scale_m),
+            "z_m_array_m": z_hat * p.length_scale_m,
             "phi_hat": phi_hat,
-            "phi_V": phi_hat * p.T_phe_eV,
+            "phi_V": phi_hat * p.photoelectron_temperature_ev,
             "dphi_dzhat": e_hat,
-            "E_Vpm": -(p.T_phe_eV / p.lambda_d_phe_ref_m) * e_hat,
-            "lambda_d_phe_ref_m": p.lambda_d_phe_ref_m,
+            "E_Vpm": -(p.photoelectron_temperature_ev / p.length_scale_m) * e_hat,
+            "length_scale_m": p.length_scale_m,
             **dens,
         }
         out["n_total_hat"] = (
@@ -676,7 +601,7 @@ class ZhaoSheathSolver:
         return out
 
     def solve_auto(self) -> Dict[str, np.ndarray | float | str]:
-        if self.p.alpha_deg < 20.0:
+        if isinstance(self.p, ZhaoParams) and self.p.alpha_deg < 20.0:
             order: list[Branch] = ["C", "A", "B"]
         else:
             order = ["A", "B", "C"]
@@ -695,7 +620,7 @@ class ZhaoSheathSolver:
         if unit == "hat":
             return float(z)
         if unit == "m":
-            return float(z) / self.p.lambda_d_phe_ref_m
+            return float(z) / self.p.length_scale_m
         raise ValueError(f"unknown z unit: {unit}")
 
     @staticmethod
@@ -755,7 +680,7 @@ class ZhaoSheathSolver:
             )
 
         dens_hat_scalar = {k: float(v[0]) for k, v in dens_hat.items()}
-        dens_m3 = {k.replace("_hat", "_m3"): v * p.n_phe_ref_m3 for k, v in dens_hat_scalar.items()}
+        dens_m3 = {k.replace("_hat", "_m3"): v * p.density_scale_m3 for k, v in dens_hat_scalar.items()}
         n_total_hat = (
             dens_hat_scalar["n_swe_f_hat"]
             + dens_hat_scalar["n_swe_r_hat"]
@@ -764,10 +689,7 @@ class ZhaoSheathSolver:
         )
         rho_hat = dens_hat_scalar["n_swi_hat"] - n_total_hat
 
-        arg_ion = 1.0 - 2.0 * phi_hat / (p.tau * p.mach * p.mach)
-        if arg_ion <= 0.0:
-            raise ValueError("local ion energy argument became non-positive")
-        v_i_local = p.v_d_ion_mps * math.sqrt(arg_ion)
+        v_i_local = p.ion_entry_speed_mps*p.ion_density_m3/dens_m3["n_swi_m3"]
 
         if branch == "B":
             a_swe = math.sqrt(max(0.0, phi_hat / p.tau))
@@ -789,18 +711,18 @@ class ZhaoSheathSolver:
             "branch": branch,
             "side": side,
             "z_hat": z_hat,
-            "z_m": z_hat * p.lambda_d_phe_ref_m,
+            "z_m": z_hat * p.length_scale_m,
             "phi_hat": phi_hat,
-            "phi_V": phi_hat * p.T_phe_eV,
+            "phi_V": phi_hat * p.photoelectron_temperature_ev,
             "phi0_hat": phi0_hat,
-            "phi0_V": phi0_hat * p.T_phe_eV,
+            "phi0_V": phi0_hat * p.photoelectron_temperature_ev,
             "phi_m_hat": phi_m_hat,
-            "phi_m_V": phi_m_hat * p.T_phe_eV if math.isfinite(phi_m_hat) else math.nan,
+            "phi_m_V": phi_m_hat * p.photoelectron_temperature_ev if math.isfinite(phi_m_hat) else math.nan,
             "z_m_hat": z_m_hat,
             "dphi_dzhat": dphi_dzhat,
             "E_Vpm": E_Vpm,
             "n_swe_inf_hat": n_swe_inf_hat,
-            "n_swe_inf_m3": n_swe_inf_hat * p.n_phe_ref_m3,
+            "n_swe_inf_m3": n_swe_inf_hat * p.density_scale_m3,
             "a_swe": a_swe,
             "a_phe": a_phe,
             "vcut_swe_mps": a_swe * p.v_swe_th_mps,
@@ -816,8 +738,8 @@ class ZhaoSheathSolver:
             "n_total_hat": n_total_hat,
             "rho_hat": rho_hat,
             **dens_m3,
-            "n_total_m3": n_total_hat * p.n_phe_ref_m3,
-            "rho_m3": rho_hat * p.n_phe_ref_m3,
+            "n_total_m3": n_total_hat * p.density_scale_m3,
+            "rho_m3": rho_hat * p.density_scale_m3,
         }
 
     def _velocity_grid_for_species(
@@ -885,7 +807,7 @@ class ZhaoSheathSolver:
     def _phe_vdf_components(self, state: Dict[str, float | str], vz_mps: np.ndarray) -> Dict[str, np.ndarray]:
         p = self.p
         vz = np.asarray(vz_mps, dtype=float)
-        amp = p.n_phe0_m3 * math.exp(float(state["phi_hat"]) - float(state["phi0_hat"])) / (
+        amp = p.photoelectron_density_m3 * math.exp(float(state["phi_hat"]) - float(state["phi0_hat"])) / (
             math.sqrt(math.pi) * p.v_phe_th_mps
         )
         vcut = float(state["vcut_phe_mps"])
@@ -916,6 +838,8 @@ class ZhaoSheathSolver:
         ion_sigma_frac: float,
     ) -> Dict[str, np.ndarray | float | str]:
         p = self.p
+        if p.ion_temperature_ev > 0:
+            raise ValueError("warm-ion fluid pressure does not define an ion VDF; request electron species")
         vz = np.asarray(vz_mps, dtype=float)
         n_i = float(state["n_swi_m3"])
         v_peak = -float(state["v_i_mps"])
@@ -980,11 +904,11 @@ class ZhaoSheathSolver:
             accessible = coefficient * self._swe_free_current_term(float(state["n_swe_inf_m3"]),
                                                                    math.sqrt(max(0., -psi)) - p.u)
             reflected_e = max(0., accessible - free_e)
-        free_pe = coefficient*p.n_phe0_m3*math.exp(barrier*p.tau - float(state["phi0_hat"]))
+        free_pe = coefficient*p.photoelectron_density_m3*math.exp(barrier*p.tau - float(state["phi0_hat"]))
         captured_pe = 0.0
         if state["phe_captured_active"]:
-            captured_pe = max(0., coefficient*p.n_phe0_m3*math.exp(float(state["phi_hat"])-float(state["phi0_hat"]))-free_pe)
-        ion_flux = p.n_swi_inf_m3*p.v_d_ion_mps
+            captured_pe = max(0., coefficient*p.photoelectron_density_m3*math.exp(float(state["phi_hat"])-float(state["phi0_hat"]))-free_pe)
+        ion_flux = p.ion_density_m3*p.ion_entry_speed_mps
 
         def moment(density, plus, minus, charge):
             signed = plus - minus
@@ -1038,3 +962,25 @@ class ZhaoSheathSolver:
             "J_phe_captured_returning_Apm2": float(phe_cap_ret["J_signed_Apm2"]),
         }
         return out
+
+
+class FixedEntrySheathSolver(_SheathSolver):
+    """J=0 sheath, densities, profiles and local fluxes at a fixed entrance state.
+
+    The incoming ion speed is used unchanged. Warm-ion pressure specifies
+    fluid transport, without defining an ion velocity distribution.
+    """
+
+    def __init__(self, params: FixedEntryParams):
+        if not isinstance(params, FixedEntryParams):
+            raise TypeError("FixedEntrySheathSolver requires FixedEntryParams")
+        super().__init__(params)
+
+
+class ZhaoSheathSolver(_SheathSolver):
+    """Sheath with entrance state and source projected from solar illumination."""
+
+    def __init__(self, params: ZhaoParams):
+        if not isinstance(params, ZhaoParams):
+            raise TypeError("ZhaoSheathSolver requires ZhaoParams")
+        super().__init__(params)

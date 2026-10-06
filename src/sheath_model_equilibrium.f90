@@ -4,6 +4,8 @@ module sheath_model_equilibrium
   use sheath_model_constants, only: dp, i32, pi, eps0, qe, electron_mass, proton_mass, lower_ascii
   use sheath_model_photoelectrons, only: maxwellian_photoelectrons
   use sheath_model_admissibility, only: validate_zhao_profile
+  use sheath_model_ions, only: ion_critical_potential, ion_density_ratio
+  use sheath_model_state, only: zhao_plasma_input, prepare_plasma_params
   use sheath_model_core, only: zhao_params_type, try_solve_zhao_unknowns, &
       evaluate_zhao_density_hat, zhao_residuals_type_a, zhao_residuals_type_b, zhao_residuals_type_c, &
       evaluate_zhao_fluxes
@@ -13,18 +15,29 @@ module sheath_model_equilibrium
 
   private
 
-  public :: zhao_equilibrium_input, zhao_equilibrium_result, zhao_density_result
+  public :: zhao_equilibrium_input, fixed_entry_equilibrium_input, zhao_equilibrium_result, zhao_density_result
   public :: solve_equilibrium, evaluate_density, solve_profile
   public :: zhao_profile_options, zhao_profile_result
 
+  type, abstract :: equilibrium_input
+    character(len=9) :: branch = 'auto'
+  end type equilibrium_input
+
+  !> Fixed normal plasma state and emitted source for the J=0 closure.
+  !! No wind projection or Bohm-speed adjustment is applied. Plasma units are SI except temperatures [eV].
+  type, extends(equilibrium_input) :: fixed_entry_equilibrium_input
+    type(zhao_plasma_input) :: plasma = zhao_plasma_input(electron_drift_mps=0.0_dp)
+  end type fixed_entry_equilibrium_input
+
   !> Plasma and illumination inputs for the J=0 closure; units are given by the component suffixes.
   !! branch selects A/B/C/auto; normal drift projects the wind speed along the surface normal.
-  type :: zhao_equilibrium_input
-    character(len=9) :: branch = 'auto'
+  type, extends(equilibrium_input) :: zhao_equilibrium_input
     real(dp) :: sun_elevation_deg = 60.0_dp
     real(dp) :: ion_density_m3 = 8.7e6_dp
     real(dp) :: photoelectron_reference_density_m3 = 64.0e6_dp
     real(dp) :: electron_temperature_ev = 12.0_dp
+    real(dp) :: ion_temperature_ev = 0.0_dp
+    real(dp) :: ion_pressure_factor = 1.0_dp
     real(dp) :: photoelectron_temperature_ev = 2.2_dp
     real(dp) :: solar_wind_speed_mps = 468.0e3_dp
     real(dp) :: ion_mass_kg = proton_mass
@@ -78,83 +91,99 @@ module sheath_model_equilibrium
 contains
 
   subroutine prepare_params(input, p, status, message)
-    type(zhao_equilibrium_input), intent(in) :: input
+    class(equilibrium_input), intent(in) :: input
     type(zhao_params_type), intent(out) :: p
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
 
     p = zhao_params_type()
     status = SHEATH_INVALID_ARGUMENT
-    message = 'Equilibrium inputs must be finite.'
-    if (.not. all(ieee_is_finite([input%sun_elevation_deg, input%ion_density_m3, &
-        input%photoelectron_reference_density_m3, input%electron_temperature_ev, &
-        input%photoelectron_temperature_ev, input%solar_wind_speed_mps, input%ion_mass_kg, input%electron_mass_kg]))) return
-
-    message = 'Densities, temperatures, wind speed, and masses must be positive; elevation must be in [0,90].'
-    if (min(input%ion_density_m3, input%photoelectron_reference_density_m3, input%electron_temperature_ev, &
-        input%photoelectron_temperature_ev, input%solar_wind_speed_mps, input%ion_mass_kg, input%electron_mass_kg) <= 0.0_dp) return
-    if (input%sun_elevation_deg < 0.0_dp .or. input%sun_elevation_deg > 90.0_dp) return
-
     message = 'branch must be auto, A, B, or C.'
-
     select case (trim(lower_ascii(input%branch)))
     case ('auto', 'a', 'b', 'c')
     case default
       return
     end select
 
-    message = 'Electron drift mode must be normal, full, or zero; ion mode normal or full.'
-    if (input%electron_drift_mode /= 'normal' .and. input%electron_drift_mode /= 'full' .and. &
-        input%electron_drift_mode /= 'zero') return
-    if (input%ion_drift_mode /= 'normal' .and. input%ion_drift_mode /= 'full') return
+    select type (input)
+    type is (fixed_entry_equilibrium_input)
+      call prepare_plasma_params(input%plasma, p, status, message)
+      return
+    type is (zhao_equilibrium_input)
+      message = 'Equilibrium inputs must be finite.'
+      if (.not. all(ieee_is_finite([input%sun_elevation_deg, input%ion_density_m3, &
+          input%photoelectron_reference_density_m3, input%electron_temperature_ev, &
+          input%photoelectron_temperature_ev, input%solar_wind_speed_mps, input%ion_mass_kg, input%electron_mass_kg, &
+          input%ion_temperature_ev, input%ion_pressure_factor]))) return
 
-    p%alpha_rad = input%sun_elevation_deg*pi/180.0_dp
-    p%n_swi_inf_m3 = input%ion_density_m3
-    p%density_scale_m3 = input%photoelectron_reference_density_m3
-    p%emission_density_scale_m3 = p%density_scale_m3*sin(p%alpha_rad)
-    p%t_swe_ev = input%electron_temperature_ev
-    p%potential_scale_v = input%photoelectron_temperature_ev
-    p%photoelectrons = maxwellian_photoelectrons(p%emission_density_scale_m3, input%photoelectron_temperature_ev)
-    p%m_i_kg = input%ion_mass_kg
-    p%m_e_kg = input%electron_mass_kg
+      message = 'Densities, temperatures, wind speed, and masses must be positive; elevation must be in [0,90].'
+      if (min(input%ion_density_m3, input%photoelectron_reference_density_m3, input%electron_temperature_ev, &
+          input%photoelectron_temperature_ev, input%solar_wind_speed_mps, &
+          input%ion_mass_kg, input%electron_mass_kg) <= 0.0_dp) return
+      if (input%sun_elevation_deg < 0.0_dp .or. input%sun_elevation_deg > 90.0_dp) return
+      message = 'Ion temperature must be nonnegative and pressure factor positive.'
+      if (input%ion_temperature_ev < 0.0_dp .or. input%ion_pressure_factor <= 0.0_dp) return
 
-    p%v_d_electron_mps = input%solar_wind_speed_mps
-    p%v_d_ion_mps = input%solar_wind_speed_mps
-    if (input%electron_drift_mode == 'normal') then
-      p%v_d_electron_mps = p%v_d_electron_mps*sin(p%alpha_rad)
-    end if
-    if (input%electron_drift_mode == 'zero') then
-      p%v_d_electron_mps = 0.0_dp
-    end if
-    if (input%ion_drift_mode == 'normal') then
-      p%v_d_ion_mps = p%v_d_ion_mps*sin(p%alpha_rad)
-    end if
+      message = 'Electron drift mode must be normal, full, or zero; ion mode normal or full.'
+      if (input%electron_drift_mode /= 'normal' .and. input%electron_drift_mode /= 'full' .and. &
+          input%electron_drift_mode /= 'zero') return
+      if (input%ion_drift_mode /= 'normal' .and. input%ion_drift_mode /= 'full') return
 
-    message = 'Zero normal ion drift is degenerate; use a positive elevation or explicit full ion drift.'
-    if (p%v_d_ion_mps <= 0.0_dp) return
+      p%alpha_rad = input%sun_elevation_deg*pi/180.0_dp
+      p%n_swi_inf_m3 = input%ion_density_m3
+      p%density_scale_m3 = input%photoelectron_reference_density_m3
+      p%emission_density_scale_m3 = p%density_scale_m3*sin(p%alpha_rad)
+      p%t_swe_ev = input%electron_temperature_ev
+      p%t_swi_ev = input%ion_temperature_ev
+      p%ion_pressure_factor = input%ion_pressure_factor
+      p%potential_scale_v = input%photoelectron_temperature_ev
+      p%photoelectrons = maxwellian_photoelectrons(p%emission_density_scale_m3, input%photoelectron_temperature_ev)
+      p%m_i_kg = input%ion_mass_kg
+      p%m_e_kg = input%electron_mass_kg
 
-    p%v_swe_th_mps = sqrt(2.0_dp*qe*p%t_swe_ev/p%m_e_kg)
-    p%velocity_scale_mps = sqrt(2.0_dp*qe*p%potential_scale_v/p%m_e_kg)
-    p%cs_mps = sqrt(qe*p%t_swe_ev/p%m_i_kg)
-    p%mach = p%v_d_ion_mps/p%cs_mps
-    p%u = p%v_d_electron_mps/p%v_swe_th_mps
-    p%tau = p%t_swe_ev/p%potential_scale_v
-    p%length_scale_m = sqrt(eps0*p%potential_scale_v/(p%density_scale_m3*qe))
-    status = SHEATH_NUMERICAL_FAILURE
-    message = 'Parameter normalization is non-finite or underflowed.'
-    if (.not. all(ieee_is_finite([p%v_swe_th_mps, p%velocity_scale_mps, p%cs_mps, p%mach, p%u, p%tau, &
-        p%length_scale_m]))) return
-    if (min(p%v_swe_th_mps, p%velocity_scale_mps, p%cs_mps, p%mach, p%tau, p%length_scale_m) <= 0.0_dp) return
+      p%v_d_electron_mps = input%solar_wind_speed_mps
+      p%v_d_ion_mps = input%solar_wind_speed_mps
+      if (input%electron_drift_mode == 'normal') then
+        p%v_d_electron_mps = p%v_d_electron_mps*sin(p%alpha_rad)
+      end if
+      if (input%electron_drift_mode == 'zero') then
+        p%v_d_electron_mps = 0.0_dp
+      end if
+      if (input%ion_drift_mode == 'normal') then
+        p%v_d_ion_mps = p%v_d_ion_mps*sin(p%alpha_rad)
+      end if
 
-    status = SHEATH_OK
-    message = ''
+      message = 'Zero normal ion drift is degenerate; use a positive elevation or explicit full ion drift.'
+      if (p%v_d_ion_mps <= 0.0_dp) return
+
+      p%v_swe_th_mps = sqrt(2.0_dp*qe*p%t_swe_ev/p%m_e_kg)
+      p%velocity_scale_mps = sqrt(2.0_dp*qe*p%potential_scale_v/p%m_e_kg)
+      p%cs_mps = sqrt(qe*p%t_swe_ev/p%m_i_kg)
+      p%mach = p%v_d_ion_mps/p%cs_mps
+      message = 'Ion entry speed must exceed the ion thermal sound speed; no presheath acceleration is applied.'
+      if (.not. ieee_is_finite(ion_critical_potential(0.5_dp*p%t_swe_ev*p%mach**2, &
+          p%ion_pressure_factor*p%t_swi_ev))) return
+      p%u = p%v_d_electron_mps/p%v_swe_th_mps
+      p%tau = p%t_swe_ev/p%potential_scale_v
+      p%length_scale_m = sqrt(eps0*p%potential_scale_v/(p%density_scale_m3*qe))
+      status = SHEATH_NUMERICAL_FAILURE
+      message = 'Parameter normalization is non-finite or underflowed.'
+      if (.not. all(ieee_is_finite([p%v_swe_th_mps, p%velocity_scale_mps, p%cs_mps, p%mach, p%u, p%tau, &
+          p%length_scale_m]))) return
+      if (min(p%v_swe_th_mps, p%velocity_scale_mps, p%cs_mps, p%mach, p%tau, p%length_scale_m) <= 0.0_dp) return
+
+      status = SHEATH_OK
+      message = ''
+    class default
+      message = 'Unsupported equilibrium input type.'
+    end select
   end subroutine prepare_params
 
   !> Solve the J=0 closure for the plasma inputs and return a physically admissible equilibrium.
   !! branch='auto' returns the first admissible branch in the model's search order.
   !! status/message report the outcome; output%valid is false on failure. Physical outputs use SI units.
   subroutine solve_equilibrium(input, output, status, message)
-    type(zhao_equilibrium_input), intent(in) :: input
+    class(equilibrium_input), intent(in) :: input
     type(zhao_equilibrium_result), intent(out) :: output
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
@@ -174,9 +203,10 @@ contains
     if (status /= SHEATH_OK) return
 
     order = ['A', 'B', 'C']
-    if (input%sun_elevation_deg < 20.0_dp) then
-      order = ['C', 'A', 'B']
-    end if
+    select type (input)
+    type is (zhao_equilibrium_input)
+      if (input%sun_elevation_deg < 20.0_dp) order = ['C', 'A', 'B']
+    end select
     count = 3
     if (trim(lower_ascii(input%branch)) /= 'auto') then
       order(1) = input%branch(1:1)
@@ -253,7 +283,7 @@ contains
       output, status, message, &
       side &
       )
-    type(zhao_equilibrium_input), intent(in) :: input
+    class(equilibrium_input), intent(in) :: input
     type(zhao_equilibrium_result), intent(in) :: solution
     real(dp), intent(in) :: potential_v
     type(zhao_density_result), intent(out) :: output
@@ -296,9 +326,10 @@ contains
       return
     end select
 
-    message = 'Potential is outside the selected branch interval or blocks cold ions.'
+    message = 'Potential is outside the selected branch interval or blocks the ion fluid branch.'
     if (potential_v < solution%minimum_potential_v .or. potential_v > upper) return
-    if (1.0_dp - 2.0_dp*potential_v/(p%t_swe_ev*p%mach**2) <= 0.0_dp) return
+    if (.not. ieee_is_finite(ion_density_ratio(potential_v, 0.5_dp*p%t_swe_ev*p%mach**2, &
+        p%ion_pressure_factor*p%t_swi_ev))) return
 
     call evaluate_zhao_density_hat(p, solution%branch, region, potential_v/p%potential_scale_v, &
         solution%surface_potential_v/p%potential_scale_v, solution%minimum_potential_v/p%potential_scale_v, &
@@ -317,7 +348,7 @@ contains
   !! options controls sampling and truncation of the semi-infinite domain; no forced zero tail is attached.
   !! On SHEATH_OK, output contains allocated arrays in SI units; otherwise inspect status and message.
   subroutine solve_profile(input, options, output, status, message)
-    type(zhao_equilibrium_input), intent(in) :: input
+    class(equilibrium_input), intent(in) :: input
     type(zhao_profile_options), intent(in) :: options
     type(zhao_profile_result), intent(out) :: output
     integer(i32), intent(out) :: status

@@ -8,15 +8,18 @@ module sheath_model_state
   use sheath_model_core, only: zhao_params_type, neutral_electron_density, integrate_zhao_rho, evaluate_zhao_fluxes, &
       evaluate_zhao_rho_hat
   use sheath_model_admissibility, only: validate_zhao_profile
+  use sheath_model_ions, only: ion_critical_potential, ion_density_ratio
   implicit none
   private
   public :: zhao_plasma_input, zhao_state_result, evaluate_sheath_state, prepare_plasma_params
 
   !> Fixed upstream ion state, electron distribution and outward boundary photoelectron source.
-  !! SI units except electron temperature [eV]. Normal drifts are positive inward.
+  !! SI units except temperatures [eV]. Normal drifts are positive inward.
   type :: zhao_plasma_input
     real(dp) :: ion_density_m3 = 8.7e6_dp
     real(dp) :: electron_temperature_ev = 12.0_dp
+    real(dp) :: ion_temperature_ev = 0.0_dp
+    real(dp) :: ion_pressure_factor = 1.0_dp
     real(dp) :: electron_drift_mps = 4.0529988897111727e5_dp
     real(dp) :: ion_drift_mps = 4.0529988897111727e5_dp
     real(dp) :: ion_mass_kg = proton_mass
@@ -58,15 +61,20 @@ contains
     status = SHEATH_INVALID_ARGUMENT
     message = 'Plasma inputs must be finite, with positive ion density, temperature, ion speed and masses.'
     if (.not. all(ieee_is_finite([input%ion_density_m3, input%electron_temperature_ev, &
-        input%electron_drift_mps, input%ion_drift_mps, input%ion_mass_kg, input%electron_mass_kg]))) return
+        input%electron_drift_mps, input%ion_drift_mps, input%ion_mass_kg, input%electron_mass_kg, &
+        input%ion_temperature_ev, input%ion_pressure_factor]))) return
     if (min(input%ion_density_m3, input%electron_temperature_ev, input%ion_drift_mps, &
         input%ion_mass_kg, input%electron_mass_kg) <= 0.0_dp) return
+    message = 'Ion temperature must be nonnegative and pressure factor positive.'
+    if (input%ion_temperature_ev < 0.0_dp .or. input%ion_pressure_factor <= 0.0_dp) return
     call validate_photoelectrons(input%photoelectrons, status, message)
     if (status /= SHEATH_OK) return
     params%photoelectrons = input%photoelectrons
     params%n_swi_inf_m3 = input%ion_density_m3
     params%density_scale_m3 = input%ion_density_m3
     params%t_swe_ev = input%electron_temperature_ev
+    params%t_swi_ev = input%ion_temperature_ev
+    params%ion_pressure_factor = input%ion_pressure_factor
     params%potential_scale_v = input%photoelectrons%potential_scale(input%electron_temperature_ev)
     params%v_d_electron_mps = input%electron_drift_mps
     params%v_d_ion_mps = input%ion_drift_mps
@@ -76,6 +84,10 @@ contains
     params%velocity_scale_mps = sqrt(2.0_dp*qe*params%potential_scale_v/params%m_e_kg)
     params%cs_mps = sqrt(qe*params%t_swe_ev/params%m_i_kg)
     params%mach = params%v_d_ion_mps/params%cs_mps
+    status = SHEATH_INVALID_ARGUMENT
+    message = 'Ion entry speed must exceed the ion thermal sound speed; no presheath acceleration is applied.'
+    if (.not. ieee_is_finite(ion_critical_potential(0.5_dp*params%t_swe_ev*params%mach**2, &
+        params%ion_pressure_factor*params%t_swi_ev))) return
     params%u = params%v_d_electron_mps/params%v_swe_th_mps
     params%tau = params%t_swe_ev/params%potential_scale_v
     params%length_scale_m = sqrt(eps0*params%potential_scale_v/(params%density_scale_m3*qe))
@@ -138,8 +150,9 @@ contains
       return
     end select
     if (.not. ieee_is_finite(phim)) return
-    message = 'Trial potential blocks the cold ion beam.'
-    if (1.0_dp - 2.0_dp*max(phi0, 0.0_dp)/(p%tau*p%mach**2) <= 0.0_dp) return
+    message = 'Trial potential blocks the ion fluid branch.'
+    if (.not. ieee_is_finite(ion_density_ratio(boundary_potential_v, 0.5_dp*p%t_swe_ev*p%mach**2, &
+        p%ion_pressure_factor*p%t_swi_ev))) return
     density = neutral_electron_density(p, selected, boundary_potential_v, phim*p%potential_scale_v)
     if (present(electron_normalization_m3)) then
       message = 'Density correction is limited to the B/C neighboring-potential neutrality interval.'

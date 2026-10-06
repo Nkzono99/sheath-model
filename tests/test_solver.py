@@ -17,8 +17,8 @@ class ZhaoSolverTests(unittest.TestCase):
         expected = params.v_sw_total_mps * math.sin(math.radians(10.0))
         self.assertEqual(params.electron_drift_mode, "normal")
         self.assertEqual(params.ion_drift_mode, "normal")
-        self.assertAlmostEqual(params.v_d_electron_mps, expected)
-        self.assertAlmostEqual(params.v_d_ion_mps, expected)
+        self.assertAlmostEqual(params.electron_drift_mps, expected)
+        self.assertAlmostEqual(params.ion_entry_speed_mps, expected)
 
     def test_swe_current_term_matches_direct_integral(self) -> None:
         params = ZhaoParams(alpha_deg=60.0)
@@ -28,7 +28,7 @@ class ZhaoSolverTests(unittest.TestCase):
         a_swe = 0.35
 
         integral, _ = quad(
-            lambda x: (params.v_swe_th_mps * x + params.v_d_electron_mps) * math.exp(-(x ** 2)) / math.sqrt(math.pi),
+            lambda x: (params.v_swe_th_mps * x + params.electron_drift_mps) * math.exp(-(x ** 2)) / math.sqrt(math.pi),
             a_swe,
             math.inf,
         )
@@ -58,10 +58,8 @@ class ZhaoSolverTests(unittest.TestCase):
         self.assertGreater(out_10["n_swe_inf_m3"], 0.0)
 
     def test_zero_sun_elevation_normal_drift_raises_clear_error(self) -> None:
-        solver = ZhaoSheathSolver(ZhaoParams(alpha_deg=0.0))
-
         with self.assertRaisesRegex(ValueError, "degenerate"):
-            solver.solve_profile("C")
+            ZhaoSheathSolver(ZhaoParams(alpha_deg=0.0))
 
 
 if __name__ == "__main__":

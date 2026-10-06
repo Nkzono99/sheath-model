@@ -1,5 +1,8 @@
-"""Zhao et al. lunar photoelectron sheath solver."""
+"""Fixed-entry and solar-illumination photoelectron sheath models."""
 
-from .solver import ZhaoParams, ZhaoSheathSolver
+from .params import FixedEntryParams, ZhaoParams
+from .solver import FixedEntrySheathSolver, ZhaoSheathSolver
+from ._ions import ion_density_ratio, ion_critical_potential
 
-__all__ = ["ZhaoParams", "ZhaoSheathSolver"]
+__all__ = ["FixedEntryParams", "FixedEntrySheathSolver", "ZhaoParams", "ZhaoSheathSolver",
+           "ion_density_ratio", "ion_critical_potential"]

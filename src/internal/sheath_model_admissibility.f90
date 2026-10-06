@@ -5,6 +5,7 @@ module sheath_model_admissibility
   use sheath_model_status, only: SHEATH_OK, SHEATH_NO_PHYSICAL_SOLUTION, SHEATH_NUMERICAL_FAILURE
   use sheath_model_core, only: zhao_params_type, integrate_zhao_rho, evaluate_zhao_rho_hat
   use sheath_model_photoelectrons, only: photoelectron_sqrt_coefficient
+  use sheath_model_ions, only: ion_density_ratio
 
   implicit none
 
@@ -55,8 +56,9 @@ contains
       end if
     end if
 
-    message = 'The root blocks the cold ion beam.'
-    if (1.0_dp - 2.0_dp*max(phi0, 0.0_dp)/(p%tau*p%mach**2) <= 0.0_dp) return
+    message = 'The root blocks the upstream-connected ion flow.'
+    if (.not. ieee_is_finite(ion_density_ratio(max(phi0, 0.0_dp)*p%potential_scale_v, &
+        0.5_dp*p%t_swe_ev*p%mach**2, p%ion_pressure_factor*p%t_swi_ev))) return
 
     side = 'monotonic'
     if (branch == 'A') then

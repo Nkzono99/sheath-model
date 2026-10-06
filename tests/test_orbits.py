@@ -127,7 +127,7 @@ class OrbitTests(unittest.TestCase):
         p = ZhaoParams()
         phi0 = 2.6544268139403324 / p.T_phe_eV
         phim = -1.1897238115913789 / p.T_phe_eV
-        density = 7923268.55824609 / p.n_phe_ref_m3
+        density = 7923268.55824609 / p.density_scale_m3
 
         def rho(phi):
             psi = phi / p.tau
@@ -143,8 +143,8 @@ class OrbitTests(unittest.TestCase):
                 + 2 * quad(vdf, 0, cutoff, epsabs=1e-12)[0]
             )
             ions = (
-                p.n_swi_inf_m3
-                / p.n_phe_ref_m3
+                p.ion_density_m3
+                / p.density_scale_m3
                 / math.sqrt(1 - 2 * phi / (p.tau * p.mach**2))
             )
             photo = (
@@ -163,7 +163,7 @@ class OrbitTests(unittest.TestCase):
         solver = ZhaoSheathSolver(p)
         phi0 = 10.0 / p.T_phe_eV
         # At infinity B has one incoming half-Maxwellian and escaping PE.
-        density = 2 * (p.n_swi_inf_m3 - 0.5 * p.n_phe0_m3 * math.exp(-phi0)) / p.n_phe_ref_m3
+        density = 2 * (p.ion_density_m3 - 0.5 * p.photoelectron_density_m3 * math.exp(-phi0)) / p.density_scale_m3
         field_squared = 2 * solver._integrate_rho("B", "monotonic", phi0, 0.0, phi0, 0.0, density)
         self.assertGreater(field_squared, 0.0)
         with self.assertRaisesRegex(RuntimeError, "arbitrarily near upstream infinity"):

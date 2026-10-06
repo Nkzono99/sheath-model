@@ -31,8 +31,8 @@ def main() -> None:
     print(f"phi_m                = {out['phi_m_V']:.6f} V")
     print(f"n_swe_inf            = {out['n_swe_inf_m3']:.6e} m^-3")
     print(f"z_m_hat              = {out['z_m_hat']:.6f}")
-    print(f"electron drift mode  = {out['electron_drift_mode']}")
-    print(f"ion drift mode       = {out['ion_drift_mode']}")
+    print(f"electron drift mode  = {prm.electron_drift_mode}")
+    print(f"ion drift mode       = {prm.ion_drift_mode}")
 
 
 if __name__ == "__main__":

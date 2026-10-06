@@ -5,6 +5,7 @@
 !! 数学的な反復処理は sheath_model_numerics、残差の定義と許容条件は physics が担当する。
 submodule(sheath_model_field) sheath_model_field_numerics
   use sheath_model_numerics, only: try_guarded_newton_solve
+  use sheath_model_ions, only: ion_critical_potential
   implicit none
 
 contains
@@ -29,7 +30,8 @@ contains
     source_ratio = params%emission_density_scale_m3/params%n_swi_inf_m3
     source_shift = log(max(1.0_dp, 0.5_dp*source_ratio))
     field_voltage = max(1e-10_dp, min(100.0_dp, abs(target_field_hat)*sqrt(params%tau)))
-    ion_limit = 0.5_dp*params%tau*params%mach**2
+    ion_limit = ion_critical_potential(0.5_dp*params%t_swe_ev*params%mach**2, &
+        params%ion_pressure_factor*params%t_swi_ev)/params%potential_scale_v
 
     select case (branch)
     case ('A')
