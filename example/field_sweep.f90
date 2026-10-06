@@ -3,7 +3,7 @@ program field_sweep
   use sheath_model
   implicit none
   type(zhao_field_input) :: input
-  type(zhao_field_search_diagnostics) :: diagnostics
+  type(sheath_search_diagnostics) :: diagnostics
   type(zhao_field_result), allocatable :: previous(:), candidates(:)
   integer(i32) :: status
   integer :: step, i

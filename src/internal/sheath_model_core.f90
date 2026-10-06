@@ -8,7 +8,7 @@ module sheath_model_core
   use sheath_model_orbits, only: electron_density, gauss_x, gauss_w
   use sheath_model_ions, only: ion_density_ratio
   use sheath_model_constants, only: dp
-  use sheath_model_numerics, only: solve_nonlinear_system, residual_norm, NONLINEAR_TOL
+  use sheath_model_search, only: sheath_search_options
   use sheath_model_constants, only: pi, eps0, qe
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_quiet_nan
   implicit none
@@ -17,6 +17,7 @@ module sheath_model_core
   !> Internal plasma parameters and derived scales, prepared by the public model wrappers.
   !! Physical fields use their suffix units; mach, u and tau are dimensionless ratios.
   type :: zhao_params_type
+    type(sheath_search_options) :: search
     type(photoelectron_source) :: photoelectrons
     real(dp) :: alpha_rad = 0.0d0
     real(dp) :: n_swi_inf_m3 = 0.0d0
@@ -41,7 +42,7 @@ module sheath_model_core
 
   public :: neutral_electron_density, evaluate_zhao_fluxes
   public :: zhao_params_type
-  public :: try_solve_zhao_unknowns
+  public :: evaluate_monotonic_stationary_phi
   public :: evaluate_zhao_density_hat
   public :: evaluate_zhao_rho_hat
   public :: zhao_residuals_type_a
@@ -93,240 +94,6 @@ contains
     n_phe_f_hat = photo_free/p%density_scale_m3
     n_phe_c_hat = photo_captured/p%density_scale_m3
   end subroutine evaluate_zhao_density_hat
-
-  !> 指定枝の代数根を探索する。物理解の判定と auto 選択は公開窓口で行う。
-  !! model は zhao_a/zhao_b/zhao_c。電位 [V]、電子規格化密度 [m^-3]、枝と収束成否を返す。
-  !! 最小電位は B では上流の 0 V、C では境界電位と一致する。
-  subroutine try_solve_zhao_unknowns(model, p, phi0_v, phi_m_v, n_swe_inf_m3, branch, success)
-    character(len=*), intent(in) :: model
-    type(zhao_params_type), intent(in) :: p
-    real(dp), intent(out) :: phi0_v, phi_m_v, n_swe_inf_m3
-    character(len=1), intent(out) :: branch
-    logical, intent(out) :: success
-
-    real(dp) :: x3(3), x2(2)
-
-    phi0_v = 0.0_dp
-    phi_m_v = 0.0_dp
-    n_swe_inf_m3 = 0.0_dp
-    branch = ' '
-    success = .false.
-
-    select case (trim(model))
-    case ('zhao_a')
-      call try_solve_zhao_branch_a(p, x3, success)
-      if (success) then
-        phi0_v = x3(1)
-        phi_m_v = x3(2)
-        n_swe_inf_m3 = x3(3)
-        branch = 'A'
-      end if
-      return
-    case ('zhao_b')
-      call try_solve_zhao_branch_b(p, x2, success)
-      if (success) then
-        phi0_v = x2(1)
-        phi_m_v = 0.0_dp
-        n_swe_inf_m3 = x2(2)
-        branch = 'B'
-      end if
-      return
-    case ('zhao_c')
-      call try_solve_zhao_branch_c(p, x2, success)
-      if (success) then
-        phi0_v = x2(1)
-        phi_m_v = x2(1)
-        n_swe_inf_m3 = x2(2)
-        branch = 'C'
-      end if
-      return
-    end select
-
-  end subroutine try_solve_zhao_unknowns
-
-  subroutine try_solve_zhao_branch_a(p, x, success)
-    type(zhao_params_type), intent(in) :: p
-    real(dp), intent(out) :: x(3)
-    logical, intent(out) :: success
-
-    real(dp) :: guesses(3, 6)
-
-    guesses(:, 1) = [1.6_dp*p%potential_scale_v, -0.3_dp*p%potential_scale_v, 0.9_dp*p%n_swi_inf_m3]
-    guesses(:, 2) = [0.5_dp*p%potential_scale_v, -0.5_dp*p%potential_scale_v, 0.9_dp*p%n_swi_inf_m3]
-    guesses(:, 3) = [-0.2_dp*p%potential_scale_v, -0.8_dp*p%potential_scale_v, 0.9_dp*p%n_swi_inf_m3]
-    guesses(:, 4) = [-p%potential_scale_v, -2.0_dp*p%potential_scale_v, p%n_swi_inf_m3]
-    guesses(:, 5) = [3.0_dp*p%potential_scale_v, -0.1_dp*p%potential_scale_v, p%n_swi_inf_m3]
-    guesses(:, 6) = [-3.0_dp*p%potential_scale_v, -4.0_dp*p%potential_scale_v, p%n_swi_inf_m3]
-    call solve_nonlinear_system(3, guesses, residual_a, x, success)
-
-  contains
-
-    subroutine residual_a(xa, fa)
-      real(dp), intent(in) :: xa(:)
-      real(dp), intent(out) :: fa(:)
-
-      call zhao_residuals_type_a(p, xa, fa)
-      fa(1:2) = fa(1:2)/p%density_scale_m3
-    end subroutine residual_a
-
-  end subroutine try_solve_zhao_branch_a
-
-  subroutine try_solve_zhao_branch_b(p, x, success)
-    type(zhao_params_type), intent(in) :: p
-    real(dp), intent(out) :: x(2)
-    logical, intent(out) :: success
-
-    real(dp) :: guesses(2, 3)
-
-    call try_solve_zhao_monotonic_scalar(p, 'B', x, success)
-    if (success) return
-    guesses(:, 1) = [1.3d0, 7.0d6]
-    guesses(:, 2) = [0.8d0, 6.5d6]
-    guesses(:, 3) = [2.0d0, 7.8d6]
-    call solve_nonlinear_system(2, guesses, residual_b, x, success)
-
-  contains
-
-    subroutine residual_b(xb, fb)
-      real(dp), intent(in) :: xb(:)
-      real(dp), intent(out) :: fb(:)
-
-      call zhao_residuals_type_b(p, xb, fb)
-      fb(1:2) = fb(1:2)/p%density_scale_m3
-    end subroutine residual_b
-
-  end subroutine try_solve_zhao_branch_b
-
-  subroutine try_solve_zhao_branch_c(p, x, success)
-    type(zhao_params_type), intent(in) :: p
-    real(dp), intent(out) :: x(2)
-    logical, intent(out) :: success
-
-    real(dp) :: guesses(2, 5)
-
-    call try_solve_zhao_monotonic_scalar(p, 'C', x, success)
-    if (success) return
-    guesses(:, 1) = [-0.5d0, 6.0d6]
-    guesses(:, 2) = [-2.0d0, 7.0d6]
-    guesses(:, 3) = [-5.0d0, 8.0d6]
-    guesses(:, 4) = [-10.0d0, 8.2d6]
-    guesses(:, 5) = [-15.0d0, 8.5d6]
-    call solve_nonlinear_system(2, guesses, residual_c, x, success)
-
-  contains
-
-    subroutine residual_c(xc, fc)
-      real(dp), intent(in) :: xc(:)
-      real(dp), intent(out) :: fc(:)
-
-      call zhao_residuals_type_c(p, xc, fc)
-      fc(1:2) = fc(1:2)/p%density_scale_m3
-    end subroutine residual_c
-
-  end subroutine try_solve_zhao_branch_c
-
-  !> Type-B/C の定常電流式から ambient density を消去し、電位だけをbracketする。
-  subroutine try_solve_zhao_monotonic_scalar(p, branch, x, success)
-    type(zhao_params_type), intent(in) :: p
-    character(len=1), intent(in) :: branch
-    real(dp), intent(out) :: x(2)
-    logical, intent(out) :: success
-
-    integer :: iteration
-    real(dp) :: phi_left, phi_right, phi_mid, residual_left, residual_right, residual_mid
-    real(dp) :: density_left, density_right, density_mid, voltage_scale, phi_limit
-    real(dp) :: residual(2), residual_scale
-    logical :: left_ok, right_ok, mid_ok
-
-    x = 0.0_dp
-    success = .false.
-    voltage_scale = max(p%potential_scale_v, p%t_swe_ev, 1.0_dp)
-    residual_scale = max(p%n_swi_inf_m3, p%emission_density_scale_m3, 1.0_dp)
-    select case (branch)
-    case ('B')
-      phi_left = 128.0_dp*epsilon(1.0_dp)*voltage_scale
-      phi_right = voltage_scale
-      phi_limit = 100.0_dp*voltage_scale
-    case ('C')
-      phi_left = -voltage_scale
-      phi_right = -128.0_dp*epsilon(1.0_dp)*voltage_scale
-      phi_limit = -100.0_dp*voltage_scale
-    case default
-      return
-    end select
-
-    call evaluate_monotonic_stationary_phi(p, branch, phi_left, residual_left, density_left, left_ok)
-    call evaluate_monotonic_stationary_phi(p, branch, phi_right, residual_right, density_right, right_ok)
-    if (.not. left_ok .or. .not. right_ok) return
-    do iteration = 1, 16
-      if (residual_left == 0.0_dp .or. residual_right == 0.0_dp .or. &
-          sign(1.0_dp, residual_left) /= sign(1.0_dp, residual_right)) exit
-      if (branch == 'B') then
-        phi_right = min(phi_limit, 2.0_dp*phi_right)
-        call evaluate_monotonic_stationary_phi( &
-            p, branch, phi_right, residual_right, density_right, right_ok &
-            )
-        if (.not. right_ok .or. phi_right >= phi_limit) exit
-      else
-        phi_left = max(phi_limit, 2.0_dp*phi_left)
-        call evaluate_monotonic_stationary_phi( &
-            p, branch, phi_left, residual_left, density_left, left_ok &
-            )
-        if (.not. left_ok .or. phi_left <= phi_limit) exit
-      end if
-    end do
-    if (.not. left_ok .or. .not. right_ok) return
-    if (residual_left /= 0.0_dp .and. residual_right /= 0.0_dp) then
-      if (sign(1.0_dp, residual_left) == sign(1.0_dp, residual_right)) return
-    end if
-
-    if (residual_left == 0.0_dp) then
-      x = [phi_left, density_left]
-    else if (residual_right == 0.0_dp) then
-      x = [phi_right, density_right]
-    else
-      do iteration = 1, 160
-        phi_mid = phi_left + 0.5_dp*(phi_right - phi_left)
-        call evaluate_monotonic_stationary_phi( &
-            p, branch, phi_mid, residual_mid, density_mid, mid_ok &
-            )
-        if (.not. mid_ok) return
-        if (residual_mid == 0.0_dp) then
-          phi_left = phi_mid
-          phi_right = phi_mid
-          density_left = density_mid
-          density_right = density_mid
-          exit
-        end if
-        if (sign(1.0_dp, residual_left) /= sign(1.0_dp, residual_mid)) then
-          phi_right = phi_mid
-          residual_right = residual_mid
-          density_right = density_mid
-        else
-          phi_left = phi_mid
-          residual_left = residual_mid
-          density_left = density_mid
-        end if
-        if (abs(phi_right - phi_left) <= &
-            256.0_dp*epsilon(1.0_dp)*max(1.0_dp, abs(phi_left), abs(phi_right))) exit
-      end do
-      phi_mid = phi_left + 0.5_dp*(phi_right - phi_left)
-      call evaluate_monotonic_stationary_phi( &
-          p, branch, phi_mid, residual_mid, density_mid, mid_ok &
-          )
-      if (.not. mid_ok) return
-      x = [phi_mid, density_mid]
-    end if
-
-    if (branch == 'B') then
-      call zhao_residuals_type_b(p, x, residual)
-    else
-      call zhao_residuals_type_c(p, x, residual)
-    end if
-    success = all(ieee_is_finite(x)) .and. all(ieee_is_finite(residual)) .and. &
-        x(2) > 0.0_dp .and. residual_norm(residual) <= &
-        max(NONLINEAR_TOL, 1024.0_dp*epsilon(1.0_dp)*residual_scale)
-  end subroutine try_solve_zhao_monotonic_scalar
 
   subroutine evaluate_monotonic_stationary_phi(p, branch, phi_v, residual_v, density_m3, success)
     type(zhao_params_type), intent(in) :: p

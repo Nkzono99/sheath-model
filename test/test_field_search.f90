@@ -3,7 +3,7 @@ program test_field_search
   use sheath_model
   implicit none
   type(zhao_field_input) :: base, input
-  type(zhao_field_search_diagnostics) :: diagnostics, reference_diagnostics
+  type(sheath_search_diagnostics) :: diagnostics, reference_diagnostics
   type(zhao_field_result) :: output, difficult_seed(1)
   type(zhao_field_result), allocatable :: reference(:), scaled(:), previous(:), cold(:), warm(:)
   real(dp), parameter :: density_scales(*) = [1e-8_dp, 1.0_dp, 1e8_dp]

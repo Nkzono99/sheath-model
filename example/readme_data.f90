@@ -156,7 +156,7 @@ contains
     integer, intent(out) :: found, unknown, refused, count
     type(zhao_field_input) :: input
     type(zhao_field_result), allocatable :: roots(:)
-    type(zhao_field_search_diagnostics) :: diagnostics
+    type(sheath_search_diagnostics) :: diagnostics
     integer(i32) :: status
     integer :: k
     character(len=512) :: message

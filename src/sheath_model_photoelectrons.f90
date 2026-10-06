@@ -20,6 +20,7 @@ module sheath_model_photoelectrons
     real(dp), allocatable :: edges_ev(:), flux_m2_s(:)
   contains
     procedure :: is_binned
+    procedure :: search_breakpoints
     procedure :: potential_scale
   end type
 
@@ -60,6 +61,14 @@ contains
       scale = 2.0_dp**(exponent(spectrum_scale_v) - 1)
     end if
   end function
+
+  !> Exact normal-energy bin edges for numerical searches; empty for a Maxwellian.
+  pure function search_breakpoints(self) result(edges)
+    class(photoelectron_source), intent(in) :: self
+    real(dp), allocatable :: edges(:)
+    allocate (edges(0))
+    if (allocated(self%edges_ev)) edges = self%edges_ev
+  end function search_breakpoints
 
   !> Validate finite nonnegative source strength, positive Maxwellian temperature, and strict bin ordering.
   subroutine validate_photoelectrons(source, status, message)

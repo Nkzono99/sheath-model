@@ -3,12 +3,13 @@ module sheath_model_equilibrium
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use sheath_model_constants, only: dp, i32, pi, eps0, qe, electron_mass, proton_mass, lower_ascii
   use sheath_model_photoelectrons, only: maxwellian_photoelectrons
-  use sheath_model_admissibility, only: validate_zhao_profile
   use sheath_model_ions, only: ion_critical_potential, ion_density_ratio
   use sheath_model_state, only: zhao_plasma_input, prepare_plasma_params
-  use sheath_model_core, only: zhao_params_type, try_solve_zhao_unknowns, &
-      evaluate_zhao_density_hat, zhao_residuals_type_a, zhao_residuals_type_b, zhao_residuals_type_c, &
+  use sheath_model_core, only: zhao_params_type, &
+      evaluate_zhao_density_hat, &
       evaluate_zhao_fluxes
+  use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, valid_search_options
+  use sheath_model_equilibrium_search, only: search_equilibrium_branch, equilibrium_residual
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NUMERICAL_FAILURE, SHEATH_NO_PHYSICAL_SOLUTION
 
   implicit none
@@ -20,6 +21,7 @@ module sheath_model_equilibrium
   public :: zhao_profile_options, zhao_profile_result
 
   type, abstract :: equilibrium_input
+    type(sheath_search_options) :: search
     character(len=9) :: branch = 'auto'
   end type equilibrium_input
 
@@ -105,9 +107,15 @@ contains
       return
     end select
 
+    message = 'Invalid search options; bracket is available only for explicit B/C equilibrium branches.'
+    if (.not. valid_search_options(input%search)) return
+    if (trim(lower_ascii(input%search%method)) == 'bracket' .and. &
+        trim(lower_ascii(input%branch)) /= 'b' .and. trim(lower_ascii(input%branch)) /= 'c') return
     select type (input)
     type is (fixed_entry_equilibrium_input)
       call prepare_plasma_params(input%plasma, p, status, message)
+      p%search = input%search
+      p%search%method = lower_ascii(p%search%method)
       return
     type is (zhao_equilibrium_input)
       message = 'Equilibrium inputs must be finite.'
@@ -129,6 +137,8 @@ contains
           input%electron_drift_mode /= 'zero') return
       if (input%ion_drift_mode /= 'normal' .and. input%ion_drift_mode /= 'full') return
 
+      p%search = input%search
+      p%search%method = lower_ascii(p%search%method)
       p%alpha_rad = input%sun_elevation_deg*pi/180.0_dp
       p%n_swi_inf_m3 = input%ion_density_m3
       p%density_scale_m3 = input%photoelectron_reference_density_m3
@@ -182,16 +192,22 @@ contains
   !> Solve the J=0 closure for the plasma inputs and return a physically admissible equilibrium.
   !! branch='auto' returns the first admissible branch in the model's search order.
   !! status/message report the outcome; output%valid is false on failure. Physical outputs use SI units.
-  subroutine solve_equilibrium(input, output, status, message)
+  subroutine solve_equilibrium(input, output, status, message, diagnostics, initial_guesses)
     class(equilibrium_input), intent(in) :: input
     type(zhao_equilibrium_result), intent(out) :: output
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
 
     type(zhao_params_type) :: p
+    type(sheath_search_diagnostics), intent(out), optional :: diagnostics
+    type(zhao_equilibrium_result), intent(in), optional :: initial_guesses(:)
+    type(sheath_search_diagnostics) :: search
+    real(dp), allocatable :: initial(:, :)
+    real(dp) :: found(3)
+    integer :: i, seed_count
     type(zhao_equilibrium_result) :: trial
     real(dp) :: phi0, phim, density, residual(3)
-    real(dp) :: outward, returning, minimum_e2, boundary_e2
+    real(dp) :: outward, returning
     character(len=1) :: order(3)
     integer :: attempt, count
     logical :: nonphysical, unresolved_search
@@ -199,6 +215,8 @@ contains
     logical :: success
 
     output = zhao_equilibrium_result()
+    search = sheath_search_diagnostics()
+    if (present(diagnostics)) diagnostics = search
     call prepare_params(input, p, status, message)
     if (status /= SHEATH_OK) return
 
@@ -215,48 +233,46 @@ contains
     nonphysical = .false.
     unresolved_search = .false.
     do attempt = 1, count
-      call try_solve_zhao_unknowns('zhao_'//lower_ascii(order(attempt)), p, phi0, phim, density, branch, success)
+      branch = order(attempt)
+      if (branch >= 'a' .and. branch <= 'c') branch = achar(iachar(branch) - 32)
+      seed_count = 0
+      if (allocated(initial)) deallocate (initial)
+      allocate (initial(3, 0))
+      if (present(initial_guesses)) then
+        deallocate (initial)
+        allocate (initial(3, size(initial_guesses)))
+        do i = 1, size(initial_guesses)
+          if (.not. initial_guesses(i)%valid .or. initial_guesses(i)%branch /= branch) cycle
+          seed_count = seed_count + 1
+          initial(:, seed_count) = [initial_guesses(i)%surface_potential_v, initial_guesses(i)%minimum_potential_v, &
+              initial_guesses(i)%ambient_electron_density_m3]
+        end do
+      end if
+      call search_equilibrium_branch(p, branch, initial(:, :seed_count), found, success, search)
+      if (present(diagnostics)) diagnostics = search
+      phi0 = found(1)
+      phim = found(2)
+      density = found(3)
       if (.not. success) then
-        unresolved_search = .true.
+        nonphysical = nonphysical .or. any(search%excluded) .or. any(search%rejected > 0)
+        unresolved_search = unresolved_search .or. search%unconverged(index('ABC', branch)) > 0 .or. &
+            search%profile_failures(index('ABC', branch)) > 0 .or. (.not. search%excluded(index('ABC', branch)) .and. &
+            search%roots_found(index('ABC', branch)) == 0 .and. search%rejected(index('ABC', branch)) == 0)
         cycle
       end if
-      if (branch == 'B') then
-        phim = 0.0_dp
-      end if
-      call validate_zhao_profile(p, branch, phi0/p%potential_scale_v, phim/p%potential_scale_v, density/p%density_scale_m3, &
-          minimum_e2, boundary_e2, status, message)
-      if (status == SHEATH_OK) exit
-      if (status == SHEATH_NO_PHYSICAL_SOLUTION) then
-        nonphysical = .true.
-      end if
-      if (status == SHEATH_NUMERICAL_FAILURE) then
-        unresolved_search = .true.
-      end if
-      success = .false.
+      exit
     end do
     if (.not. success) then
       status = SHEATH_NUMERICAL_FAILURE
       message = 'Equilibrium root search did not converge for the requested branch.'
       if (nonphysical .and. .not. unresolved_search) then
         status = SHEATH_NO_PHYSICAL_SOLUTION
-        message = 'Algebraic equilibrium roots exist but have no real connecting sheath profile.'
+        message = 'Requested branches or located roots are excluded by physical profile conditions.'
       end if
       return
     end if
 
-    residual = 0.0_dp
-
-    select case (branch)
-    case ('A')
-      call zhao_residuals_type_a(p, [phi0, phim, density], residual)
-    case ('B')
-      call zhao_residuals_type_b(p, [phi0, density], residual(1:2))
-      phim = 0.0_dp ! physical minimum is at infinity, not the surface
-    case ('C')
-      call zhao_residuals_type_c(p, [phi0, density], residual(1:2))
-    end select
-
-    residual(1:2) = residual(1:2)/p%density_scale_m3
+    call equilibrium_residual(p, branch, [phi0, phim, density], residual)
     trial = zhao_equilibrium_result(.false., branch, phi0, phim, density, p%length_scale_m, &
         maxval(abs(residual)))
     call evaluate_zhao_fluxes(p, phi0, phim, density, trial%electron_inward_flux_m2_s, &

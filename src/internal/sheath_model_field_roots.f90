@@ -21,7 +21,7 @@ contains
     type(zhao_field_root), intent(out) :: root
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
-    type(zhao_field_search_diagnostics), intent(out) :: diagnostics
+    type(sheath_search_diagnostics), intent(out) :: diagnostics
     type(zhao_field_result), intent(in), optional :: initial_guesses(:)
 
     type(zhao_field_root), allocatable :: roots(:)
@@ -49,7 +49,7 @@ contains
     type(zhao_field_root), allocatable, intent(out) :: roots(:)
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
-    type(zhao_field_search_diagnostics), intent(out) :: diagnostics
+    type(sheath_search_diagnostics), intent(out) :: diagnostics
     type(zhao_field_result), intent(in), optional :: initial_guesses(:)
 
     character(len=1) :: order(3)
@@ -59,7 +59,7 @@ contains
     integer :: branch_count, i, j, k, count, n, capacity, branch_index
     logical :: duplicate, unresolved
 
-    diagnostics = zhao_field_search_diagnostics()
+    diagnostics = sheath_search_diagnostics()
     field_scale = params%potential_scale_v/params%length_scale_m
     target = interface_field_v_m/field_scale
     status = SHEATH_NUMERICAL_FAILURE
@@ -179,13 +179,13 @@ contains
     real(dp), intent(in) :: target_field_hat
     type(zhao_field_root), allocatable, intent(out) :: unique_roots(:)
     integer, intent(out) :: unique_count
-    type(zhao_field_search_diagnostics), intent(inout) :: diagnostics
+    type(sheath_search_diagnostics), intent(inout) :: diagnostics
     type(zhao_field_result), intent(in), optional :: initial_guesses(:)
 
     real(dp) :: defaults(3, default_field_starts), y(3), norm, encoded(3)
     real(dp), allocatable :: guesses(:, :)
     type(zhao_field_root) :: candidate_root
-    integer :: guess_count, default_count, guess_index, iterations, root_index, k, capacity
+    integer :: guess_count, default_count, guess_index, iterations, evaluations, lm_steps, root_index, k, capacity
     integer(i32) :: profile_status
     logical :: success, compatible, duplicate_root
     character(len=512) :: profile_message
@@ -212,7 +212,7 @@ contains
     if (present(initial_guesses)) then
       do guess_index = 1, size(initial_guesses)
         if (.not. initial_guesses(guess_index)%valid .or. initial_guesses(guess_index)%branch /= branch) cycle
-        call encode_field_unknowns(params, branch, initial_guesses(guess_index)%boundary_potential_v, &
+        call encode_unknowns(params, branch, initial_guesses(guess_index)%boundary_potential_v, &
             initial_guesses(guess_index)%minimum_potential_v, &
             initial_guesses(guess_index)%ambient_electron_density_m3, encoded, success)
         if (.not. success) cycle
@@ -221,18 +221,23 @@ contains
       end do
     end if
 
-    call make_field_branch_guesses(params, branch, target_field_hat, defaults, default_count)
+    default_count = 0
+    if (params%search%use_default_guesses) call make_branch_guesses(params, branch, target_field_hat, defaults, default_count)
     guesses(:, guess_count + 1:guess_count + default_count) = defaults(:, :default_count)
     guess_count = guess_count + default_count
 
-    do guess_index = 1, guess_count
+    do guess_index = 1, min(guess_count, params%search%max_starts)
       diagnostics%starts(k) = diagnostics%starts(k) + 1
-      call newton_field_branch( &
+      call solve_field_branch( &
           params, branch, target_field_hat, &
           guesses(:, guess_index), y, &
           norm, iterations, &
-          success &
+          success, evaluations, lm_steps &
           )
+      diagnostics%evaluations(k) = diagnostics%evaluations(k) + evaluations
+      diagnostics%iterations(k) = diagnostics%iterations(k) + iterations
+      diagnostics%lm_steps(k) = diagnostics%lm_steps(k) + lm_steps
+      diagnostics%best_residual(k) = min(diagnostics%best_residual(k), norm)
       if (.not. success) then
         diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1
         cycle
@@ -240,7 +245,7 @@ contains
 
       candidate_root = zhao_field_root()
       candidate_root%branch = branch
-      call decode_field_unknowns(params, branch, y, candidate_root%phi0_v, candidate_root%phi_m_v, &
+      call decode_unknowns(params, branch, y, candidate_root%phi0_v, candidate_root%phi_m_v, &
           candidate_root%ambient_electron_density_m3, success)
       if (.not. success) then
         diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1

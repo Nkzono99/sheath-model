@@ -11,101 +11,6 @@ submodule(sheath_model_field) sheath_model_field_physics
 
 contains
 
-  module subroutine encode_field_unknowns( &
-      params, branch, &
-      phi0_v, phi_m_v, density_m3, &
-      y, valid &
-      )
-    type(zhao_params_type), intent(in) :: params
-    character(len=1), intent(in) :: branch
-    real(dp), intent(in) :: phi0_v, phi_m_v, density_m3
-    real(dp), intent(out) :: y(3)
-    logical, intent(out) :: valid
-
-    y = 0.0_dp
-    valid = density_m3 > 0.0_dp .and. params%density_scale_m3 > 0.0_dp .and. params%potential_scale_v > 0.0_dp
-    if (.not. valid) return
-
-    select case (branch)
-    case ('A')
-      valid = phi_m_v < min(phi0_v, 0.0_dp)
-      if (.not. valid) return
-
-      y(1) = log((phi0_v - phi_m_v)/params%potential_scale_v)
-      y(2) = log(-phi_m_v/params%potential_scale_v)
-      y(3) = log(density_m3/params%density_scale_m3)
-    case ('B')
-      valid = phi0_v > 0.0_dp
-      if (.not. valid) return
-
-      y(1) = log(phi0_v/params%potential_scale_v)
-      y(2) = log(density_m3/params%density_scale_m3)
-    case ('C')
-      valid = phi0_v < 0.0_dp
-      if (.not. valid) return
-
-      y(1) = log(-phi0_v/params%potential_scale_v)
-      y(2) = log(density_m3/params%density_scale_m3)
-    case default
-      valid = .false.
-    end select
-
-    valid = valid .and. all(ieee_is_finite(y))
-  end subroutine encode_field_unknowns
-
-  module subroutine decode_field_unknowns( &
-      params, branch, y, &
-      phi0_v, phi_m_v, density_m3, &
-      valid &
-      )
-    type(zhao_params_type), intent(in) :: params
-    character(len=1), intent(in) :: branch
-    real(dp), intent(in) :: y(3)
-    real(dp), intent(out) :: phi0_v, phi_m_v, density_m3
-    logical, intent(out) :: valid
-
-    phi0_v = 0.0_dp
-    phi_m_v = 0.0_dp
-    density_m3 = 0.0_dp
-    valid = all(ieee_is_finite(y))
-    if (.not. valid .or. y(1) < -50.0_dp .or. y(1) > log(200.0_dp)) then
-      valid = .false.
-      return
-    end if
-
-    select case (branch)
-    case ('A')
-      if (y(2) < -50.0_dp .or. y(2) > log(200.0_dp) .or. &
-          y(3) < -30.0_dp .or. y(3) > log(1.0e6_dp)) then
-        valid = .false.
-        return
-      end if
-      phi_m_v = -params%potential_scale_v*exp(y(2))
-      phi0_v = phi_m_v + params%potential_scale_v*exp(y(1))
-      density_m3 = params%density_scale_m3*exp(y(3))
-    case ('B')
-      if (y(2) < -30.0_dp .or. y(2) > log(1.0e6_dp)) then
-        valid = .false.
-        return
-      end if
-      phi0_v = params%potential_scale_v*exp(y(1))
-      phi_m_v = 0.0_dp
-      density_m3 = params%density_scale_m3*exp(y(2))
-    case ('C')
-      if (y(2) < -30.0_dp .or. y(2) > log(1.0e6_dp)) then
-        valid = .false.
-        return
-      end if
-      phi0_v = -params%potential_scale_v*exp(y(1))
-      phi_m_v = phi0_v
-      density_m3 = params%density_scale_m3*exp(y(2))
-    case default
-      valid = .false.
-    end select
-
-    valid = valid .and. all(ieee_is_finite([phi0_v, phi_m_v, density_m3]))
-  end subroutine decode_field_unknowns
-
   module subroutine evaluate_charge_residual( &
       params, branch, target_field_hat, &
       y, residual, valid &
@@ -122,7 +27,7 @@ contains
     logical :: integral_ok
 
     residual = 0.0_dp
-    call decode_field_unknowns( &
+    call decode_unknowns( &
         params, branch, y, phi0_v, phi_m_v, density_m3, valid &
         )
     if (.not. valid) return
@@ -151,10 +56,9 @@ contains
       field_residual_scale = max(1.0_dp, target_field_hat*target_field_hat)
       residual(1) = raw(1)/params%density_scale_m3
       residual(2) = (field_squared - target_field_hat*target_field_hat)/field_residual_scale
-      residual(3) = raw(3)
-      if (params%photoelectrons%is_binned()) then
-        residual(3) = raw(3)/(-phi_m_hat)**1.5_dp
-      end if
+      ! A shrinking upper segment makes the unscaled integral vanish even
+      ! without a connection. Scale every source by its leading depth^(3/2).
+      residual(3) = raw(3)/(-phi_m_hat)**1.5_dp
     case ('B', 'C')
       x2 = [phi0_v, density_m3]
       if (branch == 'B') then

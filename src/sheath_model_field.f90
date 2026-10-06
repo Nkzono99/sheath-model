@@ -7,6 +7,8 @@ module sheath_model_field
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NO_PHYSICAL_SOLUTION, SHEATH_NUMERICAL_FAILURE, &
       SHEATH_AMBIGUOUS_SOLUTION
   use sheath_model_core, only: zhao_params_type, neutral_electron_density, evaluate_zhao_fluxes
+  use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, valid_search_options
+  use sheath_model_coordinates, only: encode_unknowns, decode_unknowns, make_branch_guesses
   use sheath_model_state, only: zhao_plasma_input, prepare_plasma_params
 
   implicit none
@@ -14,25 +16,14 @@ module sheath_model_field
   private
 
   public :: zhao_field_input, zhao_field_result, solve_prescribed_field, solve_prescribed_field_candidates
-  public :: zhao_field_search_diagnostics
+  public :: sheath_search_diagnostics
 
   integer, parameter :: default_field_starts = 16
-
-  !> Search diagnostics for branches A, B and C, stored in that array order.
-  !! Counters except roots_found describe initial guesses, not distinct roots; success need not resolve every start.
-  type :: zhao_field_search_diagnostics
-    logical :: searched(3) = .false.
-    logical :: excluded(3) = .false.
-    integer(i32) :: starts(3) = 0
-    integer(i32) :: unconverged(3) = 0
-    integer(i32) :: rejected(3) = 0
-    integer(i32) :: profile_failures(3) = 0
-    integer(i32) :: roots_found(3) = 0
-  end type zhao_field_search_diagnostics
 
   !> Plasma inputs and prescribed normal field E_H [V/m]; branch selects A/B/C/auto.
   !! Other quantities use SI units except temperatures/normal energies [eV]; field is positive outward, drift positive inward.
   type, extends(zhao_plasma_input) :: zhao_field_input
+    type(sheath_search_options) :: search
     character(len=9) :: branch = 'auto'
     real(dp) :: electric_field_v_m = 0.0_dp
   end type zhao_field_input
@@ -79,7 +70,7 @@ module sheath_model_field
       type(zhao_field_root), intent(out) :: root
       integer(i32), intent(out) :: status
       character(len=*), intent(out) :: message
-      type(zhao_field_search_diagnostics), intent(out) :: diagnostics
+      type(sheath_search_diagnostics), intent(out) :: diagnostics
       type(zhao_field_result), intent(in), optional :: initial_guesses(:)
     end subroutine solve_field_root
 
@@ -94,58 +85,23 @@ module sheath_model_field
       type(zhao_field_root), allocatable, intent(out) :: roots(:)
       integer(i32), intent(out) :: status
       character(len=*), intent(out) :: message
-      type(zhao_field_search_diagnostics), intent(out) :: diagnostics
+      type(sheath_search_diagnostics), intent(out) :: diagnostics
       type(zhao_field_result), intent(in), optional :: initial_guesses(:)
     end subroutine find_field_roots
 
-    module subroutine make_field_branch_guesses( &
-        params, branch, target_field_hat, &
-        guesses, count &
-        )
-      type(zhao_params_type), intent(in) :: params
-      character(len=1), intent(in) :: branch
-      real(dp), intent(in) :: target_field_hat
-      real(dp), intent(out) :: guesses(3, default_field_starts)
-      integer, intent(out) :: count
-    end subroutine make_field_branch_guesses
-
-    module subroutine newton_field_branch( &
+    module subroutine solve_field_branch( &
         params, branch, target_field_hat, &
         y0, y_out, &
         final_norm, iterations, &
-        success &
+        success, evaluations, lm_steps &
         )
       type(zhao_params_type), intent(in) :: params
       character(len=1), intent(in) :: branch
       real(dp), intent(in) :: target_field_hat, y0(3)
       real(dp), intent(out) :: y_out(3), final_norm
-      integer, intent(out) :: iterations
+      integer, intent(out) :: iterations, evaluations, lm_steps
       logical, intent(out) :: success
-    end subroutine newton_field_branch
-
-    module subroutine encode_field_unknowns( &
-        params, branch, &
-        phi0_v, phi_m_v, density_m3, &
-        y, valid &
-        )
-      type(zhao_params_type), intent(in) :: params
-      character(len=1), intent(in) :: branch
-      real(dp), intent(in) :: phi0_v, phi_m_v, density_m3
-      real(dp), intent(out) :: y(3)
-      logical, intent(out) :: valid
-    end subroutine encode_field_unknowns
-
-    module subroutine decode_field_unknowns( &
-        params, branch, y, &
-        phi0_v, phi_m_v, density_m3, &
-        valid &
-        )
-      type(zhao_params_type), intent(in) :: params
-      character(len=1), intent(in) :: branch
-      real(dp), intent(in) :: y(3)
-      real(dp), intent(out) :: phi0_v, phi_m_v, density_m3
-      logical, intent(out) :: valid
-    end subroutine decode_field_unknowns
+    end subroutine solve_field_branch
 
     module subroutine evaluate_charge_residual( &
         params, branch, target_field_hat, &
@@ -185,17 +141,17 @@ contains
     type(zhao_field_result), intent(out) :: output
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
-    type(zhao_field_search_diagnostics), intent(out), optional :: diagnostics
+    type(sheath_search_diagnostics), intent(out), optional :: diagnostics
     type(zhao_field_result), intent(in), optional :: initial_guesses(:)
 
     type(zhao_params_type) :: params
     type(zhao_field_root) :: root
-    type(zhao_field_search_diagnostics) :: search
+    type(sheath_search_diagnostics) :: search
     character(len=256) :: search_message
 
     output = zhao_field_result()
     if (present(diagnostics)) then
-      diagnostics = zhao_field_search_diagnostics()
+      diagnostics = sheath_search_diagnostics()
     end if
     call prepare_field_params(input, params, status, message)
     if (status /= SHEATH_OK) return
@@ -230,17 +186,17 @@ contains
     type(zhao_field_result), allocatable, intent(out) :: outputs(:)
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
-    type(zhao_field_search_diagnostics), intent(out), optional :: diagnostics
+    type(sheath_search_diagnostics), intent(out), optional :: diagnostics
     type(zhao_field_result), intent(in), optional :: initial_guesses(:)
 
     type(zhao_params_type) :: params
     type(zhao_field_root), allocatable :: roots(:)
-    type(zhao_field_search_diagnostics) :: search
+    type(sheath_search_diagnostics) :: search
     character(len=256) :: search_message
     integer :: i
 
     if (present(diagnostics)) then
-      diagnostics = zhao_field_search_diagnostics()
+      diagnostics = sheath_search_diagnostics()
     end if
     call prepare_field_params(input, params, status, message)
     if (status /= SHEATH_OK) return
@@ -326,7 +282,11 @@ contains
 
     message = 'The prescribed field must be finite.'
     if (.not. ieee_is_finite(input%electric_field_v_m)) return
+    message = 'Invalid search options; prescribed-field search supports auto, newton, or lm.'
+    if (.not. valid_search_options(input%search) .or. trim(lower_ascii(input%search%method)) == 'bracket') return
     call prepare_plasma_params(input, params, status, message)
+    params%search = input%search
+    params%search%method = lower_ascii(params%search%method)
   end subroutine prepare_field_params
 
 end module sheath_model_field

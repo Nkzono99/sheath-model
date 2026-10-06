@@ -109,12 +109,14 @@ class OrbitTests(unittest.TestCase):
             np.testing.assert_allclose(currents, 0.0, atol=1e-14)
 
     def test_reject_inadmissible_algebraic_roots(self):
-        with self.assertRaisesRegex(RuntimeError, "near neutral infinity"):
+        with self.assertRaises(RuntimeError) as caught:
             ZhaoSheathSolver(ZhaoParams()).solve_unknowns("A")
-        with self.assertRaisesRegex(RuntimeError, "no real connecting"):
+        self.assertTrue(caught.exception.diagnostics.excluded[0])
+        with self.assertRaises(RuntimeError) as caught:
             ZhaoSheathSolver(
                 ZhaoParams(alpha_deg=1.0, electron_drift_mode="zero")
             ).solve_unknowns("C")
+        self.assertGreater(caught.exception.diagnostics.rejected[2], 0)
         root = ZhaoSheathSolver(
             ZhaoParams(alpha_deg=19.0, electron_drift_mode="zero")
         ).solve_unknowns("A")

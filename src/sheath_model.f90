@@ -15,7 +15,7 @@ module sheath_model
       zhao_density_result, solve_equilibrium, evaluate_density, &
       zhao_profile_options, zhao_profile_result, solve_profile
   use sheath_model_field, only: zhao_field_input, zhao_field_result, solve_prescribed_field, solve_prescribed_field_candidates
-  use sheath_model_field, only: zhao_field_search_diagnostics
+  use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics
   implicit none
 
   private
@@ -29,5 +29,5 @@ module sheath_model
   public :: solve_equilibrium, evaluate_density, solve_profile
   public :: zhao_profile_options, zhao_profile_result
   public :: zhao_field_input, zhao_field_result, solve_prescribed_field, solve_prescribed_field_candidates
-  public :: zhao_field_search_diagnostics
+  public :: sheath_search_options, sheath_search_diagnostics
 end module sheath_model

@@ -69,7 +69,9 @@ class FixedEntryTests(unittest.TestCase):
         self.assertLess(profile["phi0_V"], 0.)
         np.testing.assert_array_equal(profile["n_phe_f_hat"], 0.)
         self.assertAlmostEqual(solver.fluxes_at_z(profile, 0.)["J_net_Apm2"], 0., delta=1e-12)
-        self.assertEqual(FixedEntrySheathSolver(FixedEntryParams()).solve_auto()["branch"], "C")
+        automatic = FixedEntrySheathSolver(FixedEntryParams()).solve_auto()
+        self.assertEqual(automatic["branch"], "C")
+        self.assertEqual(automatic["search_diagnostics"].searched, [True, True, True])
 
     def test_invalid_inputs_and_no_speed_correction(self):
         for extra in ({"ion_entry_speed_mps": 0.}, {"ion_entry_speed_mps": math.nan},

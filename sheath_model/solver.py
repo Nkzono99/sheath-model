@@ -7,17 +7,17 @@ See docs/kinetic-model.md for the reservoir closure and admissibility conditions
 from __future__ import annotations
 
 import math
-from typing import Dict, Iterable, Literal
+from typing import Dict, Literal
 
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
-from scipy.optimize import root
 from scipy.special import erf, erfc
 from ._orbits import electron_density, POTENTIAL_NODES, POTENTIAL_WEIGHTS
 from ._ions import ion_density_ratio, ion_critical_potential
 
 from ._constants import QE, ME
 from .params import FixedEntryParams, ZhaoParams
+from .search import SearchOptions, SearchDiagnostics, SearchFailure, solve_guarded_system
 
 Branch = Literal["A", "B", "C"]
 TypeASide = Literal["lower", "upper"]
@@ -26,8 +26,11 @@ ZUnit = Literal["hat", "m"]
 
 
 class _SheathSolver:
-    def __init__(self, params: FixedEntryParams | ZhaoParams):
+    def __init__(self, params: FixedEntryParams | ZhaoParams, *, search: SearchOptions | None = None):
         self.p = params
+        self.search = search if search is not None else SearchOptions()
+        if not isinstance(self.search, SearchOptions):
+            raise TypeError("search must be SearchOptions")
         if isinstance(params, ZhaoParams):
             if not math.isfinite(params.alpha_deg) or not 0 <= params.alpha_deg <= 90:
                 raise ValueError("alpha_deg must be finite and in [0, 90]")
@@ -180,99 +183,235 @@ class _SheathSolver:
 
         return np.array([r1, r2], dtype=float)
 
-    def _try_root_guesses(self, func, guesses: Iterable[np.ndarray]) -> np.ndarray:
-        def scaled(x):
-            values = func(x).copy()
-            values[:2] /= self.p.density_scale_m3
-            return values
-        best = None
-        best_norm = float("inf")
-        for guess in guesses:
-            sol = root(scaled, np.asarray(guess, dtype=float), method="hybr", options={"xtol": 1e-10})
-            fnorm = (
-                float(np.linalg.norm(sol.fun)) if sol.fun is not None else float("inf")
-            )
-            if np.all(np.isfinite(sol.x)) and fnorm < best_norm:
-                best = sol
-                best_norm = fnorm
-            if sol.success and np.all(np.isfinite(sol.x)) and fnorm < 1e-10:
-                return np.asarray(sol.x, dtype=float)
-        if best is None or best_norm > 1e-10:
-            raise RuntimeError(
-                f"root solve failed; best residual norm={best_norm:.3e}, "
-                f"x={None if best is None else best.x}, fun={None if best is None else best.fun}"
-            )
-        return np.asarray(best.x, dtype=float)
+    def _encode_unknowns(self, branch, physical):
+        phi0, phim, density = physical
+        scale = self.p.photoelectron_temperature_ev
+        if not np.all(np.isfinite(physical)) or density <= 0:
+            return None
+        if branch == "A":
+            if phim >= min(phi0, 0.):
+                return None
+            return np.log([(phi0-phim)/scale, -phim/scale, density/self.p.ion_density_m3])
+        if (branch == "B" and phi0 <= 0) or (branch == "C" and phi0 >= 0):
+            return None
+        return np.log([abs(phi0)/scale, density/self.p.ion_density_m3])
 
-    def solve_unknowns(
-        self, branch: Branch, guess: tuple[float, ...] | None = None
-    ) -> Dict[str, float | str]:
+    def _decode_unknowns(self, branch, y, options):
+        if not np.all(np.isfinite(y)) or min(y) < -50 or max(y) > 700:
+            return None
+        if y[-1] < -30 or y[-1] > math.log(1e6) or y[0] > math.log(options.potential_extent):
+            return None
+        p = self.p
+        if branch == "A":
+            if y[1] > math.log(options.potential_extent):
+                return None
+            phim = -p.photoelectron_temperature_ev*math.exp(y[1])
+            phi0 = phim + p.photoelectron_temperature_ev*math.exp(y[0])
+        else:
+            phi0 = (1 if branch == "B" else -1)*p.photoelectron_temperature_ev*math.exp(y[0])
+            phim = 0. if branch == "B" else phi0
+        density = p.ion_density_m3*math.exp(y[-1])
+        if not math.isfinite(density) or density <= 0:
+            return None
+        try:
+            self._ion_density_hat(max(phi0, 0)/p.photoelectron_temperature_ev)
+        except ValueError:
+            return None
+        return np.array([phi0, phim, density])
+
+    def _default_guesses(self, branch, options):
+        p = self.p
+        source_shift = math.log(max(1., .5*p.photoelectron_density_m3/p.ion_density_m3))
+        limit = ion_critical_potential(.5*p.electron_temperature_ev*p.mach**2,
+                                      p.ion_pressure_factor*p.ion_temperature_ev)/p.photoelectron_temperature_ev
+        potentials = []
+        if branch == "A":
+            for gap, depth in zip((2., 1., .5, 3., 1., 1., 1., .02), (.2, .05, .5, .8, 1., 2., 4., .5)):
+                potentials.extend(((gap-depth, -depth), (gap+source_shift-depth, -depth)))
+        else:
+            for voltage in (.002, .02, .2, .6, 1.5, 4., 12., 50.):
+                potentials.extend(((voltage, 0.), (source_shift+voltage*1e-10, 0.)) if branch == "B" else
+                                  ((-voltage, -voltage), (-min(180., voltage*max(1e-10, source_shift)),)*2))
+        guesses = []
+        for surface, minimum in potentials:
+            surface = min(surface, .8*limit, .9*options.potential_extent)
+            if branch == "A":
+                minimum = max(-.9*options.potential_extent, min(minimum, surface-1e-6))
+            elif branch == "C":
+                surface = max(-.9*options.potential_extent, surface)
+                minimum = surface
+            else:
+                minimum = 0.
+            phi0, phim = np.array([surface, minimum])*p.photoelectron_temperature_ev
+            # The neutrality equation is affine in electron normalization.
+            func = getattr(self, "_residuals_type_"+branch.lower())
+            x0 = [phi0, phim, p.ion_density_m3] if branch == "A" else [phi0, p.ion_density_m3]
+            x1 = [phi0, phim, 2*p.ion_density_m3] if branch == "A" else [phi0, 2*p.ion_density_m3]
+            f0, f1 = func(np.array(x0))[0], func(np.array(x1))[0]
+            if not math.isfinite(f1-f0) or f1 == f0:
+                continue
+            density = p.ion_density_m3*(1-f0/(f1-f0))
+            density = max(.1*p.ion_density_m3, min(1e5*p.ion_density_m3, density))
+            encoded = self._encode_unknowns(branch, [phi0, phim, density])
+            if encoded is not None and not any(np.max(np.abs(encoded-other)) < 1e-10 for other in guesses):
+                guesses.append(encoded)
+        return guesses
+
+    def solve_unknowns(self, branch: Branch, guess: tuple[float, ...] | None = None,
+                       *, search: SearchOptions | None = None) -> dict[str, float | str | SearchDiagnostics]:
+        """Find the first physically connecting root; attach search_diagnostics.
+
+        guess is (surface V, minimum V, density m^-3) for A, or (surface V,
+        density m^-3) for B/C. It supplements independent starts. To run only
+        a continuation seed, set use_default_guesses=False and method=newton/lm.
+        """
         p = self.p
         self._validate_params_for_branch(branch)
-        if branch == "A":
-            guesses = (
-                [np.array(guess, dtype=float)]
-                if guess is not None
-                else [
-                    np.array([3.6, -0.5, 8.2e6]),
-                    np.array([2.8, -0.3, 8.0e6]),
-                    np.array([4.5, -0.8, 8.4e6]),
-                    np.array([-0.4, -1.7, 8.0e6]),
-                    np.array([-2.2, -4.4, 8.0e6]),
-                ]
-            )
-            phi0_V, phi_m_V, n_swe_inf_m3 = self._try_root_guesses(
-                self._residuals_type_a, guesses
-            )
-        elif branch == "B":
-            guesses = (
-                [np.array(guess, dtype=float)]
-                if guess is not None
-                else [
-                    np.array([1.3, 7.0e6]),
-                    np.array([0.8, 6.5e6]),
-                    np.array([2.0, 7.8e6]),
-                ]
-            )
-            phi0_V, n_swe_inf_m3 = self._try_root_guesses(
-                self._residuals_type_b, guesses
-            )
-            phi_m_V = 0.0
-        elif branch == "C":
-            guesses = (
-                [np.array(guess, dtype=float)]
-                if guess is not None
-                else [
-                    np.array([-0.5, 6.0e6]),
-                    np.array([-2.0, 7.0e6]),
-                    np.array([-5.0, 8.0e6]),
-                    np.array([-10.0, 8.2e6]),
-                    np.array([-15.0, 8.5e6]),
-                ]
-            )
-            phi0_V, n_swe_inf_m3 = self._try_root_guesses(
-                self._residuals_type_c, guesses
-            )
-            phi_m_V = phi0_V
-        else:
-            raise ValueError(f"unknown branch: {branch}")
+        options = self.search if search is None else search
+        if not isinstance(options, SearchOptions):
+            raise TypeError("search must be SearchOptions")
+        if options.method == "bracket" and branch == "A":
+            raise ValueError("bracket supports only B/C J=0 branches")
+        diagnostics = SearchDiagnostics()
+        k = "ABC".index(branch)
+        diagnostics.searched[k] = True
+        if branch in ("A", "C") and p.u > 0:
+            diagnostics.excluded[k] = True
+            raise SearchFailure("reflected drifting electrons have no neutral semi-infinite profile", diagnostics)
+        func = getattr(self, "_residuals_type_"+branch.lower())
 
-        self._validate_profile_root(branch, phi0_V / p.photoelectron_temperature_ev,
-                                    0.0 if branch == "B" else phi_m_V / p.photoelectron_temperature_ev,
-                                    n_swe_inf_m3 / p.density_scale_m3)
-        return {
-            "branch": branch,
-            "phi0_V": float(phi0_V),
-            "phi_m_V": float(phi_m_V),
-            "n_swe_inf_m3": float(n_swe_inf_m3),
-            "phi0_hat": float(phi0_V / p.photoelectron_temperature_ev),
-            "phi_m_hat": (
-                float(phi_m_V / p.photoelectron_temperature_ev) if math.isfinite(phi_m_V) else math.nan
-            ),
-            "n_swe_inf_hat": float(n_swe_inf_m3 / p.density_scale_m3),
-            "electron_drift_mps": p.electron_drift_mps,
-            "ion_entry_speed_mps": p.ion_entry_speed_mps,
-        }
+        def residual(y):
+            physical = self._decode_unknowns(branch, y, options)
+            if physical is None:
+                return None
+            raw = func(physical if branch == "A" else physical[[0, 2]])
+            raw[:2] /= p.ion_density_m3
+            if branch == "A":
+                raw[2] *= p.density_scale_m3/p.ion_density_m3/(-physical[1]/p.photoelectron_temperature_ev)**1.5
+            return raw
+
+        def accept(physical):
+            try:
+                self._validate_profile_root(branch, physical[0]/p.photoelectron_temperature_ev,
+                                            physical[1]/p.photoelectron_temperature_ev,
+                                            physical[2]/p.density_scale_m3)
+            except FloatingPointError:
+                diagnostics.profile_failures[k] += 1
+                return False
+            except RuntimeError:
+                diagnostics.rejected[k] += 1
+                return False
+            diagnostics.roots_found[k] += 1
+            return True
+
+        def multivariate(starts):
+            for encoded in starts:
+                if diagnostics.starts[k] >= options.max_starts:
+                    break
+                diagnostics.starts[k] += 1
+                y, norm, success = solve_guarded_system(residual, encoded, options, diagnostics, k)
+                if not success:
+                    diagnostics.unconverged[k] += 1
+                    continue
+                physical = self._decode_unknowns(branch, y, options)
+                if physical is not None and accept(physical):
+                    return physical
+            return None
+
+        seeds = []
+        if guess is not None:
+            if len(guess) != (3 if branch == "A" else 2):
+                raise ValueError("guess has wrong number of unknowns")
+            physical = guess if branch == "A" else (guess[0], 0. if branch == "B" else guess[0], guess[1])
+            encoded = self._encode_unknowns(branch, physical)
+            if encoded is None:
+                raise ValueError("guess must be finite and satisfy branch signs and positive density")
+            seeds.append(encoded)
+        found = multivariate(seeds) if options.method != "bracket" else None
+        if found is None and branch != "A" and options.method in ("auto", "bracket"):
+            found = self._scalar_search(branch, options, diagnostics, accept)
+        if found is None and options.method != "bracket" and options.use_default_guesses:
+            found = multivariate(self._default_guesses(branch, options))
+        if found is None:
+            raise SearchFailure(f"finite {options.method} search found no admissible {branch} root; "
+                                f"best residual={diagnostics.best_residual[k]:.3e}, "
+                                f"unconverged={diagnostics.unconverged[k]}, rejected={diagnostics.rejected[k]}", diagnostics)
+        phi0_V, phi_m_V, n_swe_inf_m3 = found
+        return {"branch": branch, "phi0_V": float(phi0_V), "phi_m_V": float(phi_m_V),
+                "n_swe_inf_m3": float(n_swe_inf_m3),
+                "phi0_hat": float(phi0_V/p.photoelectron_temperature_ev),
+                "phi_m_hat": float(phi_m_V/p.photoelectron_temperature_ev),
+                "n_swe_inf_hat": float(n_swe_inf_m3/p.density_scale_m3),
+                "electron_drift_mps": p.electron_drift_mps,
+                "ion_entry_speed_mps": p.ion_entry_speed_mps,
+                "search_diagnostics": diagnostics}
+
+    def _scalar_search(self, branch, options, diagnostics, accept):
+        p = self.p
+        k = "ABC".index(branch)
+        limit = options.potential_extent*p.photoelectron_temperature_ev
+        if branch == "B":
+            limit = min(limit, np.nextafter(ion_critical_potential(.5*p.electron_temperature_ev*p.mach**2,
+                               p.ion_pressure_factor*p.ion_temperature_ev), -math.inf))
+        grid = np.unique(np.concatenate((limit*np.exp(np.linspace(-28., 0., options.bracket_points)),
+                                        limit*np.arange(1, options.bracket_points+1)/options.bracket_points)))
+        if branch == "C":
+            grid = -grid
+        func = self._residuals_type_b if branch == "B" else self._residuals_type_c
+        ion_term = p.ion_density_m3*math.sqrt(2*math.pi*p.electron_temperature_ev/
+                   p.photoelectron_temperature_ev*ME/p.ion_mass_kg)*p.mach
+
+        def evaluate(phi):
+            diagnostics.evaluations[k] += 1
+            cutoff = -p.u if branch == "B" else math.sqrt(-phi/p.electron_temperature_ev)-p.u
+            coefficient = self._swe_free_current_term(1., cutoff)
+            source = p.photoelectron_density_m3*(math.exp(-phi/p.photoelectron_temperature_ev) if branch == "B" else 1.)
+            if coefficient <= 0 or not math.isfinite(coefficient):
+                return None
+            density = (source+ion_term)/coefficient
+            raw = func(np.array([phi, density]))/p.ion_density_m3
+            if not np.all(np.isfinite(raw)) or density <= 0 or abs(raw[1]) > options.residual_tolerance:
+                return None
+            diagnostics.best_residual[k] = min(diagnostics.best_residual[k], float(np.max(np.abs(raw))))
+            return float(raw[0]), density
+
+        previous = None
+        for phi in grid:
+            value = evaluate(phi)
+            if value is None:
+                previous = None
+                continue
+            f, density = value
+            located = abs(f) <= options.residual_tolerance
+            trial_phi = phi
+            if not located and previous is not None and np.signbit(f) != np.signbit(previous[1]):
+                diagnostics.brackets[k] += 1
+                lo, flo, hi = previous[0], previous[1], phi
+                for _ in range(options.max_iterations):
+                    mid = .5*lo+.5*hi
+                    if mid == lo or mid == hi:
+                        break
+                    diagnostics.iterations[k] += 1
+                    middle = evaluate(mid)
+                    if middle is None:
+                        break
+                    fm, density = middle
+                    if abs(fm) <= options.residual_tolerance:
+                        trial_phi = mid
+                        located = True
+                        break
+                    if np.signbit(flo) != np.signbit(fm):
+                        hi = mid
+                    else:
+                        lo, flo = mid, fm
+                if not located:
+                    diagnostics.unconverged[k] += 1
+            if located:
+                physical = np.array([trial_phi, 0. if branch == "B" else trial_phi, density])
+                if accept(physical):
+                    return physical
+            previous = (phi, f)
+        return None
 
     def _validate_profile_root(self, branch, phi0, phim, density):
         if branch == "B" and phi0 > 0:
@@ -298,7 +437,9 @@ class _SheathSolver:
                 e2 = (-2*self._integrate_rho(branch, side, phim, phi, phi0, phim, density) if branch == "A" else
                       2*self._integrate_rho(branch, side, phi, 0., phi0, phim, density))
                 values.append(e2)
-        if not np.all(np.isfinite(values)) or min(values) < -1e-8*max(1., max(values)):
+        if not np.all(np.isfinite(values)):
+            raise FloatingPointError("profile field integration is non-finite")
+        if min(values) < -1e-8*max(1., max(values)):
             raise RuntimeError("algebraic root has no real connecting field profile")
 
     # ------------------------------------------------------------------
@@ -455,7 +596,7 @@ class _SheathSolver:
 
     def _build_type_a_profile(
         self, uk: Dict[str, float | str]
-    ) -> Dict[str, np.ndarray | float | str]:
+    ) -> Dict[str, np.ndarray | float | str | SearchDiagnostics]:
         p = self.p
         phi0_hat = float(uk["phi0_hat"])
         phi_m_hat = float(uk["phi_m_hat"])
@@ -519,7 +660,7 @@ class _SheathSolver:
         ehat = ehat[keep]
         dens = {k: v[keep] for k, v in dens.items()}
 
-        out: Dict[str, np.ndarray | float | str] = {
+        out: Dict[str, np.ndarray | float | str | SearchDiagnostics] = {
             **uk,
             "z_hat": z_hat,
             "z_m_hat": z_m_hat,
@@ -546,7 +687,7 @@ class _SheathSolver:
     # ------------------------------------------------------------------
     def solve_profile(
         self, branch: Branch, guess_unknowns: tuple[float, ...] | None = None
-    ) -> Dict[str, np.ndarray | float | str]:
+    ) -> Dict[str, np.ndarray | float | str | SearchDiagnostics]:
         p = self.p
         uk = self.solve_unknowns(branch, guess_unknowns)
 
@@ -578,7 +719,7 @@ class _SheathSolver:
         e_hat = -math.copysign(1., phi0_hat)*np.sqrt(e2)
         dens = self._densities_hat(branch, phi_hat, phi0_hat, n_swe_inf_hat, phi_m_hat)
 
-        out: Dict[str, np.ndarray | float | str] = {
+        out: Dict[str, np.ndarray | float | str | SearchDiagnostics] = {
             **uk,
             "z_hat": z_hat,
             "z_m_hat": float(z_hat[np.argmin(phi_hat)]),
@@ -600,18 +741,29 @@ class _SheathSolver:
         out["rho_hat"] = out["n_swi_hat"] - out["n_total_hat"]
         return out
 
-    def solve_auto(self) -> Dict[str, np.ndarray | float | str]:
+    def solve_auto(self) -> Dict[str, np.ndarray | float | str | SearchDiagnostics]:
+        if self.search.method == "bracket":
+            raise ValueError("bracket requires an explicit B/C branch")
         if isinstance(self.p, ZhaoParams) and self.p.alpha_deg < 20.0:
             order: list[Branch] = ["C", "A", "B"]
         else:
             order = ["A", "B", "C"]
         errs = []
+        diagnostics = SearchDiagnostics()
         for br in order:
             try:
-                return self.solve_profile(br)
-            except Exception as exc:  # noqa: BLE001
+                profile = self.solve_profile(br)
+                diagnostics.include(profile["search_diagnostics"])
+                profile["search_diagnostics"] = diagnostics
+                return profile
+            except SearchFailure as exc:
+                diagnostics.include(exc.diagnostics)
                 errs.append(f"{br}: {exc}")
-        raise RuntimeError("auto branch selection failed: " + " | ".join(errs))
+            except (RuntimeError, ValueError, FloatingPointError) as exc:
+                diagnostics.searched["ABC".index(br)] = True
+                diagnostics.profile_failures["ABC".index(br)] += 1
+                errs.append(f"{br}: {exc}")
+        raise SearchFailure("auto branch selection failed: " + " | ".join(errs), diagnostics)
 
     # ------------------------------------------------------------------
     # Local diagnostics: densities, fluxes, reduced 1D VDFs
@@ -624,10 +776,12 @@ class _SheathSolver:
         raise ValueError(f"unknown z unit: {unit}")
 
     @staticmethod
-    def _interp_on_profile(profile: Dict[str, np.ndarray | float | str], key: str, z_hat: float) -> float:
+    def _interp_on_profile(profile: Dict[str, np.ndarray | float | str | SearchDiagnostics], key: str, z_hat: float) -> float:
         z_arr = np.asarray(profile["z_hat"], dtype=float)
         y_arr = np.asarray(profile[key], dtype=float)
-        if z_hat < float(z_arr[0]) or z_hat > float(z_arr[-1]):
+        # SI -> normalized round trips can put an endpoint one ulp outside.
+        allowance = 4*np.spacing(max(1., abs(z_arr[0]), abs(z_arr[-1])))
+        if not math.isfinite(z_hat) or z_hat < float(z_arr[0])-allowance or z_hat > float(z_arr[-1])+allowance:
             raise ValueError(
                 f"requested z_hat={z_hat:.6g} is outside the solved interval "
                 f"[{float(z_arr[0]):.6g}, {float(z_arr[-1]):.6g}]"
@@ -636,7 +790,7 @@ class _SheathSolver:
 
     def sample_at_z(
         self,
-        profile: Dict[str, np.ndarray | float | str],
+        profile: Dict[str, np.ndarray | float | str | SearchDiagnostics],
         z: float,
         unit: ZUnit = "hat",
     ) -> Dict[str, float | str]:
@@ -836,7 +990,7 @@ class _SheathSolver:
         state: Dict[str, float | str],
         vz_mps: np.ndarray,
         ion_sigma_frac: float,
-    ) -> Dict[str, np.ndarray | float | str]:
+    ) -> Dict[str, np.ndarray | float | str | SearchDiagnostics]:
         p = self.p
         if p.ion_temperature_ev > 0:
             raise ValueError("warm-ion fluid pressure does not define an ion VDF; request electron species")
@@ -857,7 +1011,7 @@ class _SheathSolver:
 
     def vdf_1d_at_z(
         self,
-        profile: Dict[str, np.ndarray | float | str],
+        profile: Dict[str, np.ndarray | float | str | SearchDiagnostics],
         z: float,
         species: Species = "all",
         unit: ZUnit = "hat",
@@ -887,7 +1041,7 @@ class _SheathSolver:
 
     def fluxes_at_z(
         self,
-        profile: Dict[str, np.ndarray | float | str],
+        profile: Dict[str, np.ndarray | float | str | SearchDiagnostics],
         z: float,
         unit: ZUnit = "hat",
     ) -> Dict[str, float | str]:
@@ -971,16 +1125,16 @@ class FixedEntrySheathSolver(_SheathSolver):
     fluid transport, without defining an ion velocity distribution.
     """
 
-    def __init__(self, params: FixedEntryParams):
+    def __init__(self, params: FixedEntryParams, *, search: SearchOptions | None = None):
         if not isinstance(params, FixedEntryParams):
             raise TypeError("FixedEntrySheathSolver requires FixedEntryParams")
-        super().__init__(params)
+        super().__init__(params, search=search)
 
 
 class ZhaoSheathSolver(_SheathSolver):
     """Sheath with entrance state and source projected from solar illumination."""
 
-    def __init__(self, params: ZhaoParams):
+    def __init__(self, params: ZhaoParams, *, search: SearchOptions | None = None):
         if not isinstance(params, ZhaoParams):
             raise TypeError("ZhaoSheathSolver requires ZhaoParams")
-        super().__init__(params)
+        super().__init__(params, search=search)

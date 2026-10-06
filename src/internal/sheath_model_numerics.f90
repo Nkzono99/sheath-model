@@ -4,29 +4,16 @@
 !> Numerical algorithms without sheath parameters, branches, or status codes.
 module sheath_model_numerics
   use sheath_model_constants, only: dp
+  use sheath_model_search, only: sheath_search_options
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 
   implicit none
 
   private
 
-  public :: solve_nonlinear_system, try_guarded_newton_solve, residual_norm, NONLINEAR_TOL
-
-  !> Absolute Euclidean residual tolerance used by solve_nonlinear_system.
-  real(dp), parameter :: NONLINEAR_TOL = 1.0d-10
-  integer, parameter :: NONLINEAR_MAX_ITER = 60
-  integer, parameter :: NONLINEAR_MAX_BACKTRACK = 20
-  integer, parameter :: GUARDED_MAX_ITERATIONS = 60
-  integer, parameter :: GUARDED_MAX_BACKTRACKS = 24
-  real(dp), parameter :: GUARDED_TOLERANCE = 1.0e-9_dp
+  public :: solve_guarded_system, residual_norm
 
   abstract interface
-    subroutine nonlinear_residual(x, f)
-      import :: dp
-      real(dp), intent(in) :: x(:)
-      real(dp), intent(out) :: f(:)
-    end subroutine nonlinear_residual
-
     subroutine guarded_residual(x, f, valid)
       import :: dp
       real(dp), intent(in) :: x(:)
@@ -36,163 +23,6 @@ module sheath_model_numerics
   end interface
 
 contains
-
-  !> Solve residual_fn(x,f)=0 for n unknowns, trying the columns of guesses in order.
-  !! Uses forward-difference Newton steps and backtracking with the Euclidean residual norm.
-  !! Returns the first converged x_best, or the best trial when success is false.
-  subroutine solve_nonlinear_system(n, guesses, residual_fn, x_best, success)
-    integer, intent(in) :: n
-    real(dp), intent(in) :: guesses(:, :)
-    procedure(nonlinear_residual) :: residual_fn
-    real(dp), intent(out) :: x_best(n)
-    logical, intent(out) :: success
-
-    integer :: guess_idx
-    real(dp) :: x_trial(n), best_norm, trial_norm
-    logical :: trial_success
-
-    success = .false.
-    x_best = 0.0_dp
-    if (size(guesses, 1) /= n .or. size(guesses, 2) == 0) return
-
-    x_best = guesses(:, 1)
-    best_norm = huge(1.0d0)
-    do guess_idx = 1, size(guesses, 2)
-      call try_newton_solve(n, guesses(:, guess_idx), residual_fn, x_trial, trial_norm, trial_success)
-      if (trial_norm < best_norm) then
-        best_norm = trial_norm
-        x_best = x_trial
-      end if
-      if (trial_success .and. trial_norm < NONLINEAR_TOL) then
-        success = .true.
-        x_best = x_trial
-        return
-      end if
-    end do
-
-    success = best_norm < NONLINEAR_TOL
-  end subroutine solve_nonlinear_system
-
-  subroutine try_newton_solve( &
-      n, x0, residual_fn, &
-      x_out, final_norm, success &
-      )
-    integer, intent(in) :: n
-    real(dp), intent(in) :: x0(n)
-    procedure(nonlinear_residual) :: residual_fn
-    real(dp), intent(out) :: x_out(n)
-    real(dp), intent(out) :: final_norm
-    logical, intent(out) :: success
-
-    integer :: iter, backtrack
-    real(dp) :: x(n), f(n), jac(n, n), dx(n), x_trial(n), f_trial(n), step_scale, fnorm, trial_norm
-    logical :: linear_ok, improved
-
-    x = x0
-    call residual_fn(x, f)
-    fnorm = residual_norm(f)
-
-    do iter = 1, NONLINEAR_MAX_ITER
-      if (fnorm < NONLINEAR_TOL) exit
-
-      call numerical_jacobian(n, x, f, residual_fn, jac)
-      call solve_small_linear_system(n, jac, -f, dx, linear_ok)
-      if (.not. linear_ok) exit
-
-      step_scale = 1.0d0
-      improved = .false.
-      do backtrack = 1, NONLINEAR_MAX_BACKTRACK
-        x_trial = x + step_scale*dx
-        call residual_fn(x_trial, f_trial)
-        trial_norm = residual_norm(f_trial)
-        if (trial_norm < fnorm) then
-          x = x_trial
-          f = f_trial
-          fnorm = trial_norm
-          improved = .true.
-          exit
-        end if
-        step_scale = 0.5d0*step_scale
-      end do
-      if (.not. improved) exit
-    end do
-
-    x_out = x
-    final_norm = fnorm
-    success = fnorm < NONLINEAR_TOL
-  end subroutine try_newton_solve
-
-  subroutine numerical_jacobian(n, x, f0, residual_fn, jac)
-    integer, intent(in) :: n
-    real(dp), intent(in) :: x(n), f0(n)
-    procedure(nonlinear_residual) :: residual_fn
-    real(dp), intent(out) :: jac(n, n)
-
-    integer :: j
-    real(dp) :: h, xh(n), fh(n)
-
-    do j = 1, n
-      h = 1.0d-6*max(1.0d0, abs(x(j)))
-      xh = x
-      xh(j) = xh(j) + h
-      call residual_fn(xh, fh)
-      jac(:, j) = (fh - f0)/h
-    end do
-  end subroutine numerical_jacobian
-
-  subroutine solve_small_linear_system(n, a_in, b_in, x, ok)
-    integer, intent(in) :: n
-    real(dp), intent(in) :: a_in(n, n), b_in(n)
-    real(dp), intent(out) :: x(n)
-    logical, intent(out) :: ok
-
-    integer :: i, j, k, pivot_row
-    real(dp) :: a(n, n), b(n), factor, pivot_abs, tmp_row(n), tmp_val
-
-    a = a_in
-    b = b_in
-    ok = .true.
-
-    do k = 1, n
-      pivot_row = k
-      pivot_abs = abs(a(k, k))
-      do i = k + 1, n
-        if (abs(a(i, k)) > pivot_abs) then
-          pivot_abs = abs(a(i, k))
-          pivot_row = i
-        end if
-      end do
-      if (pivot_abs <= 1.0d-18) then
-        ok = .false.
-        x = 0.0d0
-        return
-      end if
-
-      if (pivot_row /= k) then
-        tmp_row = a(k, :)
-        a(k, :) = a(pivot_row, :)
-        a(pivot_row, :) = tmp_row
-        tmp_val = b(k)
-        b(k) = b(pivot_row)
-        b(pivot_row) = tmp_val
-      end if
-
-      do i = k + 1, n
-        factor = a(i, k)/a(k, k)
-        a(i, k:n) = a(i, k:n) - factor*a(k, k:n)
-        b(i) = b(i) - factor*b(k)
-      end do
-    end do
-
-    x = 0.0d0
-    do i = n, 1, -1
-      x(i) = b(i)
-      do j = i + 1, n
-        x(i) = x(i) - a(i, j)*x(j)
-      end do
-      x(i) = x(i)/a(i, i)
-    end do
-  end subroutine solve_small_linear_system
 
   !> Return the Euclidean norm of f, or huge() if any component is non-finite.
   real(dp) function residual_norm(f) result(norm2)
@@ -206,73 +36,109 @@ contains
     norm2 = sqrt(sum(f*f))
   end function residual_norm
 
-  !> Solve n residual equations from y0 with a callback residual_fn(y,f,valid) that marks valid states.
-  !! Uses central differences, one-sided differences at domain limits, and backtracking.
-  !! Returns y_out, maximum absolute residual final_norm, iteration count, and convergence flag success.
-  !! An invalid initial state returns y0, huge() residual, zero iterations, and success=false.
-  subroutine try_guarded_newton_solve( &
-      n, y0, residual_fn, &
-      y_out, final_norm, iterations, &
-      success &
-      )
+  !> Newton with backtracking or Levenberg-Marquardt in dimensionless coordinates.
+  !! auto tries an LM step when a Newton step cannot reduce the residual.
+  !! Convergence always requires the residual tolerance, never a small step alone.
+  subroutine solve_guarded_system(n, y0, residual_fn, options, y_out, final_norm, iterations, success, evaluations, lm_steps)
     integer, intent(in) :: n
     real(dp), intent(in) :: y0(n)
     procedure(guarded_residual) :: residual_fn
+    type(sheath_search_options), intent(in) :: options
     real(dp), intent(out) :: y_out(n), final_norm
     integer, intent(out) :: iterations
     logical, intent(out) :: success
+    integer, intent(out), optional :: evaluations, lm_steps
 
-    real(dp) :: y(n), f(n), jac(n, n), delta(n), trial(n), trial_f(n)
-    real(dp) :: norm, trial_norm, step
-    integer :: iteration, backtrack
-    logical :: valid, jacobian_ok, linear_ok, trial_valid
+    real(dp) :: y(n), f(n), jac(n, n), delta(n), trial(n), trial_f(n), a(n, n), rhs(n)
+    real(dp) :: norm, trial_norm, step, damping, diagonal(n)
+    integer :: iteration, backtrack, attempt, i, neval, nlm
+    logical :: valid, jacobian_ok, linear_ok, trial_valid, improved, use_lm
 
+    neval = 0
+    nlm = 0
+    iterations = 0
     y = y0
-    call residual_fn(y, f, valid)
-    if (.not. valid) then
-      y_out = y
-      final_norm = huge(1.0_dp)
-      iterations = 0
-      success = .false.
-      return
-    end if
-
-    norm = maxval(abs(f(1:n)))
+    call counted_residual(y, f, valid)
+    norm = huge(1.0_dp)
     success = .false.
-    do iteration = 0, GUARDED_MAX_ITERATIONS
-      if (norm <= GUARDED_TOLERANCE) then
-        success = .true.
-        exit
-      end if
-      if (iteration == GUARDED_MAX_ITERATIONS) exit
+    if (valid) then
+      norm = maxval(abs(f))
+      do iteration = 0, options%max_iterations
+        iterations = iteration
+        if (norm <= options%residual_tolerance) then
+          success = .true.
+          exit
+        end if
+        if (iteration == options%max_iterations) exit
+        call guarded_numerical_jacobian(n, y, f, counted_residual, jac, jacobian_ok)
+        if (.not. jacobian_ok) exit
+        improved = .false.
+        if (trim(options%method) /= 'lm') then
+          call solve_guarded_linear_system(n, jac, -f, delta, linear_ok)
+          if (linear_ok) call accept_step(delta, improved)
+        end if
+        use_lm = trim(options%method) == 'lm' .or. (trim(options%method) == 'auto' .and. .not. improved)
+        if (use_lm) then
+          a = matmul(transpose(jac), jac)
+          rhs = -matmul(transpose(jac), f)
+          do i = 1, n
+            diagonal(i) = max(a(i, i), 1e-12_dp)
+          end do
+          damping = 1e-3_dp
+          do attempt = 1, options%max_backtracks
+            a = matmul(transpose(jac), jac)
+            do i = 1, n
+              a(i, i) = a(i, i) + damping*diagonal(i)
+            end do
+            call solve_guarded_linear_system(n, a, rhs, delta, linear_ok)
+            if (linear_ok) call accept_step(delta, improved)
+            if (improved) then
+              nlm = nlm + 1
+              exit
+            end if
+            damping = damping*10.0_dp
+          end do
+        end if
+        if (.not. improved) exit
+      end do
+    end if
+    y_out = y
+    final_norm = norm
+    if (present(evaluations)) evaluations = neval
+    if (present(lm_steps)) lm_steps = nlm
 
-      call guarded_numerical_jacobian(n, y, f, residual_fn, jac, jacobian_ok)
-      if (.not. jacobian_ok) exit
-      call solve_guarded_linear_system(n, jac, -f, delta, linear_ok)
-      if (.not. linear_ok) exit
+  contains
+    subroutine counted_residual(value, residual, ok)
+      real(dp), intent(in) :: value(:)
+      real(dp), intent(out) :: residual(:)
+      logical, intent(out) :: ok
+      neval = neval + 1
+      call residual_fn(value, residual, ok)
+      ok = ok .and. all(ieee_is_finite(residual))
+    end subroutine counted_residual
 
+    subroutine accept_step(direction, accepted)
+      real(dp), intent(in) :: direction(n)
+      logical, intent(out) :: accepted
+      accepted = .false.
       step = 1.0_dp
-      do backtrack = 1, GUARDED_MAX_BACKTRACKS
-        trial = y + step*delta
-        call residual_fn(trial, trial_f, trial_valid)
+      do backtrack = 1, options%max_backtracks
+        trial = y + step*direction
+        call counted_residual(trial, trial_f, trial_valid)
         if (trial_valid) then
-          trial_norm = maxval(abs(trial_f(1:n)))
+          trial_norm = maxval(abs(trial_f))
           if (trial_norm < norm) then
             y = trial
             f = trial_f
             norm = trial_norm
-            exit
+            accepted = .true.
+            return
           end if
         end if
-        step = 0.5_dp*step
+        step = step*0.5_dp
       end do
-      if (backtrack > GUARDED_MAX_BACKTRACKS) exit
-    end do
-
-    y_out = y
-    final_norm = norm
-    iterations = iteration
-  end subroutine try_guarded_newton_solve
+    end subroutine accept_step
+  end subroutine solve_guarded_system
 
   subroutine guarded_numerical_jacobian(n, y, f0, residual_fn, jac, success)
     integer, intent(in) :: n

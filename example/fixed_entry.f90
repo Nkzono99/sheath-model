@@ -8,6 +8,8 @@ program fixed_entry
   character(len=256) :: message
 
   input%branch = 'A'
+  ! auto / newton / lm; bracket is available for J=0 B/C.
+  input%search%method = 'newton'
   input%plasma%ion_density_m3 = 8.7e6_dp
   input%plasma%ion_drift_mps = 405299.88897111727_dp
   input%plasma%ion_temperature_ev = 12.0_dp
