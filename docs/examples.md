@@ -130,6 +130,8 @@ KUDPC 等の共有環境では、ビルド・ソルバー・テスト・描画�
 
 ### Fortran
 
+Fortran 2008 対応コンパイラと fpm を用意し、リポジトリ直下で実行します。
+
 ```bash
 fpm build
 fpm test
@@ -152,7 +154,16 @@ E_H 指定の `solve_prescribed_field` は、検出した物理解が一つの�
 候補を比較したい場合は `solve_prescribed_field_candidates` を使ってください。
 ライブラリ自体はプロセス終了やファイル出力を行わず、ステータスと結果を返します。
 
-ローカルのソースを別の fpm プロジェクトから使う場合は、Git 依存の代わりにパスを指定できます。
+別の fpm プロジェクトから使う場合は、`fpm.toml` に依存を追加します。
+
+```toml
+[dependencies]
+sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", branch = "main" }
+```
+
+掲載例は `main` の実装に対応します。公開済みの `v0.1.0` には軌道保存・物理解判定の修正が含まれません。
+計算の再現性が必要な場合は、`branch` を使用するコミットの `rev` に置き換えてください。
+ローカルのソースを使う場合は、Git 依存の代わりにパスを指定できます。
 
 ```toml
 [dependencies]
@@ -160,6 +171,22 @@ sheath-model = { path = "../sheath-model" }
 ```
 
 ### Python
+
+Python 3.10+ では NumPy / SciPy による独立した実装を利用できます。
+リポジトリ直下で `python -m pip install -e '.[plot]'` を実行してください。
+
+```python
+from sheath_model import ZhaoParams, ZhaoSheathSolver
+
+solver = ZhaoSheathSolver(
+    ZhaoParams(alpha_deg=60.0, electron_drift_mode="zero", zmax_hat=120.0)
+)
+profile = solver.solve_profile("A")
+print(profile["phi0_V"], profile["phi_m_V"])
+```
+
+Fortran とのバインディングはなく、Python は Maxwell 源の J=0 モデルに対応します。
+任意スペクトルと静的電位評価は [Fortran API](spectral-api.md) で利用できます。
 
 ```bash
 python -m unittest discover -s tests -v

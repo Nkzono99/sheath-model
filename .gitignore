@@ -209,3 +209,6 @@ __marimo__/
 ref/
 **/*.png
 !docs/figures/*.png
+
+# Local research and implementation work
+/working/
