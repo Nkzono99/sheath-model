@@ -14,7 +14,7 @@ module sheath_model_atlas_physics
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: equilibrium_key, atlas_equilibrium_seeds, continue_equilibrium_from_atlas
+  public :: equilibrium_key, params_from_key, atlas_equilibrium_seeds, continue_equilibrium_from_atlas
 contains
   subroutine equilibrium_key(p, key, shape)
     type(zhao_params_type), intent(in) :: p

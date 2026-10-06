@@ -7,7 +7,7 @@ module sheath_model_atlas
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
-  public :: sheath_equilibrium_atlas, sheath_atlas_options, sheath_atlas_point
+  public :: sheath_equilibrium_atlas, sheath_field_atlas, sheath_atlas_options, sheath_atlas_point
 
   type :: sheath_atlas_options
     integer :: neighbors = 8
@@ -20,11 +20,13 @@ module sheath_model_atlas
     integer :: component = 0
     ! log(Te/Tscale), asinh(ue/vthe), log(ui/vscale), log(mi/me),
     ! log1p(pressure_factor*Ti/Tscale), log1p(2 sqrt(pi) Gamma_pe/(ni vscale)).
-    real(dp) :: key(6) = 0.0_dp, coordinates(3) = 0.0_dp
+    ! Prescribed-field maps append asinh(E_H / field_scale) as a seventh coordinate.
+    real(dp), allocatable :: key(:)
+    real(dp) :: coordinates(3) = 0.0_dp
     real(dp), allocatable :: spectrum_shape(:)
   end type
 
-  type :: sheath_equilibrium_atlas
+  type, abstract :: sheath_root_atlas
     type(sheath_atlas_options) :: options
     type(sheath_continuation_options) :: continuation
     type(sheath_atlas_point), allocatable, private :: points(:)
@@ -38,30 +40,78 @@ module sheath_model_atlas
     procedure :: insert => atlas_insert
     procedure :: write => atlas_write
     procedure :: read => atlas_read
+    procedure(atlas_dimension_interface), deferred, private :: dimension
+    procedure(atlas_magic_interface), deferred, private :: magic
   end type
+
+  type, extends(sheath_root_atlas) :: sheath_equilibrium_atlas
+  contains
+    procedure, private :: dimension => equilibrium_dimension
+    procedure, private :: magic => equilibrium_magic
+  end type
+
+  type, extends(sheath_root_atlas) :: sheath_field_atlas
+  contains
+    procedure, private :: dimension => field_dimension
+    procedure, private :: magic => field_magic
+  end type
+
+  abstract interface
+    pure integer function atlas_dimension_interface(self) result(n)
+      import sheath_root_atlas
+      class(sheath_root_atlas), intent(in) :: self
+    end function
+    pure function atlas_magic_interface(self) result(magic)
+      import sheath_root_atlas
+      class(sheath_root_atlas), intent(in) :: self
+      character(len=32) :: magic
+    end function
+  end interface
 
 contains
 
-  integer function atlas_size(self) result(count)
+  pure integer function equilibrium_dimension(self) result(n)
     class(sheath_equilibrium_atlas), intent(in) :: self
+    n = 6
+  end function
+
+  pure integer function field_dimension(self) result(n)
+    class(sheath_field_atlas), intent(in) :: self
+    n = 7
+  end function
+
+  pure function equilibrium_magic(self) result(magic)
+    class(sheath_equilibrium_atlas), intent(in) :: self
+    character(len=32) :: magic
+    magic = 'SHEATH_EQUILIBRIUM_ATLAS'
+  end function
+
+  pure function field_magic(self) result(magic)
+    class(sheath_field_atlas), intent(in) :: self
+    character(len=32) :: magic
+    magic = 'SHEATH_FIELD_ATLAS'
+  end function
+
+  integer function atlas_size(self) result(count)
+    class(sheath_root_atlas), intent(in) :: self
     count = 0
     if (allocated(self%points)) count = size(self%points)
   end function
 
   function atlas_point_at(self, index) result(point)
-    class(sheath_equilibrium_atlas), intent(in) :: self
+    class(sheath_root_atlas), intent(in) :: self
     integer, intent(in) :: index
     type(sheath_atlas_point) :: point
     point = self%points(index)
   end function
 
   subroutine atlas_clear(self)
-    class(sheath_equilibrium_atlas), intent(inout) :: self
+    class(sheath_root_atlas), intent(inout) :: self
     if (allocated(self%points)) deallocate (self%points)
   end subroutine
 
   logical function atlas_valid(self) result(valid)
-    class(sheath_equilibrium_atlas), intent(in) :: self
+    class(sheath_root_atlas), intent(in) :: self
     valid = self%options%neighbors > 0 .and. ieee_is_finite(self%options%max_distance) .and. &
         self%options%max_distance > 0.0_dp .and. valid_continuation_options(self%continuation)
   end function
@@ -74,14 +124,18 @@ contains
   end function
 
   subroutine atlas_neighbors(self, key, shape, branch, indices)
-    class(sheath_equilibrium_atlas), intent(in) :: self
-    real(dp), intent(in) :: key(6), shape(:)
+    class(sheath_root_atlas), intent(in) :: self
+    real(dp), intent(in) :: key(:), shape(:)
     character(len=1), intent(in) :: branch
     integer, allocatable, intent(out) :: indices(:)
     integer, allocatable :: order(:)
     real(dp), allocatable :: distances(:)
     real(dp) :: distance
     integer :: i, j, count
+    if (.not. self%valid() .or. size(key) /= self%dimension() .or. .not. all(ieee_is_finite(key))) then
+      allocate (indices(0))
+      return
+    end if
     allocate (order(self%size()), distances(self%size()))
     count = 0
     do i = 1, self%size()
@@ -104,16 +158,18 @@ contains
   end subroutine
 
   subroutine atlas_predictions(self, key, shape, branch, values)
-    class(sheath_equilibrium_atlas), intent(in) :: self
-    real(dp), intent(in) :: key(6), shape(:)
+    class(sheath_root_atlas), intent(in) :: self
+    real(dp), intent(in) :: key(:), shape(:)
     character(len=1), intent(in) :: branch
     real(dp), allocatable, intent(out) :: values(:, :)
     integer, allocatable :: indices(:), components(:)
-    real(dp), allocatable :: guesses(:, :)
-    real(dp) :: normal(6, 6), rhs(6, 3), slopes(6, 3), offset(6), prediction(3)
-    integer :: i, j, c, index, anchor, count
+    real(dp), allocatable :: guesses(:, :), normal(:, :), rhs(:, :), slopes(:, :), offset(:)
+    real(dp) :: prediction(3)
+    integer :: i, j, c, index, anchor, count, n
     logical :: valid
     call self%neighbors(key, shape, branch, indices)
+    n = self%dimension()
+    allocate (normal(n, n), rhs(n, 3), slopes(n, 3), offset(n))
     allocate (components(size(indices)))
     allocate (guesses(3, 2*size(indices)))
     count = 0
@@ -129,16 +185,16 @@ contains
         index = indices(j)
         if (self%points(index)%component /= c) cycle
         offset = self%points(index)%key - self%points(anchor)%key
-        normal = normal + spread(offset, 2, 6)*spread(offset, 1, 6)
-        rhs = rhs + spread(offset, 2, 3)*spread(self%points(index)%coordinates - self%points(anchor)%coordinates, 1, 6)
+        normal = normal + spread(offset, 2, n)*spread(offset, 1, n)
+        rhs = rhs + spread(offset, 2, 3)*spread(self%points(index)%coordinates - self%points(anchor)%coordinates, 1, n)
       end do
       if (self%options%interpolate) then
-        do j = 1, 6
+        do j = 1, n
           normal(j, j) = normal(j, j) + 1e-10_dp
         end do
         slopes = 0.0_dp
         do j = 1, 3
-          call solve_guarded_linear_system(6, normal, rhs(:, j), slopes(:, j), valid)
+          call solve_guarded_linear_system(n, normal, rhs(:, j), slopes(:, j), valid)
           if (.not. valid) exit
         end do
         if (valid) then
@@ -167,8 +223,8 @@ contains
 
   !> Insert a seed; successful solves, not the table, establish its physical validity.
   subroutine atlas_insert(self, key, shape, branch, coordinates, component)
-    class(sheath_equilibrium_atlas), intent(inout) :: self
-    real(dp), intent(in) :: key(6), shape(:), coordinates(3)
+    class(sheath_root_atlas), intent(inout) :: self
+    real(dp), intent(in) :: key(:), shape(:), coordinates(3)
     character(len=1), intent(in) :: branch
     integer, intent(in), optional :: component
     type(sheath_atlas_point) :: point
@@ -176,6 +232,13 @@ contains
     integer :: i, j, c, max_component
     real(dp) :: distance, best_distance
     logical :: occupied
+    if (.not. self%valid() .or. size(key) /= self%dimension()) return
+    if (.not. all(ieee_is_finite(key)) .or. .not. all(ieee_is_finite(coordinates))) return
+    if (.not. all(ieee_is_finite(shape)) .or. index('ABC', branch) == 0 .or. any(key(5:6) < 0.0_dp)) return
+    if (branch /= 'A' .and. coordinates(3) /= 0.0_dp) return
+    if (present(component)) then
+      if (component < 1) return
+    end if
     c = 0
     max_component = 0
     if (.not. allocated(self%points)) allocate (self%points(0))
@@ -218,13 +281,14 @@ contains
     self%points = [self%points, point]
   end subroutine
 
-  !> Versioned text format shared with Python; unit must be opened formatted.
+  !> Versioned text format; equilibrium maps share their format with Python.
+  !! Field maps have their own header and seventh coordinate. Open unit formatted.
   subroutine atlas_write(self, unit, iostat)
-    class(sheath_equilibrium_atlas), intent(in) :: self
+    class(sheath_root_atlas), intent(in) :: self
     integer, intent(in) :: unit
     integer, intent(out) :: iostat
     integer :: i
-    write (unit, '(a,1x,i0,1x,i0)', iostat=iostat) 'SHEATH_EQUILIBRIUM_ATLAS', 1, self%size()
+    write (unit, '(a,1x,i0,1x,i0)', iostat=iostat) trim(self%magic()), 1, self%size()
     if (iostat /= 0) return
     do i = 1, self%size()
       write (unit, '(a,1x,i0,1x,i0,1x,*(es25.17,1x))', iostat=iostat) self%points(i)%branch, &
@@ -239,7 +303,7 @@ contains
 
   !> Read transactionally. Malformed data leaves the existing table unchanged.
   subroutine atlas_read(self, unit, iostat)
-    class(sheath_equilibrium_atlas), intent(inout) :: self
+    class(sheath_root_atlas), intent(inout) :: self
     integer, intent(in) :: unit
     integer, intent(out) :: iostat
     type(sheath_atlas_point), allocatable :: points(:)
@@ -248,9 +312,10 @@ contains
     read (unit, *, iostat=iostat) magic, version, count
     if (iostat /= 0) return
     iostat = 1
-    if (magic /= 'SHEATH_EQUILIBRIUM_ATLAS' .or. version /= 1 .or. count < 0) return
+    if (magic /= self%magic() .or. version /= 1 .or. count < 0) return
     allocate (points(count))
     do i = 1, count
+      allocate (points(i)%key(self%dimension()))
       read (unit, *, iostat=iostat) points(i)%branch, points(i)%component, shape_count, points(i)%key, points(i)%coordinates
       if (iostat /= 0) return
       iostat = 1

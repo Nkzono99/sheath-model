@@ -11,6 +11,7 @@ program test_closures
   type(zhao_profile_result) :: profile
   type(zhao_field_input) :: field_input
   type(zhao_field_result) :: response
+  type(sheath_field_atlas) :: atlas
   type(zhao_field_result), allocatable :: responses(:)
   integer(i32) :: status
   integer :: i
@@ -53,9 +54,11 @@ program test_closures
   call near(response%boundary_potential_v, root%surface_potential_v, 3e-5_dp, 'common solution potential')
   call near(response%ambient_electron_density_m3, root%ambient_electron_density_m3, 30.0_dp, 'common solution density')
   call near(response%net_current_a_m2, 0.0_dp, 1e-10_dp, 'common solution current')
+  call add_field_to_atlas(field_input, response, atlas, status, message)
+  call ok('store E_H reference')
   ! A different field must be preserved, without restoring J=0.
   field_input%electric_field_v_m = 1.01_dp*field
-  call solve_prescribed_field_candidates(field_input, responses, status, message)
+  call solve_prescribed_field_candidates(field_input, responses, status, message, atlas=atlas, deflation=.true.)
   call ok('nonzero-current E_H model')
   do i = 1, size(responses)
     response = responses(i)

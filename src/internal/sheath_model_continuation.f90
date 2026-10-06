@@ -183,7 +183,7 @@ contains
   !> Enumerate algebraic roots with multistart and optional shifted deflation.
   !! Always check the original residual; callers must still validate profiles.
   subroutine find_guarded_roots(n, residual, starts, search, diagnostics, k, roots, max_roots, deflation, &
-      known_roots, atlas_flags, origins)
+      known_roots, atlas_flags, origins, root_iterations)
     integer, intent(in) :: n, k, max_roots
     procedure(root_residual) :: residual
     real(dp), intent(in) :: starts(:, :)
@@ -194,8 +194,10 @@ contains
     real(dp), intent(in), optional :: known_roots(:, :)
     logical, intent(in), optional :: atlas_flags(:)
     integer, allocatable, intent(out), optional :: origins(:)
+    integer, allocatable, intent(out), optional :: root_iterations(:)
     real(dp) :: stored(n, max_roots), value(n), norm, raw(n)
     integer :: stored_origins(max_roots)
+    integer :: stored_iterations(max_roots)
     integer :: count, initial_count, i, j, iterations, evaluations, lm_steps
     logical :: valid, success, duplicate
     count = 0
@@ -230,12 +232,14 @@ contains
         count = count + 1
         stored(:, count) = value
         stored_origins(count) = i
+        stored_iterations(count) = iterations
         if (.not. deflation) exit
         diagnostics%deflations(k) = diagnostics%deflations(k) + 1
       end do
     end do
     roots = stored(:, initial_count + 1:count)
     if (present(origins)) origins = stored_origins(initial_count + 1:count)
+    if (present(root_iterations)) root_iterations = stored_iterations(initial_count + 1:count)
   contains
     subroutine modified_residual(y, f, ok)
       real(dp), intent(in) :: y(:)

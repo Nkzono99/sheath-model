@@ -13,7 +13,7 @@ contains
   module subroutine solve_field_root( &
       model, params, interface_field_v_m, &
       root, status, message, &
-      diagnostics, initial_guesses &
+      diagnostics, initial_guesses, atlas, deflation, max_roots &
       )
     character(len=*), intent(in) :: model
     type(zhao_params_type), intent(in) :: params
@@ -23,11 +23,15 @@ contains
     character(len=*), intent(out) :: message
     type(sheath_search_diagnostics), intent(out) :: diagnostics
     type(zhao_field_result), intent(in), optional :: initial_guesses(:)
+    type(sheath_field_atlas), intent(in), optional :: atlas
+    logical, intent(in), optional :: deflation
+    integer, intent(in), optional :: max_roots
 
     type(zhao_field_root), allocatable :: roots(:)
 
     root = zhao_field_root()
-    call find_field_roots(model, params, interface_field_v_m, roots, status, message, diagnostics, initial_guesses)
+    call find_field_roots(model, params, interface_field_v_m, roots, status, message, diagnostics, &
+        initial_guesses, atlas, deflation, max_roots)
     if (status /= SHEATH_OK) return
 
     if (size(roots) == 1) then
@@ -41,7 +45,7 @@ contains
   module subroutine find_field_roots( &
       model, params, interface_field_v_m, &
       roots, status, message, &
-      diagnostics, initial_guesses &
+      diagnostics, initial_guesses, atlas, deflation, max_roots &
       )
     character(len=*), intent(in) :: model
     type(zhao_params_type), intent(in) :: params
@@ -51,6 +55,9 @@ contains
     character(len=*), intent(out) :: message
     type(sheath_search_diagnostics), intent(out) :: diagnostics
     type(zhao_field_result), intent(in), optional :: initial_guesses(:)
+    type(sheath_field_atlas), intent(in), optional :: atlas
+    logical, intent(in), optional :: deflation
+    integer, intent(in), optional :: max_roots
 
     character(len=1) :: order(3)
     type(zhao_field_root), allocatable :: found(:), candidates(:)
@@ -69,10 +76,8 @@ contains
     call field_branch_order(model, target, order, branch_count, status, message)
     if (status /= SHEATH_OK) return
 
-    capacity = default_field_starts
-    if (present(initial_guesses)) then
-      capacity = capacity + size(initial_guesses)
-    end if
+    capacity = 16
+    if (present(max_roots)) capacity = max_roots
     allocate (found(3*capacity + 1))
     n = 0
 
@@ -91,7 +96,8 @@ contains
     end if
 
     do i = 1, branch_count
-      call collect_field_branch_roots(params, order(i), target, candidates, count, diagnostics, initial_guesses)
+      call collect_field_branch_roots(params, order(i), target, candidates, count, diagnostics, &
+          initial_guesses, atlas, deflation, capacity)
       do j = 1, count
         duplicate = .false.
         do k = 1, n
@@ -172,7 +178,7 @@ contains
   subroutine collect_field_branch_roots( &
       params, branch, target_field_hat, &
       unique_roots, unique_count, &
-      diagnostics, initial_guesses &
+      diagnostics, initial_guesses, atlas, deflation, max_roots &
       )
     type(zhao_params_type), intent(in) :: params
     character(len=1), intent(in) :: branch
@@ -181,13 +187,19 @@ contains
     integer, intent(out) :: unique_count
     type(sheath_search_diagnostics), intent(inout) :: diagnostics
     type(zhao_field_result), intent(in), optional :: initial_guesses(:)
+    type(sheath_field_atlas), intent(in), optional :: atlas
+    logical, intent(in), optional :: deflation
+    integer, intent(in) :: max_roots
 
-    real(dp) :: defaults(3, default_field_starts), y(3), norm, encoded(3)
-    real(dp), allocatable :: guesses(:, :)
+    real(dp) :: defaults(3, default_field_starts), y(3), norm, encoded(3), key(7), raw(3)
+    real(dp), allocatable :: guesses(:, :), predictions(:, :), shape(:), algebraic(:, :)
+    logical, allocatable :: atlas_flags(:)
+    integer, allocatable :: origins(:), root_iterations(:)
+    type(zhao_field_root), allocatable :: continued(:)
     type(zhao_field_root) :: candidate_root
     integer :: guess_count, default_count, guess_index, iterations, evaluations, lm_steps, root_index, k, capacity
     integer(i32) :: profile_status
-    logical :: success, compatible, duplicate_root
+    logical :: success, compatible, duplicate_root, use_deflation
     character(len=512) :: profile_message
 
     k = index('ABC', branch)
@@ -204,7 +216,14 @@ contains
     if (present(initial_guesses)) then
       capacity = capacity + size(initial_guesses)
     end if
-    allocate (guesses(3, capacity), unique_roots(capacity))
+    allocate (predictions(3, 0))
+    if (present(atlas)) then
+      call field_atlas_key(params, target_field_hat, key, shape)
+      call atlas%predictions(key, shape, branch, predictions)
+      capacity = capacity + size(predictions, 2)
+    end if
+    allocate (guesses(3, capacity), unique_roots(max_roots), atlas_flags(capacity))
+    atlas_flags = .false.
     guess_count = 0
 
     ! Nearby physical solutions supplement the independent starts; they do not
@@ -221,35 +240,99 @@ contains
       end do
     end if
 
+    guesses(:, guess_count + 1:guess_count + size(predictions, 2)) = predictions
+    atlas_flags(guess_count + 1:guess_count + size(predictions, 2)) = .true.
+    guess_count = guess_count + size(predictions, 2)
+
     default_count = 0
     if (params%search%use_default_guesses) call make_branch_guesses(params, branch, target_field_hat, defaults, default_count)
     guesses(:, guess_count + 1:guess_count + default_count) = defaults(:, :default_count)
     guess_count = guess_count + default_count
 
-    do guess_index = 1, min(guess_count, params%search%max_starts)
-      diagnostics%starts(k) = diagnostics%starts(k) + 1
-      call solve_field_branch( &
-          params, branch, target_field_hat, &
-          guesses(:, guess_index), y, &
-          norm, iterations, &
-          success, evaluations, lm_steps &
-          )
-      diagnostics%evaluations(k) = diagnostics%evaluations(k) + evaluations
-      diagnostics%iterations(k) = diagnostics%iterations(k) + iterations
-      diagnostics%lm_steps(k) = diagnostics%lm_steps(k) + lm_steps
-      diagnostics%best_residual(k) = min(diagnostics%best_residual(k), norm)
-      if (.not. success) then
+    use_deflation = .false.
+    if (present(deflation)) use_deflation = deflation
+    if (use_deflation) then
+      call find_guarded_roots(merge(3, 2, branch == 'A'), field_residual, guesses(:merge(3, 2, branch == 'A'), :guess_count), &
+          params%search, diagnostics, k, algebraic, max_roots, .true., &
+          atlas_flags=atlas_flags(:guess_count), origins=origins, root_iterations=root_iterations)
+      do guess_index = 1, size(algebraic, 2)
+        y = 0.0_dp
+        y(:size(algebraic, 1)) = algebraic(:, guess_index)
+        call evaluate_charge_residual(params, branch, target_field_hat, y, raw, success)
+        if (.not. success) cycle
+        norm = maxval(abs(raw))
+        iterations = root_iterations(guess_index)
+        call accept_candidate(y, norm, iterations, atlas_flags(origins(guess_index)))
+      end do
+    else
+
+      do guess_index = 1, min(guess_count, params%search%max_starts)
+        if (unique_count >= max_roots) exit
+        diagnostics%starts(k) = diagnostics%starts(k) + 1
+        if (atlas_flags(guess_index)) diagnostics%atlas_starts(k) = diagnostics%atlas_starts(k) + 1
+        call solve_field_branch( &
+            params, branch, target_field_hat, &
+            guesses(:, guess_index), y, &
+            norm, iterations, &
+            success, evaluations, lm_steps &
+            )
+        diagnostics%evaluations(k) = diagnostics%evaluations(k) + evaluations
+        diagnostics%iterations(k) = diagnostics%iterations(k) + iterations
+        diagnostics%lm_steps(k) = diagnostics%lm_steps(k) + lm_steps
+        diagnostics%best_residual(k) = min(diagnostics%best_residual(k), norm)
+        if (.not. success) then
+          diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1
+          cycle
+        end if
+
+        call accept_candidate(y, norm, iterations, atlas_flags(guess_index))
+      end do
+    end if
+
+    if (present(atlas) .and. unique_count < max_roots) then
+      call continue_field_roots(params, branch, target_field_hat, atlas, continued, diagnostics)
+      do guess_index = 1, size(continued)
+        if (unique_count >= max_roots) exit
+        candidate_root = continued(guess_index)
+        call encode_unknowns(params, branch, candidate_root%phi0_v, candidate_root%phi_m_v, &
+            candidate_root%ambient_electron_density_m3, y, success)
+        if (.not. success) cycle
+        call accept_candidate(y, continued(guess_index)%residual_norm, &
+            int(continued(guess_index)%nonlinear_iterations), .true.)
+      end do
+    end if
+  contains
+    subroutine field_residual(value, f, valid)
+      real(dp), intent(in) :: value(:)
+      real(dp), intent(out) :: f(:)
+      logical, intent(out) :: valid
+      real(dp) :: coordinates(3), residual(3)
+      coordinates = 0.0_dp
+      coordinates(:size(value)) = value
+      call evaluate_charge_residual(params, branch, target_field_hat, coordinates, residual, valid)
+      f = residual(:size(value))
+    end subroutine
+
+    subroutine accept_candidate(coordinates, norm, iterations, from_atlas)
+      real(dp), intent(in) :: coordinates(3), norm
+      integer, intent(in) :: iterations
+      logical, intent(in) :: from_atlas
+      real(dp) :: original(3)
+      call evaluate_charge_residual(params, branch, target_field_hat, coordinates, original, success)
+      diagnostics%evaluations(k) = diagnostics%evaluations(k) + 1
+      if (.not. success) return
+      if (maxval(abs(original)) > params%search%residual_tolerance) then
         diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1
-        cycle
+        return
       end if
 
       candidate_root = zhao_field_root()
       candidate_root%branch = branch
-      call decode_unknowns(params, branch, y, candidate_root%phi0_v, candidate_root%phi_m_v, &
+      call decode_unknowns(params, branch, coordinates, candidate_root%phi0_v, candidate_root%phi_m_v, &
           candidate_root%ambient_electron_density_m3, success)
       if (.not. success) then
         diagnostics%unconverged(k) = diagnostics%unconverged(k) + 1
-        cycle
+        return
       end if
 
       if (target_field_hat == 0.0_dp .and. branch == 'A' .and. candidate_root%phi0_v < 0.0_dp .and. &
@@ -262,10 +345,10 @@ contains
       call validate_field_root_profile(params, candidate_root, target_field_hat, profile_status, profile_message)
       if (profile_status == SHEATH_NO_PHYSICAL_SOLUTION) then
         diagnostics%rejected(k) = diagnostics%rejected(k) + 1
-        cycle
+        return
       else if (profile_status /= SHEATH_OK) then
         diagnostics%profile_failures(k) = diagnostics%profile_failures(k) + 1
-        cycle
+        return
       end if
 
       duplicate_root = .false.
@@ -278,10 +361,12 @@ contains
         exit
       end do
       if (.not. duplicate_root) then
+        if (unique_count >= max_roots) return
         unique_count = unique_count + 1
         unique_roots(unique_count) = candidate_root
+        if (from_atlas) diagnostics%atlas_hits(k) = diagnostics%atlas_hits(k) + 1
       end if
-    end do
+    end subroutine
   end subroutine collect_field_branch_roots
 
   pure logical function field_roots_equivalent(params, first, second) result(equivalent)

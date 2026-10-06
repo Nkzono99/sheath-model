@@ -15,9 +15,10 @@ module sheath_model
       zhao_density_result, solve_equilibrium, evaluate_density, &
       zhao_profile_options, zhao_profile_result, solve_profile, build_equilibrium_atlas, add_equilibrium_to_atlas, &
       solve_equilibrium_candidates
-  use sheath_model_field, only: zhao_field_input, zhao_field_result, solve_prescribed_field, solve_prescribed_field_candidates
+  use sheath_model_field, only: zhao_field_input, zhao_field_result, solve_prescribed_field, solve_prescribed_field_candidates, &
+      build_field_atlas, add_field_to_atlas
   use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, sheath_continuation_options
-  use sheath_model_atlas, only: sheath_equilibrium_atlas, sheath_atlas_options, sheath_atlas_point
+  use sheath_model_atlas, only: sheath_equilibrium_atlas, sheath_field_atlas, sheath_atlas_options, sheath_atlas_point
   implicit none
 
   private
@@ -35,4 +36,5 @@ module sheath_model
   public :: sheath_equilibrium_atlas, sheath_atlas_options, sheath_atlas_point, sheath_continuation_options
   public :: build_equilibrium_atlas, add_equilibrium_to_atlas
   public :: solve_equilibrium_candidates
+  public :: sheath_field_atlas, build_field_atlas, add_field_to_atlas
 end module sheath_model
