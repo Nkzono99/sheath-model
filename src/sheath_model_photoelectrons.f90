@@ -27,6 +27,10 @@ module sheath_model_photoelectrons
     procedure :: with_outward_flux
   end type
 
+  !> Immutable zero-emission default for opaque sources nested in physical inputs.
+  !! Explicit component initialization keeps enclosing constructors portable across compilers.
+  type(photoelectron_source), parameter, public :: DEFAULT_PHOTOELECTRONS = photoelectron_source()
+
 contains
 
   !> Dimensionless spectral shape for identifying compatible atlas entries.

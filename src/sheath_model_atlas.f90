@@ -228,6 +228,7 @@ contains
     character(len=1), intent(in) :: branch
     integer, intent(in), optional :: component
     type(sheath_atlas_point) :: point
+    type(sheath_atlas_point), allocatable :: extended(:)
     integer, allocatable :: indices(:)
     integer :: i, j, c, max_component
     real(dp) :: distance, best_distance
@@ -278,7 +279,12 @@ contains
     point%key = key
     point%coordinates = coordinates
     point%spectrum_shape = shape
-    self%points = [self%points, point]
+    ! Copy into independent storage before replacing the array. A self-referencing
+    ! constructor with allocatable point components corrupts keys with Intel 2023.2.
+    allocate (extended(size(self%points) + 1))
+    extended(:size(self%points)) = self%points
+    extended(size(extended)) = point
+    call move_alloc(extended, self%points)
   end subroutine
 
   !> Versioned text format; equilibrium maps share their format with Python.

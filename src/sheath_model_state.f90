@@ -4,7 +4,8 @@ module sheath_model_state
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_quiet_nan
   use sheath_model_constants, only: dp, i32, qe, eps0, electron_mass, proton_mass, lower_ascii
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NUMERICAL_FAILURE
-  use sheath_model_photoelectrons, only: photoelectron_source, validate_photoelectrons, photoelectron_density
+  use sheath_model_photoelectrons, only: photoelectron_source, validate_photoelectrons, photoelectron_density, &
+      DEFAULT_PHOTOELECTRONS
   use sheath_model_core, only: zhao_params_type, neutral_electron_density, integrate_zhao_rho, evaluate_zhao_fluxes, &
       evaluate_zhao_rho_hat, type_a_connection_residual
   use sheath_model_admissibility, only: validate_zhao_profile
@@ -24,7 +25,7 @@ module sheath_model_state
     real(dp) :: ion_entry_speed_mps = 4.0529988897111727e5_dp
     real(dp) :: ion_mass_kg = proton_mass
     real(dp) :: electron_mass_kg = electron_mass
-    type(photoelectron_source) :: photoelectrons
+    type(photoelectron_source) :: photoelectrons = DEFAULT_PHOTOELECTRONS
   end type
 
   !> Evaluation of a trial state, not necessarily a complete physical sheath solution.
@@ -59,7 +60,7 @@ contains
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     real(dp) :: pe, captured
-    params = zhao_params_type()
+    ! intent(out) applies component defaults and deallocates previous sources.
     status = SHEATH_INVALID_ARGUMENT
     message = 'Plasma inputs must be finite, with positive ion density, temperature, ion speed and masses.'
     if (.not. all(ieee_is_finite([input%ion_density_m3, input%electron_temperature_ev, &

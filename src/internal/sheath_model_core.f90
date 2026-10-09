@@ -3,7 +3,8 @@
 ! Modified: standalone modules; status-returning public facade in sheath_model.
 !> Zhao 系シースの物理量、残差、および枝ごとの初期値・探索。
 module sheath_model_core
-  use sheath_model_photoelectrons, only: photoelectron_source, photoelectron_density, photoelectron_fluxes, &
+  use sheath_model_photoelectrons, only: photoelectron_source, DEFAULT_PHOTOELECTRONS, &
+      photoelectron_density, photoelectron_fluxes, &
       photoelectron_density_integral, photoelectron_upper_delta_scaled
   use sheath_model_orbits, only: electron_density, gauss_x, gauss_w
   use sheath_model_ions, only: ion_density_ratio
@@ -19,7 +20,7 @@ module sheath_model_core
   type :: zhao_params_type
     type(sheath_search_options) :: search
     type(sheath_continuation_options) :: continuation
-    type(photoelectron_source) :: photoelectrons
+    type(photoelectron_source) :: photoelectrons = DEFAULT_PHOTOELECTRONS
     real(dp) :: alpha_rad = 0.0d0
     real(dp) :: n_swi_inf_m3 = 0.0d0
     real(dp) :: density_scale_m3 = 0.0d0

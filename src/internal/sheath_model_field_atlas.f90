@@ -11,7 +11,7 @@ contains
     type(zhao_params_type), intent(out) :: params
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
-    params = zhao_params_type()
+    ! intent(out) applies component defaults and deallocates previous sources.
     if (present(search_options)) params%search = search_options
     if (present(continuation_options)) params%continuation = continuation_options
     status = SHEATH_INVALID_ARGUMENT

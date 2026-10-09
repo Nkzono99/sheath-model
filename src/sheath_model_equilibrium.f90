@@ -106,7 +106,7 @@ contains
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
 
-    p = zhao_params_type()
+    ! intent(out) applies component defaults and deallocates previous sources.
     if (present(search_options)) p%search = search_options
     if (present(continuation_options)) p%continuation = continuation_options
     status = SHEATH_INVALID_ARGUMENT
