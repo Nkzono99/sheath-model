@@ -41,7 +41,8 @@ Zhao の密度は `ion_density_m3` と `photoelectron_reference_density_m3`、�
 物理条件と制約は [運動論モデル](kinetic-model.md) を参照してください。
 
 `EquilibriumResult` は inputs、branch、surface_potential_v、minimum_potential_v、
-ambient_electron_density_m3、residual_norm、diagnostics を持ちます。
+ambient_electron_density_m3、residual_norm、diagnostics、upstream_negative_band_v を持ちます。
+upstream_negative_band_v は上流に接する $E^2<0$ の電位幅 [V] で、upstream_band_tolerance で受理した根だけが 0 より大きくなります。
 電子密度は Maxwell 分布の規格化密度です。
 `root.density(potential_v, side="upper")` で局所密度を SI 単位で評価できます。A は lower/upper を選びます。
 
@@ -54,7 +55,8 @@ sample/fluxes/vdf の位置は既定で m、無次元位置には `unit="hat"` �
 ## 探索と解マップ
 
 `SearchOptions` の method は auto/newton/lm、明示した B/C のみ bracket も可。
-主要な既定値は residual_tolerance=1e-10、max_iterations=100、max_starts=32、use_default_guesses=True。
+主要な既定値は residual_tolerance=1e-10、max_iterations=100、max_starts=32、use_default_guesses=True、
+upstream_band_tolerance=0（Fortran と同じ意味）。
 `ProfileOptions` は zmax_hat=80、n_profile_grid=600、n_type_a_grid=8000、
 profile_phi_tol_hat=1e-3、type_a_phi_m_eps_hat=1e-5。
 `ContinuationOptions(method="parameter")` または method="arclength" を Solver に設定します。

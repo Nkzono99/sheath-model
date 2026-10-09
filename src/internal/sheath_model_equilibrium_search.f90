@@ -54,7 +54,7 @@ contains
     if (enumerate) allocate (all_roots(3, 0))
     use_deflation = .true.
     if (present(deflation)) use_deflation = deflation
-    if ((branch == 'A' .or. branch == 'C') .and. p%u > 0.0_dp) then
+    if ((branch == 'A' .or. branch == 'C') .and. p%u > 0.0_dp .and. p%search%upstream_band_tolerance <= 0.0_dp) then
       diagnostics%excluded(k) = .true.
       return
     end if

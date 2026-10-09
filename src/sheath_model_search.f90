@@ -18,6 +18,9 @@ module sheath_model_search
     integer :: bracket_points = 96
     integer :: scalar_max_depth = 8 ! bounded adaptive subdivision for E-fixed B/C
     real(dp) :: potential_extent = 200.0_dp ! finite search limit / potential_scale_v
+    !> Accepted width of negative E^2 next to upstream for A/C with inward electron drift, as a fraction of
+    !! |phi_m| (A) or |phi_0| (C). 0 keeps the exact semi-infinite condition and rejects these roots.
+    real(dp) :: upstream_band_tolerance = 0.0_dp
   end type sheath_search_options
 
   type :: sheath_continuation_options
@@ -58,7 +61,9 @@ contains
     case default
       return
     end select
-    if (.not. all(ieee_is_finite([options%residual_tolerance, options%potential_extent]))) return
+    if (.not. all(ieee_is_finite([options%residual_tolerance, options%potential_extent, &
+        options%upstream_band_tolerance]))) return
+    if (options%upstream_band_tolerance < 0.0_dp .or. options%upstream_band_tolerance >= 1.0_dp) return
     valid = options%residual_tolerance > 0.0_dp .and. options%potential_extent > 0.0_dp .and. &
         options%max_iterations >= 0 .and. options%max_backtracks > 0 .and. options%max_starts > 0 .and. &
         options%bracket_points >= 2 .and. options%scalar_max_depth >= 1 .and. options%scalar_max_depth <= 16

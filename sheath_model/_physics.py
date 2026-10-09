@@ -222,7 +222,13 @@ class SheathPhysics:
         return np.array([r1, r2], dtype=float)
 
 
-    def _validate_profile_root(self, branch, phi0, phim, density):
+    def _validate_profile_root(self, branch, phi0, phim, density, tolerance=0.):
+        """Raise unless the root has a real connecting profile; return the accepted negative-E^2 band.
+
+        With inward electron drift, A/C are accepted only for tolerance>0 when E^2<0 is confined next to
+        upstream within tolerance*|phi_m| (A) or tolerance*|phi_0| (C). The band is returned in units of the
+        photoelectron temperature and is 0 otherwise.
+        """
         if branch == "B" and phi0 > 0:
             ambient_edge = (
                 density * self.p.density_scale_m3 * math.exp(-self.p.u**2)
@@ -231,10 +237,11 @@ class SheathPhysics:
             photo_edge = self.p.photoelectron_density_m3 * math.exp(-phi0) / math.sqrt(math.pi * self.p.photoelectron_temperature_ev)
             if ambient_edge - photo_edge > 128 * np.finfo(float).eps * max(abs(ambient_edge), abs(photo_edge)):
                 raise RuntimeError("Type B has negative field squared arbitrarily near upstream infinity")
-        if branch in ("A", "C") and self.p.u > 0:
+        drifting = branch in ("A", "C") and self.p.u > 0
+        if drifting and tolerance <= 0:
             raise RuntimeError("algebraic root has no semi-infinite profile: inward drift with reflected slow "
                                "electrons makes E^2 negative near neutral infinity; specify zero electron drift "
-                               "for the nondrifting model")
+                               "for the nondrifting model or a positive upstream_band_tolerance")
         try:
             self._ion_density_hat(max(phi0, 0))
         except ValueError as exc:
@@ -245,17 +252,46 @@ class SheathPhysics:
                 raise FloatingPointError("upper connection residual is non-finite")
             if abs(connection) > 1e-7:
                 raise RuntimeError("internal minimum does not connect to zero field at infinity")
+        def field_squared(side, phi):
+            return (-2*self._integrate_rho(branch, side, phim, phi, phi0, phim, density) if branch == "A" else
+                    2*self._integrate_rho(branch, side, phi, 0., phi0, phim, density))
+
         segments = [("monotonic", phi0, 0.)] if branch != "A" else [("lower", phim, phi0), ("upper", phim, 0.)]
-        values = []
+        values, lower, upstream = [], [], []
         for side, lo, hi in segments:
             for phi in np.linspace(lo, hi, 129):
-                e2 = (-2*self._integrate_rho(branch, side, phim, phi, phi0, phim, density) if branch == "A" else
-                      2*self._integrate_rho(branch, side, phi, 0., phi0, phim, density))
+                e2 = field_squared(side, phi)
                 values.append(e2)
+                (lower if side == "lower" else upstream).append((-phi, e2))
         if not np.all(np.isfinite(values)):
             raise FloatingPointError("profile field integration is non-finite")
-        if min(values) < -1e-8*max(1., max(values)):
+        threshold = -1e-8*max(1., max(values))
+        if not drifting:
+            if min(values) < threshold:
+                raise RuntimeError("algebraic root has no real connecting field profile")
+            return 0.
+        if lower and min(e2 for _, e2 in lower) < threshold:
             raise RuntimeError("algebraic root has no real connecting field profile")
+        # The log term makes E^2<0 touch upstream; measure the band by sign (it can be below the threshold for C).
+        side = "upper" if branch == "A" else "monotonic"
+        reference = -phim if branch == "A" else -phi0
+        for j in range(1, 49):
+            depth = reference*.5**j
+            upstream.append((depth, field_squared(side, -depth)))
+        if not all(math.isfinite(e2) for _, e2 in upstream):
+            raise FloatingPointError("profile field integration is non-finite")
+        band = max((depth for depth, e2 in upstream if e2 < 0), default=0.)
+        if band > 0:
+            outside = min((depth for depth, _ in upstream if depth > band), default=reference)
+            for _ in range(40):
+                mid = .5*(band+outside)
+                if field_squared(side, -mid) < 0:
+                    band = mid
+                else:
+                    outside = mid
+        if band > tolerance*reference:
+            raise RuntimeError("negative E^2 next to upstream is wider than upstream_band_tolerance allows")
+        return float(band)
 
 
     def _densities_hat_type_a_side(

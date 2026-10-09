@@ -97,6 +97,7 @@ Solver の `search`、`continuation`、`profile` に設定します。
 | `use_default_guesses` | true | 標準初期値を追加 |
 | `bracket_points`, `potential_extent` | 96, 200 | bracket 格子数、規格化電位の探索範囲 |
 | `scalar_max_depth` | 8 | 電場固定 B/C の各初期区間の細分化深さ。1〜16 |
+| `upstream_band_tolerance` | 0 | 電子が内向きに drift する J=0 の A/C 根で、上流に接する $E^2<0$ の幅をどこまで許すか。A は $\lvert\phi_m\rvert$、C は $\lvert\phi_0\rvert$ に対する割合。0 は厳密な判定で、これらの根を棄却する。0 以上 1 未満 |
 
 電場固定の auto は、B/C の電子密度を準中性から消去したスカラー探索と
 Newton/LM の複数初期値探索を併用します。bracket はスカラー探索を選び、標準初期値を必要としません。
@@ -130,7 +131,8 @@ J=0 は 6、電場固定は 7 次元の無次元キーを使い、スペクト�
 
 `sheath_equilibrium_result` は `valid`、`branch`、`surface_potential_v`、`minimum_potential_v`、
 `ambient_electron_density_m3`、`debye_length_m`、`residual_norm`、電子・イオン内向き流束、
-光電子 escape 流束、`net_current_a_m2` を返します。電子密度は Maxwell 分布の規格化で、全上流密度とは異なります。
+光電子 escape 流束、`net_current_a_m2`、`upstream_negative_band_v` を返します。電子密度は Maxwell 分布の規格化で、全上流密度とは異なります。
+`upstream_negative_band_v` は上流に接する $E^2<0$ の電位幅 [V] で、`upstream_band_tolerance` で受理した根だけが 0 より大きくなります。
 `prescribed_field_result` は表面電位を `boundary_potential_v` で返し、
 光電子 outward/return 流束、`nonlinear_iterations`、`minimum_field_squared_hat` も含みます。
 

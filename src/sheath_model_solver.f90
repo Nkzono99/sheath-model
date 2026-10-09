@@ -115,7 +115,8 @@ contains
     type(sheath_profile_result), intent(out) :: output
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
-    call build_profile(input, root, self%profile, output, status, message, self%search%residual_tolerance)
+    call build_profile(input, root, self%profile, output, status, message, self%search%residual_tolerance, &
+        upstream_band_tolerance=self%search%upstream_band_tolerance)
   end subroutine
 
   subroutine solver_build_equilibrium_atlas(self, inputs, atlas, status, message, report, deflation)

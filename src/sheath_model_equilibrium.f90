@@ -68,6 +68,8 @@ module sheath_model_equilibrium
     real(dp) :: ion_inward_flux_m2_s = 0.0_dp
     real(dp) :: photoelectron_escape_flux_m2_s = 0.0_dp
     real(dp) :: net_current_a_m2 = 0.0_dp ! Conventional electric current along +z
+    !> Potential width next to upstream where E^2<0 [V]; nonzero only for roots accepted by upstream_band_tolerance.
+    real(dp) :: upstream_negative_band_v = 0.0_dp
   end type sheath_equilibrium_result
 
   !> Local species number densities [m^-3] and net charge density [C/m^3].
@@ -322,7 +324,7 @@ contains
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     type(sheath_equilibrium_result) :: trial
-    real(dp) :: residual(3), outward, returning
+    real(dp) :: residual(3), outward, returning, minimum_e2, boundary_e2, band
     output = sheath_equilibrium_result()
     call equilibrium_residual(p, branch, physical, residual)
     status = SHEATH_NUMERICAL_FAILURE
@@ -339,6 +341,11 @@ contains
     message = 'Equilibrium flux or current evaluation is non-finite.'
     if (.not. all(ieee_is_finite([trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, &
         trial%photoelectron_escape_flux_m2_s, trial%net_current_a_m2]))) return
+
+    call validate_zhao_profile(p, branch, physical(1)/p%potential_scale_v, physical(2)/p%potential_scale_v, &
+        physical(3)/p%density_scale_m3, minimum_e2, boundary_e2, status, message, band)
+    if (status /= SHEATH_OK) return
+    trial%upstream_negative_band_v = band*p%potential_scale_v
 
     trial%valid = .true.
     output = trial
@@ -637,17 +644,18 @@ contains
   !> Reconstruct an existing J=0 root using the Poisson first integral, without root search.
   !! options controls sampling and truncation of the semi-infinite domain; no forced zero tail is attached.
   !! On SHEATH_OK, output contains allocated arrays in SI units; otherwise inspect status and message.
-  subroutine build_profile(input, root, options, output, status, message, residual_tolerance)
+  subroutine build_profile(input, root, options, output, status, message, residual_tolerance, upstream_band_tolerance)
     class(sheath_equilibrium_input), intent(in) :: input
     type(sheath_profile_options), intent(in) :: options
     type(sheath_profile_result), intent(out) :: output
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     real(dp), intent(in) :: residual_tolerance
+    real(dp), intent(in), optional :: upstream_band_tolerance ! see sheath_search_options; default 0
 
     type(zhao_params_type) :: p
     type(sheath_equilibrium_result), intent(in) :: root
-    real(dp) :: raw(3), minimum_e2, boundary_e2
+    real(dp) :: raw(3), minimum_e2, boundary_e2, band
     type(sheath_profile_result) :: trial
     real(dp), allocatable :: phi(:), distance(:), rho(:), e2(:), z(:), v(:), e(:)
     real(dp) :: phi0, phim, cutoff, t, delta, turn, part, d(5)
@@ -660,6 +668,9 @@ contains
     message = 'Profile residual tolerance must be finite and positive.'
     if (.not. ieee_is_finite(residual_tolerance) .or. residual_tolerance <= 0.0_dp) return
     p%search%residual_tolerance = residual_tolerance
+    if (present(upstream_band_tolerance)) p%search%upstream_band_tolerance = upstream_band_tolerance
+    message = 'Profile upstream band tolerance must be finite, nonnegative and below 1.'
+    if (.not. valid_search_options(p%search)) return
 
     status = SHEATH_INVALID_ARGUMENT
     message = 'Profile requires at least 32 points per segment and finite positive distance/cutoff.'
@@ -678,7 +689,7 @@ contains
     if (.not. all(ieee_is_finite(raw)) .or. maxval(abs(raw)) > p%search%residual_tolerance) return
     call validate_zhao_profile(p, root%branch, root%surface_potential_v/p%potential_scale_v, &
         root%minimum_potential_v/p%potential_scale_v, root%ambient_electron_density_m3/p%density_scale_m3, &
-        minimum_e2, boundary_e2, status, message)
+        minimum_e2, boundary_e2, status, message, band)
     if (status /= SHEATH_OK) return
 
     n = options%points_per_segment
@@ -687,6 +698,8 @@ contains
     phi0 = root%surface_potential_v/p%potential_scale_v
     phim = root%minimum_potential_v/p%potential_scale_v
     cutoff = min(options%potential_cutoff_v/p%potential_scale_v, 0.5_dp*abs(phim))
+    ! Stop the upstream end before an accepted band of negative E^2.
+    if (band > 0.0_dp) cutoff = max(cutoff, band + 0.05_dp*(abs(phim) - band))
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Profile first integral is non-finite or does not support a real electric field.'
     total = 0
@@ -737,6 +750,7 @@ contains
     else
       ! Integrate from the exact upstream potential, then omit that infinite endpoint.
       cutoff = min(options%potential_cutoff_v/p%potential_scale_v, 0.5_dp*abs(phi0))
+      if (band > 0.0_dp) cutoff = max(cutoff, band + 0.05_dp*(abs(phi0) - band))
       do i = 1, n
         t = real(i - 1, dp)/real(n - 1, dp)
         phi(i) = phi0*(1.0_dp - t)**2
