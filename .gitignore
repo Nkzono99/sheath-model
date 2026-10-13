@@ -212,3 +212,5 @@ ref/
 
 # Local research and implementation work
 /working/
+
+*.i90
