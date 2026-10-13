@@ -121,11 +121,13 @@ class EquilibriumProblem(SheathPhysics):
     def _unknown_result(self, branch, physical, diagnostics):
         y = self._encode_unknowns(branch, physical)
         norm = float(np.max(np.abs(self._encoded_residual(branch, y, self.search))))
-        band = self._validate_profile_root(branch, physical[0]/self.p.photoelectron_temperature_ev,
-                                           physical[1]/self.p.photoelectron_temperature_ev,
-                                           physical[2]/self.p.density_scale_m3, self.search.upstream_band_tolerance)
+        band, deficit = self._validate_profile_root(branch, physical[0]/self.p.photoelectron_temperature_ev,
+                                                    physical[1]/self.p.photoelectron_temperature_ev,
+                                                    physical[2]/self.p.density_scale_m3,
+                                                    self.search.upstream_band_tolerance,
+                                                    self.search.upstream_field_floor_v_m)
         return EquilibriumResult(self.p, branch, *map(float, physical), norm, diagnostics,
-                                 band*self.p.photoelectron_temperature_ev)
+                                 band*self.p.photoelectron_temperature_ev, deficit)
 
     def _continue_from_atlas(self, branch, atlas, options, diagnostics):
         from .atlas import parameter_key, params_from_key
@@ -155,7 +157,8 @@ class EquilibriumProblem(SheathPhysics):
                     solver._validate_profile_root(branch, physical[0]/solver.p.photoelectron_temperature_ev,
                                                   physical[1]/solver.p.photoelectron_temperature_ev,
                                                   physical[2]/solver.p.density_scale_m3,
-                                                  options.upstream_band_tolerance)
+                                                  options.upstream_band_tolerance,
+                                            options.upstream_field_floor_v_m)
                 except (ValueError, RuntimeError, FloatingPointError, OverflowError):
                     return False
                 return True
@@ -183,7 +186,7 @@ class EquilibriumProblem(SheathPhysics):
         diagnostics = SearchDiagnostics()
         k = "ABC".index(branch)
         diagnostics.searched[k] = True
-        if branch in ("A", "C") and p.u > 0 and options.upstream_band_tolerance <= 0:
+        if branch in ("A", "C") and p.u > 0 and options.upstream_band_tolerance <= 0 and options.upstream_field_floor_v_m <= 0:
             diagnostics.excluded[k] = True
             raise SearchFailure("reflected drifting electrons have no neutral semi-infinite profile", diagnostics)
         if atlas is not None:
@@ -198,7 +201,8 @@ class EquilibriumProblem(SheathPhysics):
             try:
                 self._validate_profile_root(branch, physical[0]/p.photoelectron_temperature_ev,
                                             physical[1]/p.photoelectron_temperature_ev,
-                                            physical[2]/p.density_scale_m3, options.upstream_band_tolerance)
+                                            physical[2]/p.density_scale_m3, options.upstream_band_tolerance,
+                                            options.upstream_field_floor_v_m)
             except FloatingPointError:
                 diagnostics.profile_failures[k] += 1
                 return False
@@ -270,7 +274,7 @@ class EquilibriumProblem(SheathPhysics):
             from .atlas import EquilibriumAtlas
             if not isinstance(atlas, EquilibriumAtlas):
                 raise TypeError("atlas must be EquilibriumAtlas")
-        if branch in {"A", "C"} and self.p.u > 0 and options.upstream_band_tolerance <= 0:
+        if branch in {"A", "C"} and self.p.u > 0 and options.upstream_band_tolerance <= 0 and options.upstream_field_floor_v_m <= 0:
             diagnostics.excluded[k] = True
             return CandidateSet((), diagnostics)
         roots = []
@@ -286,7 +290,8 @@ class EquilibriumProblem(SheathPhysics):
             try:
                 self._validate_profile_root(branch, physical[0]/self.p.photoelectron_temperature_ev,
                                             physical[1]/self.p.photoelectron_temperature_ev,
-                                            physical[2]/self.p.density_scale_m3, options.upstream_band_tolerance)
+                                            physical[2]/self.p.density_scale_m3, options.upstream_band_tolerance,
+                                            options.upstream_field_floor_v_m)
             except FloatingPointError:
                 diagnostics.profile_failures[k] += 1
                 return False

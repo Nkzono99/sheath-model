@@ -20,6 +20,9 @@ def params(drift: float, photoelectrons: bool = True) -> FixedEntryParams:
 class UpstreamBandTests(unittest.TestCase):
     strict = SheathSolver()
     tolerant = SheathSolver(search=SearchOptions(upstream_band_tolerance=0.15))
+    # Upstream boundary where the sheath field has fallen to an external level (motional field ~2 mV/m).
+    floor = SheathSolver(search=SearchOptions(upstream_field_floor_v_m=1.0e-3))
+    tight = SheathSolver(search=SearchOptions(upstream_field_floor_v_m=1.0e-4))
 
     def test_drifting_type_a_needs_tolerance(self) -> None:
         with self.assertRaises(SearchFailure):
@@ -38,6 +41,21 @@ class UpstreamBandTests(unittest.TestCase):
         profile = self.tolerant.build_profile(root)
         self.assertLess(float(profile.potential_v[-1]), -root.upstream_negative_band_v)
 
+    def test_field_floor_accepts_small_deficit(self) -> None:
+        root = self.floor.solve_equilibrium(params(4.0e5), branch="A")
+        self.assertAlmostEqual(root.surface_potential_v, 6.0383, delta=1e-3)
+        # The field deficit inside the A band is about 0.67 mV/m, below the motional field.
+        self.assertGreater(root.upstream_field_deficit_v_m, 5.0e-4)
+        self.assertLess(root.upstream_field_deficit_v_m, 9.0e-4)
+        self.assertGreater(root.upstream_negative_band_v, 0.040)
+        with self.assertRaises(SearchFailure):
+            self.tight.solve_equilibrium(params(4.0e5), branch="A")
+        shallow = self.tight.solve_equilibrium(params(4.0e5, photoelectrons=False), branch="C")
+        self.assertGreater(shallow.upstream_field_deficit_v_m, 2.0e-5)
+        self.assertLess(shallow.upstream_field_deficit_v_m, 6.0e-5)
+        with self.assertRaises(ValueError):
+            SearchOptions(upstream_field_floor_v_m=-1.0)
+
     def test_drifting_type_c_band_is_shallow(self) -> None:
         with self.assertRaises(SearchFailure):
             self.strict.solve_equilibrium(params(4.0e5, photoelectrons=False), branch="C")
@@ -51,6 +69,7 @@ class UpstreamBandTests(unittest.TestCase):
         root = self.tolerant.solve_equilibrium(params(0.0), branch="A")
         self.assertEqual(root.surface_potential_v, reference.surface_potential_v)
         self.assertEqual(root.upstream_negative_band_v, 0.0)
+        self.assertEqual(self.floor.solve_equilibrium(params(0.0), branch="A").upstream_field_deficit_v_m, 0.0)
         with self.assertRaises(ValueError):
             SearchOptions(upstream_band_tolerance=1.0)
 

@@ -11,6 +11,7 @@ from ._orbits import electron_density, POTENTIAL_NODES, POTENTIAL_WEIGHTS
 from ._ions import ion_density_ratio, ion_critical_potential
 
 from .params import FixedEntryParams, ZhaoParams
+from ._constants import QE, EPS0
 
 Branch = Literal["A", "B", "C"]
 TypeASide = Literal["lower", "upper"]
@@ -222,12 +223,13 @@ class SheathPhysics:
         return np.array([r1, r2], dtype=float)
 
 
-    def _validate_profile_root(self, branch, phi0, phim, density, tolerance=0.):
-        """Raise unless the root has a real connecting profile; return the accepted negative-E^2 band.
+    def _validate_profile_root(self, branch, phi0, phim, density, tolerance=0., field_floor_v_m=0.):
+        """Raise unless the root has a real connecting profile; return (band, field deficit).
 
-        With inward electron drift, A/C are accepted only for tolerance>0 when E^2<0 is confined next to
-        upstream within tolerance*|phi_m| (A) or tolerance*|phi_0| (C). The band is returned in units of the
-        photoelectron temperature and is 0 otherwise.
+        With inward electron drift, A/C have E^2<0 in a band next to upstream and are accepted only when every
+        enabled criterion holds: tolerance>0 bounds the band width by tolerance*|phi_m| (A) or tolerance*|phi_0| (C);
+        field_floor_v_m>0 bounds the field deficit sqrt(-min E^2) inside the band by that external field level. The band
+        is returned in units of the photoelectron temperature and the deficit in V/m; both are 0 otherwise.
         """
         if branch == "B" and phi0 > 0:
             ambient_edge = (
@@ -238,10 +240,11 @@ class SheathPhysics:
             if ambient_edge - photo_edge > 128 * np.finfo(float).eps * max(abs(ambient_edge), abs(photo_edge)):
                 raise RuntimeError("Type B has negative field squared arbitrarily near upstream infinity")
         drifting = branch in ("A", "C") and self.p.u > 0
-        if drifting and tolerance <= 0:
+        if drifting and tolerance <= 0 and field_floor_v_m <= 0:
             raise RuntimeError("algebraic root has no semi-infinite profile: inward drift with reflected slow "
                                "electrons makes E^2 negative near neutral infinity; specify zero electron drift "
-                               "for the nondrifting model or a positive upstream_band_tolerance")
+                               "for the nondrifting model, a positive upstream_band_tolerance, or a positive "
+                               "upstream_field_floor_v_m")
         try:
             self._ion_density_hat(max(phi0, 0))
         except ValueError as exc:
@@ -269,7 +272,7 @@ class SheathPhysics:
         if not drifting:
             if min(values) < threshold:
                 raise RuntimeError("algebraic root has no real connecting field profile")
-            return 0.
+            return 0., 0.
         if lower and min(e2 for _, e2 in lower) < threshold:
             raise RuntimeError("algebraic root has no real connecting field profile")
         # The log term makes E^2<0 touch upstream; measure the band by sign (it can be below the threshold for C).
@@ -289,9 +292,14 @@ class SheathPhysics:
                     band = mid
                 else:
                     outside = mid
-        if band > tolerance*reference:
+        # Outside the band E^2>=0, so the sampled upstream minimum is the deficit inside the band.
+        e2_scale = QE*self.p.density_scale_m3*self.p.photoelectron_temperature_ev/EPS0
+        deficit = math.sqrt(max(0., -min(e2 for _, e2 in upstream))*e2_scale)
+        if tolerance > 0 and band > tolerance*reference:
             raise RuntimeError("negative E^2 next to upstream is wider than upstream_band_tolerance allows")
-        return float(band)
+        if field_floor_v_m > 0 and deficit > field_floor_v_m:
+            raise RuntimeError("the field deficit inside the upstream band exceeds upstream_field_floor_v_m")
+        return float(band), float(deficit)
 
 
     def _densities_hat_type_a_side(

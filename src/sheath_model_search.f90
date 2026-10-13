@@ -21,6 +21,10 @@ module sheath_model_search
     !> Accepted width of negative E^2 next to upstream for A/C with inward electron drift, as a fraction of
     !! |phi_m| (A) or |phi_0| (C). 0 keeps the exact semi-infinite condition and rejects these roots.
     real(dp) :: upstream_band_tolerance = 0.0_dp
+    !> External field level [V/m] at which the electrostatic sheath hands over to the upstream plasma. A/C roots
+    !! with inward electron drift are accepted when the field deficit sqrt(-min E^2) inside the upstream band
+    !! does not exceed it. 0 disables this criterion; with upstream_band_tolerance also 0 these roots are rejected.
+    real(dp) :: upstream_field_floor_v_m = 0.0_dp
   end type sheath_search_options
 
   type :: sheath_continuation_options
@@ -62,8 +66,9 @@ contains
       return
     end select
     if (.not. all(ieee_is_finite([options%residual_tolerance, options%potential_extent, &
-        options%upstream_band_tolerance]))) return
+        options%upstream_band_tolerance, options%upstream_field_floor_v_m]))) return
     if (options%upstream_band_tolerance < 0.0_dp .or. options%upstream_band_tolerance >= 1.0_dp) return
+    if (options%upstream_field_floor_v_m < 0.0_dp) return
     valid = options%residual_tolerance > 0.0_dp .and. options%potential_extent > 0.0_dp .and. &
         options%max_iterations >= 0 .and. options%max_backtracks > 0 .and. options%max_starts > 0 .and. &
         options%bracket_points >= 2 .and. options%scalar_max_depth >= 1 .and. options%scalar_max_depth <= 16

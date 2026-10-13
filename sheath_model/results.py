@@ -59,8 +59,11 @@ class EquilibriumResult:
     ambient_electron_density_m3: float
     residual_norm: float
     diagnostics: SearchDiagnostics = field(compare=False)
-    # Potential width next to upstream where E^2<0 [V]; nonzero only for roots accepted by upstream_band_tolerance.
+    # Potential width next to upstream where E^2<0 [V]; nonzero only for drifting A/C roots accepted by
+    # upstream_band_tolerance or upstream_field_floor_v_m.
     upstream_negative_band_v: float = 0.
+    # Field deficit sqrt(-min E^2) inside that band [V/m]; the external field the upstream plasma must supply.
+    upstream_field_deficit_v_m: float = 0.
 
     def __post_init__(self):
         if self.branch not in {'A', 'B', 'C'}:
@@ -75,6 +78,8 @@ class EquilibriumResult:
             raise ValueError('density must be positive and residual nonnegative')
         if not math.isfinite(self.upstream_negative_band_v) or self.upstream_negative_band_v < 0:
             raise ValueError('upstream negative band must be finite and nonnegative')
+        if not math.isfinite(self.upstream_field_deficit_v_m) or self.upstream_field_deficit_v_m < 0:
+            raise ValueError('upstream field deficit must be finite and nonnegative')
         if (self.branch == 'A' and self.minimum_potential_v >= min(self.surface_potential_v, 0.)) or (
                 self.branch == 'B' and (self.surface_potential_v <= 0 or self.minimum_potential_v != 0.)) or (
                 self.branch == 'C' and (self.surface_potential_v >= 0 or self.minimum_potential_v != self.surface_potential_v)):

@@ -23,6 +23,10 @@ class SearchOptions:
     # Accepted width of negative E^2 next to upstream for A/C with inward electron drift, as a fraction
     # of |phi_m| (A) or |phi_0| (C). 0 keeps the exact semi-infinite condition and rejects these roots.
     upstream_band_tolerance: float = 0.
+    # External field level [V/m] at which the electrostatic sheath hands over to the upstream plasma. Drifting A/C
+    # roots are accepted when the field deficit sqrt(-min E^2) inside the upstream band does not exceed it. 0 disables
+    # this criterion; with upstream_band_tolerance also 0 these roots are rejected.
+    upstream_field_floor_v_m: float = 0.
 
     def __post_init__(self):
         if self.method not in {"auto", "newton", "lm", "bracket"}:
@@ -39,6 +43,8 @@ class SearchOptions:
             raise ValueError("use_default_guesses must be a bool")
         if not math.isfinite(self.upstream_band_tolerance) or not 0 <= self.upstream_band_tolerance < 1:
             raise ValueError("upstream_band_tolerance must be finite, nonnegative and below 1")
+        if not math.isfinite(self.upstream_field_floor_v_m) or self.upstream_field_floor_v_m < 0:
+            raise ValueError("upstream_field_floor_v_m must be finite and nonnegative")
 
 
 def _zeros():

@@ -6,7 +6,7 @@ program test_upstream_band
   use sheath_model_photoelectrons, only: DEFAULT_PHOTOELECTRONS
   implicit none
   real(dp), parameter :: pi = acos(-1.0_dp), qe = 1.602176634e-19_dp, me = 9.1093837139e-31_dp
-  type(sheath_solver) :: strict, tolerant, narrow
+  type(sheath_solver) :: strict, tolerant, narrow, floor, tight
   type(fixed_entry_equilibrium_input) :: input
   type(sheath_equilibrium_result) :: root, reference
   type(sheath_profile_result) :: profile
@@ -21,6 +21,10 @@ program test_upstream_band
       photoelectrons=maxwellian_photoelectrons(source_density, 2.2_dp))
   tolerant%search%upstream_band_tolerance = 0.15_dp
   narrow%search%upstream_band_tolerance = 0.02_dp
+  ! Field floor: the upstream boundary sits where the sheath field has fallen to an external level.
+  ! The solar-wind motional field |u x B| is about 2 mV/m for 400 km/s and 5 nT.
+  floor%search%upstream_field_floor_v_m = 1.0e-3_dp
+  tight%search%upstream_field_floor_v_m = 1.0e-4_dp
 
   input%branch = 'A'
   call strict%solve_equilibrium(input, root, status, message)
@@ -42,6 +46,17 @@ program test_upstream_band
   call narrow%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_NO_PHYSICAL_SOLUTION) error stop 'band wider than the tolerance must be rejected'
 
+  ! The field deficit inside the A band is about 0.67 mV/m, below the motional field.
+  call floor%solve_equilibrium(input, root, status, message)
+  if (status /= SHEATH_OK .or. root%branch /= 'A') error stop 'field floor must accept drifting A'
+  if (abs(root%surface_potential_v - 6.0383_dp) > 1e-3_dp) error stop 'field-floor A surface potential'
+  if (root%upstream_field_deficit_v_m < 5.0e-4_dp .or. root%upstream_field_deficit_v_m > 9.0e-4_dp) &
+      error stop 'drifting A field deficit'
+  if (root%upstream_negative_band_v < 0.040_dp .or. root%upstream_negative_band_v > 0.065_dp) &
+      error stop 'field-floor A must still report the band width'
+  call tight%solve_equilibrium(input, root, status, message)
+  if (status /= SHEATH_NO_PHYSICAL_SOLUTION) error stop 'a deficit above the field floor must be rejected'
+
   input%branch = 'auto'
   call tolerant%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_OK .or. root%branch /= 'A') error stop 'auto with tolerance selects A'
@@ -55,6 +70,11 @@ program test_upstream_band
   if (abs(root%surface_potential_v + 7.3403_dp) > 1e-3_dp) error stop 'drifting C surface potential'
   if (root%upstream_negative_band_v <= 0.0_dp .or. root%upstream_negative_band_v > 0.005_dp) &
       error stop 'drifting C negative band width'
+  ! The C band is shallow: its deficit is about 0.04 mV/m, so even the tight floor accepts it.
+  call tight%solve_equilibrium(input, root, status, message)
+  if (status /= SHEATH_OK .or. root%branch /= 'C') error stop 'tight field floor must accept drifting C'
+  if (root%upstream_field_deficit_v_m < 2.0e-5_dp .or. root%upstream_field_deficit_v_m > 6.0e-5_dp) &
+      error stop 'drifting C field deficit'
 
   ! Without drift the tolerance changes nothing.
   input%branch = 'A'
@@ -65,6 +85,12 @@ program test_upstream_band
   call tolerant%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_OK .or. root%surface_potential_v /= reference%surface_potential_v .or. &
       root%upstream_negative_band_v /= 0.0_dp) error stop 'tolerance must not change zero-drift roots'
+  call floor%solve_equilibrium(input, root, status, message)
+  if (status /= SHEATH_OK .or. root%surface_potential_v /= reference%surface_potential_v .or. &
+      root%upstream_field_deficit_v_m /= 0.0_dp) error stop 'field floor must not change zero-drift roots'
+  floor%search%upstream_field_floor_v_m = -1.0_dp
+  call floor%solve_equilibrium(input, root, status, message)
+  if (status == SHEATH_OK) error stop 'field floor must be nonnegative'
 
   tolerant%search%upstream_band_tolerance = 1.0_dp
   call tolerant%solve_equilibrium(input, root, status, message)

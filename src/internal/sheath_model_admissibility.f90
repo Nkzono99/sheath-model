@@ -18,13 +18,15 @@ contains
   !> Check that an algebraic root connects to a neutral, zero-field upstream state with a real field profile.
   !! phi0 and phim are potentials / p%potential_scale_v; density is electron normalization / p%density_scale_m3.
   !! Returns sampled minimum_e2 and boundary_e2 in units of (p%potential_scale_v/p%length_scale_m)^2, plus status and message.
-  !! With inward electron drift, A/C are accepted only if p%search%upstream_band_tolerance>0 and E^2<0 is confined
-  !! to a band next to upstream no wider than that fraction of |phim| (A) or |phi0| (C); negative_band returns its
-  !! width in units of p%potential_scale_v (0 otherwise).
+  !! With inward electron drift, A/C have E^2<0 in a band next to upstream. They are accepted only when the band
+  !! satisfies every enabled criterion: p%search%upstream_band_tolerance>0 bounds its potential width by that fraction
+  !! of |phim| (A) or |phi0| (C); p%search%upstream_field_floor_v_m>0 bounds the field deficit sqrt(-min E^2) inside
+  !! it by that external field level. With both 0 these roots are rejected. negative_band returns the band width in
+  !! units of p%potential_scale_v and negative_band_field_v_m the deficit in V/m (0 otherwise).
   subroutine validate_zhao_profile( &
       p, branch, phi0, phim, density, &
       minimum_e2, boundary_e2, &
-      status, message, negative_band &
+      status, message, negative_band, negative_band_field_v_m &
       )
     type(zhao_params_type), intent(in) :: p
     character(len=1), intent(in) :: branch
@@ -32,10 +34,10 @@ contains
     real(dp), intent(out) :: minimum_e2, boundary_e2
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
-    real(dp), intent(out), optional :: negative_band
+    real(dp), intent(out), optional :: negative_band, negative_band_field_v_m
 
     integer, parameter :: n_samples = 129, n_geometric = 48, n_bisection = 40
-    real(dp) :: phi, e2, rho, fraction, threshold, reference, band, outside, lower_minimum, mid
+    real(dp) :: phi, e2, rho, fraction, threshold, reference, band, outside, lower_minimum, mid, deficit
     real(dp) :: ambient_edge, photo_edge, connection_residual
     real(dp) :: depths(n_samples + n_geometric), upstream_e2s(n_samples + n_geometric)
     integer :: j, segment, n_upstream
@@ -46,6 +48,7 @@ contains
     minimum_e2 = huge(1.0_dp)
     boundary_e2 = huge(1.0_dp)
     if (present(negative_band)) negative_band = 0.0_dp
+    if (present(negative_band_field_v_m)) negative_band_field_v_m = 0.0_dp
     message = 'Inward electron drift with reflected slow electrons cannot approach neutral zero-field infinity.'
     if (density <= 0.0_dp) then
       message = 'The electron normalization must be positive.'
@@ -54,7 +57,8 @@ contains
     ! For A/C, n_e(-h)-n_e(0) contains +const*u*h*log(1/h).
     ! For u>0 this dominates the regular ion/PE terms and makes E^2<0 arbitrarily near infinity.
     drifting_reflection = (branch == 'A' .or. branch == 'C') .and. p%u > 0.0_dp
-    if (drifting_reflection .and. p%search%upstream_band_tolerance <= 0.0_dp) return
+    if (drifting_reflection .and. p%search%upstream_band_tolerance <= 0.0_dp .and. &
+        p%search%upstream_field_floor_v_m <= 0.0_dp) return
 
     if (branch == 'B' .and. phi0 > 0.0_dp) then
       ambient_edge = density*p%density_scale_m3*exp(-p%u**2)/sqrt(pi*p%t_swe_ev)
@@ -179,9 +183,14 @@ contains
         end if
       end do
     end if
+    ! Outside the band E^2>=0, so the sampled upstream minimum is the deficit inside the band.
+    deficit = sqrt(max(0.0_dp, -minval(upstream_e2s(:n_upstream))))*p%potential_scale_v/p%length_scale_m
     message = 'Negative E^2 next to upstream is wider than upstream_band_tolerance allows.'
-    if (band > p%search%upstream_band_tolerance*reference) return
+    if (p%search%upstream_band_tolerance > 0.0_dp .and. band > p%search%upstream_band_tolerance*reference) return
+    message = 'The field deficit inside the upstream band exceeds upstream_field_floor_v_m.'
+    if (p%search%upstream_field_floor_v_m > 0.0_dp .and. deficit > p%search%upstream_field_floor_v_m) return
     if (present(negative_band)) negative_band = band
+    if (present(negative_band_field_v_m)) negative_band_field_v_m = deficit
 
     status = SHEATH_OK
     message = ''

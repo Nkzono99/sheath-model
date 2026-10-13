@@ -92,7 +92,7 @@ class SheathSolver:
             raise ValueError('result does not satisfy the original equations')
         physics = ProfilePhysics(equilibrium.inputs, self.profile)
         physics._validate_profile_root(equilibrium.branch, data['phi0_hat'], data['phi_m_hat'], data['n_swe_inf_hat'],
-                                       self.search.upstream_band_tolerance)
+                                       self.search.upstream_band_tolerance, self.search.upstream_field_floor_v_m)
         return SheathProfile(equilibrium, physics.build_profile(equilibrium), physics)
 
     def solve_profile(self, inputs: FixedEntryParams | ZhaoParams, *, branch='auto',

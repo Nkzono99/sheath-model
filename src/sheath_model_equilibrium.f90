@@ -68,8 +68,11 @@ module sheath_model_equilibrium
     real(dp) :: ion_inward_flux_m2_s = 0.0_dp
     real(dp) :: photoelectron_escape_flux_m2_s = 0.0_dp
     real(dp) :: net_current_a_m2 = 0.0_dp ! Conventional electric current along +z
-    !> Potential width next to upstream where E^2<0 [V]; nonzero only for roots accepted by upstream_band_tolerance.
+    !> Potential width next to upstream where E^2<0 [V]; nonzero only for drifting A/C roots accepted by
+    !! upstream_band_tolerance or upstream_field_floor_v_m.
     real(dp) :: upstream_negative_band_v = 0.0_dp
+    !> Field deficit sqrt(-min E^2) inside that band [V/m]; the external field the upstream plasma must supply.
+    real(dp) :: upstream_field_deficit_v_m = 0.0_dp
   end type sheath_equilibrium_result
 
   !> Local species number densities [m^-3] and net charge density [C/m^3].
@@ -324,7 +327,7 @@ contains
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     type(sheath_equilibrium_result) :: trial
-    real(dp) :: residual(3), outward, returning, minimum_e2, boundary_e2, band
+    real(dp) :: residual(3), outward, returning, minimum_e2, boundary_e2, band, deficit
     output = sheath_equilibrium_result()
     call equilibrium_residual(p, branch, physical, residual)
     status = SHEATH_NUMERICAL_FAILURE
@@ -343,9 +346,10 @@ contains
         trial%photoelectron_escape_flux_m2_s, trial%net_current_a_m2]))) return
 
     call validate_zhao_profile(p, branch, physical(1)/p%potential_scale_v, physical(2)/p%potential_scale_v, &
-        physical(3)/p%density_scale_m3, minimum_e2, boundary_e2, status, message, band)
+        physical(3)/p%density_scale_m3, minimum_e2, boundary_e2, status, message, band, deficit)
     if (status /= SHEATH_OK) return
     trial%upstream_negative_band_v = band*p%potential_scale_v
+    trial%upstream_field_deficit_v_m = deficit
 
     trial%valid = .true.
     output = trial
@@ -644,7 +648,8 @@ contains
   !> Reconstruct an existing J=0 root using the Poisson first integral, without root search.
   !! options controls sampling and truncation of the semi-infinite domain; no forced zero tail is attached.
   !! On SHEATH_OK, output contains allocated arrays in SI units; otherwise inspect status and message.
-  subroutine build_profile(input, root, options, output, status, message, residual_tolerance, upstream_band_tolerance)
+  subroutine build_profile(input, root, options, output, status, message, residual_tolerance, upstream_band_tolerance, &
+      upstream_field_floor_v_m)
     class(sheath_equilibrium_input), intent(in) :: input
     type(sheath_profile_options), intent(in) :: options
     type(sheath_profile_result), intent(out) :: output
@@ -652,6 +657,7 @@ contains
     character(len=*), intent(out) :: message
     real(dp), intent(in) :: residual_tolerance
     real(dp), intent(in), optional :: upstream_band_tolerance ! see sheath_search_options; default 0
+    real(dp), intent(in), optional :: upstream_field_floor_v_m ! see sheath_search_options; default 0
 
     type(zhao_params_type) :: p
     type(sheath_equilibrium_result), intent(in) :: root
@@ -669,7 +675,8 @@ contains
     if (.not. ieee_is_finite(residual_tolerance) .or. residual_tolerance <= 0.0_dp) return
     p%search%residual_tolerance = residual_tolerance
     if (present(upstream_band_tolerance)) p%search%upstream_band_tolerance = upstream_band_tolerance
-    message = 'Profile upstream band tolerance must be finite, nonnegative and below 1.'
+    if (present(upstream_field_floor_v_m)) p%search%upstream_field_floor_v_m = upstream_field_floor_v_m
+    message = 'Profile upstream band tolerance must be finite, nonnegative and below 1, and the field floor nonnegative.'
     if (.not. valid_search_options(p%search)) return
 
     status = SHEATH_INVALID_ARGUMENT
