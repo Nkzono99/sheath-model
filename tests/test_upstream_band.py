@@ -14,7 +14,7 @@ SOURCE_DENSITY = 2.0 * math.sqrt(math.pi) * (4.5e-6 / QE) / math.sqrt(2.0 * QE *
 def params(drift: float, photoelectrons: bool = True) -> FixedEntryParams:
     return FixedEntryParams(ion_density_m3=5.0e6, electron_temperature_ev=10.0, electron_drift_mps=drift,
                             ion_entry_speed_mps=4.0e5,
-                            photoelectron_density_m3=SOURCE_DENSITY if photoelectrons else 0.0)
+                            emission_density_m3=SOURCE_DENSITY if photoelectrons else 0.0)
 
 
 class UpstreamBandTests(unittest.TestCase):

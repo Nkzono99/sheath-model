@@ -164,7 +164,7 @@ contains
     character(len=512) :: message
     input = prescribed_field_input(electric_field_v_m=field, electron_drift_mps=0.0_dp)
     input%ion_entry_speed_mps = 468.0e3_dp*sin(alpha_field*pi/180.0_dp)
-    input%photoelectrons = maxwellian_photoelectrons(input%ion_density_m3*source_ratio*sin(alpha_field*pi/180.0_dp), 2.2_dp)
+    input%emission = maxwellian_emission(input%ion_density_m3*source_ratio*sin(alpha_field*pi/180.0_dp), 2.2_dp)
     call solver%solve_prescribed_field_candidates(input, roots, status, message, diagnostics)
     found = 0
     unknown = 0

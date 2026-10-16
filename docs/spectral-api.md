@@ -1,26 +1,29 @@
-# 任意光電子スペクトルと静的シース評価
+# 放出電子スペクトルと静的シース評価
 
-Fortran の `use sheath_model` から、光電子源の分布を指定し、試行電位における
+Fortran の `use sheath_model` から、境界が外向きに放出する電子（放出電子）の分布を指定し、試行電位における
 Type A/B/C の密度規格化・電場積分・流束・電流を評価できます。
 前回状態や時刻を持たない API です。電位基準は上流の 0 V、+z は境界から上流向きで、
 `E_z=-dphi/dz` とします。
 
-## 光電子源を指定する
+## 放出源を指定する
+
+放出電子は由来を問いません。光電子のほか、二次電子や、利用側の領域内で反射して境界を外向きに通過する電子も
+同じ放出源として与えます。
 
 ```fortran
 type(plasma_input) :: plasma
 
 ! 境界を外向きに通過する法線運動エネルギーの分布
-plasma%photoelectrons = binned_photoelectrons( &
+plasma%emission = binned_emission( &
     energy_edges_ev=[0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], &
     bin_flux_m2_s=[2.0e12_dp, 5.0e11_dp, 1.0e11_dp])
 
 ! 解析的な半 Maxwell 源を使う場合
-plasma%photoelectrons = maxwellian_photoelectrons( &
+plasma%emission = maxwellian_emission( &
     density_m3=2.0e7_dp, temperature_ev=2.2_dp)
 ```
 
-`photoelectron_source` は入力を所有します。コンストラクタで渡した配列を後から変更しても
+`emission_source` は入力を所有します。コンストラクタで渡した配列を後から変更しても
 源は変わりません。入力の検査はモデルの評価・求解時に行い、不正な源には
 `SHEATH_INVALID_ARGUMENT` を返します。
 
@@ -28,12 +31,14 @@ plasma%photoelectrons = maxwellian_photoelectrons( &
 | --- | --- | --- |
 | `energy_edges_ev(N+1)` | 法線運動エネルギー K の bin 境界 [eV] | 有限・非負・厳密な昇順、N ≥ 1 |
 | `bin_flux_m2_s(N)` | 各 bin に**積分された**外向き数流束 [m⁻² s⁻¹] | 有限・非負、全てゼロも可 |
-| Maxwell `density_m3` | 半 Maxwell 分布の規格化 N_PE [m⁻³] | 有限・非負 |
-| Maxwell `temperature_ev` | 光電子温度 [eV] | 有限・正、零放出時も必要 |
+| Maxwell `density_m3` | 半 Maxwell 分布の規格化 N_em [m⁻³] | 有限・非負 |
+| Maxwell `temperature_ev` | 放出電子温度 [eV] | 有限・正、零放出時も必要 |
 
 bin 内は `g(K)=dGamma/dK=bin_flux/(K_high-K_low)` が一定、指定範囲外はゼロです。
 bin 幅・間隔は任意で、最初の境界が 0 より大きくても構いません。
-Maxwell 源の放出流束は `N_PE sqrt(2 e T_PE/m_e)/(2 sqrt(pi))` です。
+Maxwell 源の放出流束は `N_em sqrt(2 e T_em/m_e)/(2 sqrt(pi))` です。
+`source%mean_normal_energy()` は流束で重み付けした平均法線運動エネルギー [eV] を返します。
+Maxwell 源では温度、bin 源では bin 中点の流束加重平均です。
 bin 源から密度・温度を推定して Maxwell に近似する処理はありません。
 
 障壁 `B=phi_H-phi_min` を超える `K≥B` が escape、それ未満が return です。
@@ -53,7 +58,7 @@ program static_example
   character(len=256) :: message
 
   plasma%electron_drift_mps = 0.0_dp
-  plasma%photoelectrons = binned_photoelectrons( &
+  plasma%emission = binned_emission( &
       [0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], [2.0e12_dp, 5.0e11_dp, 1.0e11_dp])
   call evaluate_sheath_state(plasma, 'B', 0.5_dp, state, status, message)
   if (status /= SHEATH_OK) stop 1
@@ -71,7 +76,7 @@ end program
 A では `minimum_potential_v` が必須です。B/C への指定や `branch='auto'` は入力エラーです。
 A の呼び出し例は `call evaluate_sheath_state(plasma, 'A', phi_H, state, status, message, minimum_potential_v=phi_m)` です。
 
-`plasma_input` で固定するのは、上流イオン密度・速度、電子温度・ドリフト、粒子質量、光電子源です。
+`plasma_input` で固定するのは、上流イオン密度・速度、電子温度・ドリフト、粒子質量、放出源です。
 既定値と制約は [E_H 入力表](fortran-api.md#物理入力) の共通項と同じです。
 背景電子 Maxwell 集団の規格化 `N_e` は、指定した電位での上流準中性から求めます。
 実際の上流総電子密度を固定するモデルではありません。
@@ -83,15 +88,15 @@ A の呼び出し例は `call evaluate_sheath_state(plasma, 'A', phi_H, state, s
 | `physical_status`, `physical_message` | 不採用理由または物理解判定の成功 |
 | `branch`, `boundary_potential_v`, `minimum_potential_v` | 評価した枝と電位 [V] |
 | `ambient_electron_density_m3` | 上流電子集団の規格化 N_e [m⁻³] |
-| `neutrality_residual_m3` | 上流での `n_i-n_e-n_PE` [m⁻³] |
+| `neutrality_residual_m3` | 上流での `n_i-n_e-n_em` [m⁻³] |
 | `boundary_field_squared_v2_m2` | 符号を保持した境界の E² 積分 [V²/m²] |
 | `connection_residual_v2_m2` | A の `-2/eps0 ∫(phi_min..0) rho_upper dphi` [V²/m²]、B/C は 0 |
 | `connection_residual_normalized` | A の接続残差を内部電場尺度の二乗と `(-phi_min_hat)^(3/2)` で割った無次元量。B/C は 0 |
 | `electric_field_v_m` | 枝の符号を持つ境界電場 [V/m]。E² 積分が負なら NaN |
 | `electron_inward_flux_m2_s`, `ion_inward_flux_m2_s` | 境界への電子・イオン数流束 [m⁻² s⁻¹] |
-| `photoelectron_outward_flux_m2_s` | 総放出数流束 [m⁻² s⁻¹] |
-| `photoelectron_escape_flux_m2_s`, `photoelectron_return_flux_m2_s` | 上流到達・境界へ戻る数流束 [m⁻² s⁻¹] |
-| `net_current_a_m2` | 外向き通常電流 `e*(Gamma_e,in-Gamma_i,in-Gamma_PE,escape)` [A/m²] |
+| `emitted_outward_flux_m2_s` | 総放出数流束 [m⁻² s⁻¹] |
+| `emitted_escape_flux_m2_s`, `emitted_return_flux_m2_s` | 上流到達・境界へ戻る数流束 [m⁻² s⁻¹] |
+| `net_current_a_m2` | 外向き通常電流 `e*(Gamma_e,in-Gamma_i,in-Gamma_em,escape)` [A/m²] |
 
 **`status==SHEATH_OK` は、試行状態を評価できたという意味です。**
 `state%admissible` が偽でも、符号付き積分や残差は外側の方程式を解くために使用できます。
@@ -100,7 +105,7 @@ A の呼び出し例は `call evaluate_sheath_state(plasma, 'A', phi_H, state, s
 不正入力・数値評価失敗時には `evaluated=.false.` です。
 
 外側の連立方程式には `connection_residual_normalized` を使えます。
-`V_s=plasma%photoelectrons%potential_scale(plasma%electron_temperature_ev)` とすると、
+`V_s=plasma%emission%potential_scale(plasma%electron_temperature_ev)` とすると、
 SI 残差との関係は `R_A=connection_residual_v2_m2*eps0*sqrt(V_s)/(e*n_i*(-phi_min)^(3/2))` です。
 この規格化は浅い極小で区間が縮む効果を取り除き、Maxwell・bin の求解と最終判定で共通に使います。
 外側で課す電場、電流、時間更新式の残差は、利用側でも検査してください。
@@ -147,7 +152,9 @@ BEACH の batch-154 スペクトルと独立な高精度静的参照値を回帰
 任意スペクトル、E_H 指定、静的電位評価は Fortran API です。Python は Maxwell 源の J=0 とプロファイルに対応し、
 共通モデルの軌道分布・単位・Type B 上流条件・無ドリフト解析式を Fortran と揃えています。
 
-ヒストグラムの生成・蓄積、時間更新式とその根探索、前回状態の保存、候補の選択、MPI・checkpoint は利用側で扱います。
+粒子シミュレータの境界面から外部シースへ結合する場合は、[シミュレータとの結合](coupling-api.md) の API を使えます。
+観測した流出スペクトルからの放出源の構築、外部解の更新と保存はそちらで扱います。
+ヒストグラムの集計・MPI 合算、時間更新式とその根探索、候補の選択は利用側で扱います。
 利用側の配置や粒子種から法線条件を作る処理、変位電場から E_H への換算も利用側で行います。
 静的評価の電流は外向き通常電流なので、利用側の表面電荷収支に合わせて符号を換算してください。
 ライブラリの判定は有限の積分・経路検査を含み、全パラメータ域の存在証明や動的安定性の判定ではありません。

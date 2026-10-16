@@ -31,7 +31,7 @@ class EquilibriumProblem(SheathPhysics):
 
     def _encode_unknowns(self, branch, physical):
         phi0, phim, density = physical
-        scale = self.p.photoelectron_temperature_ev
+        scale = self.p.emission_temperature_ev
         if not np.all(np.isfinite(physical)) or density <= 0:
             return None
         if branch == "A":
@@ -52,16 +52,16 @@ class EquilibriumProblem(SheathPhysics):
         if branch == "A":
             if y[1] > math.log(options.potential_extent):
                 return None
-            phim = -p.photoelectron_temperature_ev*math.exp(y[1])
-            phi0 = phim + p.photoelectron_temperature_ev*math.exp(y[0])
+            phim = -p.emission_temperature_ev*math.exp(y[1])
+            phi0 = phim + p.emission_temperature_ev*math.exp(y[0])
         else:
-            phi0 = (1 if branch == "B" else -1)*p.photoelectron_temperature_ev*math.exp(y[0])
+            phi0 = (1 if branch == "B" else -1)*p.emission_temperature_ev*math.exp(y[0])
             phim = 0. if branch == "B" else phi0
         density = p.ion_density_m3*math.exp(y[-1])
         if not math.isfinite(density) or density <= 0:
             return None
         try:
-            self._ion_density_hat(max(phi0, 0)/p.photoelectron_temperature_ev)
+            self._ion_density_hat(max(phi0, 0)/p.emission_temperature_ev)
         except ValueError:
             return None
         return np.array([phi0, phim, density])
@@ -69,9 +69,9 @@ class EquilibriumProblem(SheathPhysics):
 
     def _default_guesses(self, branch, options):
         p = self.p
-        source_shift = math.log(max(1., .5*p.photoelectron_density_m3/p.ion_density_m3))
+        source_shift = math.log(max(1., .5*p.emission_density_m3/p.ion_density_m3))
         limit = ion_critical_potential(.5*p.electron_temperature_ev*p.mach**2,
-                                      p.ion_pressure_factor*p.ion_temperature_ev)/p.photoelectron_temperature_ev
+                                      p.ion_pressure_factor*p.ion_temperature_ev)/p.emission_temperature_ev
         potentials = []
         if branch == "A":
             for gap, depth in zip((2., 1., .5, 3., 1., 1., 1., .02), (.2, .05, .5, .8, 1., 2., 4., .5)):
@@ -90,7 +90,7 @@ class EquilibriumProblem(SheathPhysics):
                 minimum = surface
             else:
                 minimum = 0.
-            phi0, phim = np.array([surface, minimum])*p.photoelectron_temperature_ev
+            phi0, phim = np.array([surface, minimum])*p.emission_temperature_ev
             # The neutrality equation is affine in electron normalization.
             func = getattr(self, "_residuals_type_"+branch.lower())
             x0 = [phi0, phim, p.ion_density_m3] if branch == "A" else [phi0, p.ion_density_m3]
@@ -113,21 +113,21 @@ class EquilibriumProblem(SheathPhysics):
         raw = getattr(self, "_residuals_type_"+branch.lower())(physical if branch == "A" else physical[[0, 2]])
         raw[:2] /= self.p.ion_density_m3
         if branch == "A":
-            raw[2] = self._type_a_connection_residual(physical[0]/self.p.photoelectron_temperature_ev,
-                       physical[1]/self.p.photoelectron_temperature_ev, physical[2]/self.p.density_scale_m3)
+            raw[2] = self._type_a_connection_residual(physical[0]/self.p.emission_temperature_ev,
+                       physical[1]/self.p.emission_temperature_ev, physical[2]/self.p.density_scale_m3)
         return raw if np.all(np.isfinite(raw)) else None
 
 
     def _unknown_result(self, branch, physical, diagnostics):
         y = self._encode_unknowns(branch, physical)
         norm = float(np.max(np.abs(self._encoded_residual(branch, y, self.search))))
-        band, deficit = self._validate_profile_root(branch, physical[0]/self.p.photoelectron_temperature_ev,
-                                                    physical[1]/self.p.photoelectron_temperature_ev,
+        band, deficit = self._validate_profile_root(branch, physical[0]/self.p.emission_temperature_ev,
+                                                    physical[1]/self.p.emission_temperature_ev,
                                                     physical[2]/self.p.density_scale_m3,
                                                     self.search.upstream_band_tolerance,
                                                     self.search.upstream_field_floor_v_m)
         return EquilibriumResult(self.p, branch, *map(float, physical), norm, diagnostics,
-                                 band*self.p.photoelectron_temperature_ev, deficit)
+                                 band*self.p.emission_temperature_ev, deficit)
 
     def _continue_from_atlas(self, branch, atlas, options, diagnostics):
         from .atlas import parameter_key, params_from_key
@@ -154,8 +154,8 @@ class EquilibriumProblem(SheathPhysics):
                     physical = solver._decode_unknowns(branch, y, options)
                     if physical is None:
                         return False
-                    solver._validate_profile_root(branch, physical[0]/solver.p.photoelectron_temperature_ev,
-                                                  physical[1]/solver.p.photoelectron_temperature_ev,
+                    solver._validate_profile_root(branch, physical[0]/solver.p.emission_temperature_ev,
+                                                  physical[1]/solver.p.emission_temperature_ev,
                                                   physical[2]/solver.p.density_scale_m3,
                                                   options.upstream_band_tolerance,
                                             options.upstream_field_floor_v_m)
@@ -199,8 +199,8 @@ class EquilibriumProblem(SheathPhysics):
 
         def accept(physical):
             try:
-                self._validate_profile_root(branch, physical[0]/p.photoelectron_temperature_ev,
-                                            physical[1]/p.photoelectron_temperature_ev,
+                self._validate_profile_root(branch, physical[0]/p.emission_temperature_ev,
+                                            physical[1]/p.emission_temperature_ev,
                                             physical[2]/p.density_scale_m3, options.upstream_band_tolerance,
                                             options.upstream_field_floor_v_m)
             except FloatingPointError:
@@ -288,8 +288,8 @@ class EquilibriumProblem(SheathPhysics):
             if any(np.linalg.norm(encoded-root) < 1e-6 for root in roots):
                 return False
             try:
-                self._validate_profile_root(branch, physical[0]/self.p.photoelectron_temperature_ev,
-                                            physical[1]/self.p.photoelectron_temperature_ev,
+                self._validate_profile_root(branch, physical[0]/self.p.emission_temperature_ev,
+                                            physical[1]/self.p.emission_temperature_ev,
                                             physical[2]/self.p.density_scale_m3, options.upstream_band_tolerance,
                                             options.upstream_field_floor_v_m)
             except FloatingPointError:
@@ -338,7 +338,7 @@ class EquilibriumProblem(SheathPhysics):
     def _scalar_search(self, branch, options, diagnostics, accept):
         p = self.p
         k = "ABC".index(branch)
-        limit = options.potential_extent*p.photoelectron_temperature_ev
+        limit = options.potential_extent*p.emission_temperature_ev
         if branch == "B":
             limit = min(limit, np.nextafter(ion_critical_potential(.5*p.electron_temperature_ev*p.mach**2,
                                p.ion_pressure_factor*p.ion_temperature_ev), -math.inf))
@@ -348,13 +348,13 @@ class EquilibriumProblem(SheathPhysics):
             grid = -grid
         func = self._residuals_type_b if branch == "B" else self._residuals_type_c
         ion_term = p.ion_density_m3*math.sqrt(2*math.pi*p.electron_temperature_ev/
-                   p.photoelectron_temperature_ev*p.electron_mass_kg/p.ion_mass_kg)*p.mach
+                   p.emission_temperature_ev*p.electron_mass_kg/p.ion_mass_kg)*p.mach
 
         def evaluate(phi):
             diagnostics.evaluations[k] += 1
             cutoff = -p.u if branch == "B" else math.sqrt(-phi/p.electron_temperature_ev)-p.u
             coefficient = self._swe_free_current_term(1., cutoff)
-            source = p.photoelectron_density_m3*(math.exp(-phi/p.photoelectron_temperature_ev) if branch == "B" else 1.)
+            source = p.emission_density_m3*(math.exp(-phi/p.emission_temperature_ev) if branch == "B" else 1.)
             if coefficient <= 0 or not math.isfinite(coefficient):
                 return None
             density = (source+ion_term)/coefficient

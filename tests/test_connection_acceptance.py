@@ -15,8 +15,8 @@ class ConnectionAcceptanceTests(unittest.TestCase):
         fixed = FixedEntryParams(ion_density_m3=solar.ion_density_m3,
                                 ion_entry_speed_mps=solar.ion_entry_speed_mps,
                                 electron_temperature_ev=solar.electron_temperature_ev,
-                                photoelectron_temperature_ev=solar.photoelectron_temperature_ev,
-                                photoelectron_density_m3=solar.photoelectron_density_m3)
+                                emission_temperature_ev=solar.emission_temperature_ev,
+                                emission_density_m3=solar.emission_density_m3)
         root = SheathSolver().solve_equilibrium(solar, branch='A')
         values = [SheathPhysics(p)._type_a_connection_residual(root.surface_potential_v/2.2,
                   1.1*root.minimum_potential_v/2.2, root.ambient_electron_density_m3/p.density_scale_m3)
@@ -30,7 +30,7 @@ class ConnectionAcceptanceTests(unittest.TestCase):
         source_density = gamma*2*math.sqrt(math.pi)/math.sqrt(2*QE*2/me)
         params = FixedEntryParams(ion_density_m3=5e6, electron_temperature_ev=10.,
                                  ion_entry_speed_mps=309496.90072670573,
-                                 photoelectron_temperature_ev=2., photoelectron_density_m3=source_density)
+                                 emission_temperature_ev=2., emission_density_m3=source_density)
         physics = SheathPhysics(params)
         surface, minimum = 0.22886728419952757/2, -8e-15/2
         free, reflected = electron_density(0., minimum/params.tau, 0.)
@@ -59,7 +59,7 @@ class ConnectionAcceptanceTests(unittest.TestCase):
             physics._validate_profile_root('A', surface, minimum, density_m3/params.density_scale_m3)
 
     def test_accepted_equilibrium_has_a_non_degenerate_upper_connection(self):
-        params = FixedEntryParams(photoelectron_density_m3=55.42562584220407e6)
+        params = FixedEntryParams(emission_density_m3=55.42562584220407e6)
         root = SheathSolver().solve_equilibrium(params, branch='A')
         physics = SheathPhysics(params)
         residual = physics._type_a_connection_residual(root.surface_potential_v/2.2,

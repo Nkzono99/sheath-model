@@ -22,14 +22,14 @@ program test_fixed_entry
 
   call solver%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_OK .or. root%branch /= 'C') error stop 'fixed-entry defaults'
-  if (root%photoelectron_escape_flux_m2_s /= 0.0_dp) error stop 'default emission'
+  if (root%emitted_escape_flux_m2_s /= 0.0_dp) error stop 'default emission'
   options%points_per_segment = 512
   do b = 1, 3
     solar = zhao_equilibrium_input(branch=branches(b), sun_elevation_deg=elevations(b), electron_drift_mode='zero')
     input%branch = branches(b)
     input%plasma%electron_drift_mps = 0.0_dp
     input%plasma%ion_entry_speed_mps = solar%solar_wind_speed_mps*sin(elevations(b)*acos(-1.0_dp)/180.0_dp)
-    input%plasma%photoelectrons = maxwellian_photoelectrons( &
+    input%plasma%emission = maxwellian_emission( &
         solar%photoelectron_reference_density_m3*sin(elevations(b)*acos(-1.0_dp)/180.0_dp), &
         solar%photoelectron_temperature_ev)
     do hot = 0, 1
@@ -86,22 +86,22 @@ program test_fixed_entry
   end do
 
   input%branch = 'auto'
-  input%plasma%photoelectrons = maxwellian_photoelectrons(0.0_dp, 2.2_dp)
+  input%plasma%emission = maxwellian_emission(0.0_dp, 2.2_dp)
   input%plasma%ion_entry_speed_mps = 400e3_dp
   call solver%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_OK .or. root%branch /= 'C') error stop 'zero source'
-  input%plasma%photoelectrons = binned_photoelectrons([0.0_dp, 1.0_dp, 3.0_dp], [0.0_dp, 0.0_dp])
+  input%plasma%emission = binned_emission([0.0_dp, 1.0_dp, 3.0_dp], [0.0_dp, 0.0_dp])
   call solver%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_OK .or. abs(root%surface_potential_v) <= 0.0_dp) error stop 'binned zero source'
-  input%plasma%photoelectrons = binned_photoelectrons( &
+  input%plasma%emission = binned_emission( &
       [0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], [2e10_dp, 5e9_dp, 1e9_dp])
   call solver%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_OK .or. root%branch /= 'C') error stop 'binned emitting source'
-  if (abs(root%photoelectron_escape_flux_m2_s/2.6e10_dp - 1.0_dp) > 1e-14_dp) error stop 'spectral flux preserved'
+  if (abs(root%emitted_escape_flux_m2_s/2.6e10_dp - 1.0_dp) > 1e-14_dp) error stop 'spectral flux preserved'
   if (abs(root%net_current_a_m2) > 1e-12_dp) error stop 'spectral equilibrium current'
 
   input%branch = 'B'
-  input%plasma%photoelectrons = maxwellian_photoelectrons(1e7_dp, 2.2_dp)
+  input%plasma%emission = maxwellian_emission(1e7_dp, 2.2_dp)
   input%plasma%ion_entry_speed_mps = sqrt(40.0_dp*1.602176634e-19_dp/input%plasma%ion_mass_kg)
   input%plasma%ion_temperature_ev = 5.0_dp
   input%plasma%ion_pressure_factor = 1.0_dp

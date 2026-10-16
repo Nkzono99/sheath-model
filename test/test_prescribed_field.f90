@@ -12,7 +12,7 @@ program test_prescribed_field
   character(len=512) :: message
 
   call solver%solve_prescribed_field(input, output, status, message)
-  call ok('zero field without photoelectrons')
+  call ok('zero field without emission')
   thermal = sqrt(2.0_dp*qe*input%electron_temperature_ev/input%electron_mass_kg)
   expected = 2.0_dp*input%ion_density_m3/(1.0_dp + erf(input%electron_drift_mps/thermal))
   call near(output%ambient_electron_density_m3, expected, expected*1e-12_dp, 'upstream neutrality')
@@ -24,7 +24,7 @@ program test_prescribed_field
   input%branch = 'A'
   input%electron_drift_mps = 0.0_dp
   input%electric_field_v_m = 1.4187346568707933e-11_dp/eps0
-  input%photoelectrons = maxwellian_photoelectrons(5.5425625842204072e7_dp, 2.2_dp)
+  input%emission = maxwellian_emission(5.5425625842204072e7_dp, 2.2_dp)
   call solver%solve_prescribed_field(input, output, status, message)
   call ok('Type A reference')
 
@@ -47,14 +47,14 @@ program test_prescribed_field
   call ok('negative field')
   call check(output%branch == 'C' .and. output%boundary_potential_v < 0.0_dp, 'negative field C')
   call near(output%minimum_potential_v, output%boundary_potential_v, 0.0_dp, 'C minimum')
-  call near(output%photoelectron_escape_flux_m2_s, 0.0_dp, 0.0_dp, 'no emission')
+  call near(output%emitted_escape_flux_m2_s, 0.0_dp, 0.0_dp, 'no emission')
   call near(output%net_current_a_m2, qe*(output%electron_inward_flux_m2_s - output%ion_inward_flux_m2_s), &
       1e-18_dp, 'C net current')
   input%branch = 'B'
   call solver%solve_prescribed_field(input, output, status, message)
   call check(status == SHEATH_NO_PHYSICAL_SOLUTION, 'explicit branch does not fall back')
 
-  input = prescribed_field_input(photoelectrons=maxwellian_photoelectrons(-1.0_dp, 2.2_dp))
+  input = prescribed_field_input(emission=maxwellian_emission(-1.0_dp, 2.2_dp))
   call solver%solve_prescribed_field(input, output, status, message)
   call check(status == SHEATH_INVALID_ARGUMENT, 'negative source density')
   input = prescribed_field_input(electric_field_v_m=ieee_value(0.0_dp, ieee_quiet_nan))
@@ -63,7 +63,7 @@ program test_prescribed_field
   input = prescribed_field_input(ion_mass_kg=-1.0_dp)
   call solver%solve_prescribed_field(input, output, status, message)
   call check(status == SHEATH_INVALID_ARGUMENT, 'negative mass')
-  input = prescribed_field_input(photoelectrons=maxwellian_photoelectrons(0.0_dp, 0.0_dp))
+  input = prescribed_field_input(emission=maxwellian_emission(0.0_dp, 0.0_dp))
   call solver%solve_prescribed_field(input, output, status, message)
   call check(status == SHEATH_INVALID_ARGUMENT, 'zero temperature')
   input = prescribed_field_input(branch='invalid')

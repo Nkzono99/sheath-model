@@ -10,7 +10,7 @@ from sheath_model import (SheathSolver, ZhaoParams, FixedEntryParams, ProfileOpt
 class SolverApiTests(unittest.TestCase):
     def test_reuse_across_physical_inputs_and_call_order(self):
         solver = SheathSolver()
-        first = FixedEntryParams(photoelectron_density_m3=55.42562584220407e6)
+        first = FixedEntryParams(emission_density_m3=55.42562584220407e6)
         second = ZhaoParams(sun_elevation_deg=10., electron_drift_mode='zero')
         a = solver.solve_equilibrium(first, branch='A')
         c = solver.solve_equilibrium(second, branch='C')
@@ -22,7 +22,7 @@ class SolverApiTests(unittest.TestCase):
         self.assertFalse(c.diagnostics.searched[0])
 
     def test_profile_retains_its_conditions_and_needs_no_search(self):
-        params = FixedEntryParams(photoelectron_density_m3=55.42562584220407e6)
+        params = FixedEntryParams(emission_density_m3=55.42562584220407e6)
         root = SheathSolver().solve_equilibrium(params, branch='A')
         disabled = SheathSolver(search=SearchOptions(max_iterations=0, use_default_guesses=False))
         with self.assertRaises(SearchFailure):
@@ -83,7 +83,7 @@ class SolverApiTests(unittest.TestCase):
         self.assertFalse(caught.exception.diagnostics.excluded[2])
 
     def test_mass_and_speed_scaling_preserves_the_physical_map_key(self):
-        params = FixedEntryParams(photoelectron_density_m3=55.42562584220407e6)
+        params = FixedEntryParams(emission_density_m3=55.42562584220407e6)
         atlas = SheathSolver().build_equilibrium_atlas([params], branches=('A',))
         root = SheathSolver().solve_equilibrium(params, branch='A')
         scaled = replace(params, ion_mass_kg=2*params.ion_mass_kg,

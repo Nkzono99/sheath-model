@@ -26,7 +26,7 @@ program test_spectral_endpoint
   input%electron_drift_mps = 4e5_dp
   input%ion_entry_speed_mps = 4e5_dp
   input%electron_mass_kg = 9.1093837139e-31_dp
-  input%photoelectrons = binned_photoelectrons(edges, flux)
+  input%emission = binned_emission(edges, flux)
   phi = 6.43321741907773337_dp
   density = 4167907.56298632319959109_dp
   call evaluate_sheath_state(input, 'B', nearest(phi, -1.0_dp), left, status, message)
@@ -41,8 +41,8 @@ program test_spectral_endpoint
   call check(abs(eps0*state%electric_field_v_m - 1.9063843016813198782561e-11_dp) < 5e-24_dp, &
       'field agrees with high-precision oracle')
   call check(abs(state%neutrality_residual_m3)/input%ion_density_m3 < 2e-12_dp, 'neutrality within one potential ulp')
-  call check(abs(state%photoelectron_outward_flux_m2_s - state%photoelectron_escape_flux_m2_s &
-      - state%photoelectron_return_flux_m2_s)/sum(flux) < 2e-15_dp, 'source conservation')
+  call check(abs(state%emitted_outward_flux_m2_s - state%emitted_escape_flux_m2_s &
+      - state%emitted_return_flux_m2_s)/sum(flux) < 2e-15_dp, 'source conservation')
   print *, 'BEACH spectral endpoint agrees with independent high-precision reference.'
 contains
   subroutine check(condition, label)

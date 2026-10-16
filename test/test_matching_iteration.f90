@@ -12,7 +12,7 @@ program test_matching_iteration
   type(sheath_equilibrium_result) :: root
   type(sheath_matching_iteration) :: iteration, restored, other
   type(sheath_matching_conditions) :: before, after
-  type(photoelectron_source) :: binned, empty, kept, saved
+  type(emission_source) :: binned, empty, kept, saved
   integer(i32) :: status
   integer :: unit, i
   real(dp), allocatable :: edges(:), flux(:)
@@ -22,9 +22,9 @@ program test_matching_iteration
 
   temperature = 2.2_dp
   plasma%electron_drift_mps = 0.0_dp
-  plasma%photoelectrons = maxwellian_photoelectrons(64e6_dp*sin(pi/3.0_dp), temperature)
+  plasma%emission = maxwellian_emission(64e6_dp*sin(pi/3.0_dp), temperature)
 
-  call iteration%update(plasma%photoelectrons, status, message)
+  call iteration%update(plasma%emission, status, message)
   call check(status == SHEATH_INVALID_ARGUMENT, 'update needs initialization')
   call iteration%initialize(plasma, solver, status, message)
   call ok('initialize')
@@ -59,14 +59,14 @@ program test_matching_iteration
   call other%initialize(plasma, solver, status, message, branch='a')
   call ok('explicit A')
   before = other%conditions()
-  empty = binned_photoelectrons([0.0_dp, 1.0_dp], [0.0_dp])
+  empty = binned_emission([0.0_dp, 1.0_dp], [0.0_dp])
   call other%update(empty, status, message)
   call check(status /= SHEATH_OK, 'A has no root without emission')
   after = other%conditions()
   call check(after%plane_potential_v == before%plane_potential_v .and. other%accepted_solves() == 1, 'failure keeps root')
   kept = other%source()
   call check(.not. kept%is_binned(), 'failure keeps source')
-  call other%update(binned_photoelectrons([1.0_dp, 0.0_dp], [1e10_dp]), status, message)
+  call other%update(binned_emission([1.0_dp, 0.0_dp], [1e10_dp]), status, message)
   call check(status == SHEATH_INVALID_ARGUMENT, 'invalid source rejected')
   after = other%conditions()
   call check(after%plane_potential_v == before%plane_potential_v, 'invalid source keeps root')
@@ -78,12 +78,12 @@ program test_matching_iteration
   call check(status == SHEATH_INVALID_ARGUMENT, 'order must be a permutation')
   low_sun%electron_drift_mps = 0.0_dp
   low_sun%ion_entry_speed_mps = 468e3_dp*sin(10.0_dp*pi/180.0_dp)
-  low_sun%photoelectrons = maxwellian_photoelectrons(64e6_dp*sin(10.0_dp*pi/180.0_dp), temperature)
+  low_sun%emission = maxwellian_emission(64e6_dp*sin(10.0_dp*pi/180.0_dp), temperature)
   call other%initialize(low_sun, solver, status, message, initial_order='cab')
   call ok('low-sun start')
   after = other%conditions()
   call check(after%branch == 'C', 'low-sun order starts with C')
-  call other%update(maxwellian_photoelectrons(1.01_dp*64e6_dp*sin(10.0_dp*pi/180.0_dp), temperature), status, message)
+  call other%update(maxwellian_emission(1.01_dp*64e6_dp*sin(10.0_dp*pi/180.0_dp), temperature), status, message)
   call ok('low-sun update')
   after = other%conditions()
   call check(after%branch == 'C', 'update prefers the current branch')

@@ -8,9 +8,9 @@ from sheath_model import (FixedEntryParams, SheathSolver, EquilibriumAtlas,
 
 
 def main():
-    base = FixedEntryParams(photoelectron_density_m3=55.42562584220407e6,
+    base = FixedEntryParams(emission_density_m3=55.42562584220407e6,
                             ion_temperature_ev=12., ion_pressure_factor=3.)
-    inputs = [replace(base, photoelectron_density_m3=density) for density in (54e6, 57e6)]
+    inputs = [replace(base, emission_density_m3=density) for density in (54e6, 57e6)]
     # Use method="arclength" to follow simple folds along the input path.
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else None
     if path is not None and path.exists():

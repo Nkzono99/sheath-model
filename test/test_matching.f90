@@ -16,7 +16,7 @@ program test_matching
   type(prescribed_field_input) :: field_input
   type(prescribed_field_result) :: field_root
   type(prescribed_field_result), allocatable :: field_roots(:)
-  type(photoelectron_source) :: source
+  type(emission_source) :: source
   integer(i32) :: status
   integer :: i
   real(dp), allocatable :: edges(:), breakpoints(:)
@@ -35,7 +35,7 @@ program test_matching
     ! Same expressions as the closure: fluxes reproduce the root exactly up to rounding.
     call near(conditions%electron_inward_flux_m2_s, root%electron_inward_flux_m2_s, 1e-13_dp, 'electron flux')
     call near(conditions%ion_inward_flux_m2_s, root%ion_inward_flux_m2_s, 1e-13_dp, 'ion flux')
-    call near(conditions%emitted_escape_flux_m2_s, root%photoelectron_escape_flux_m2_s, 1e-13_dp, 'escape flux')
+    call near(conditions%emitted_escape_flux_m2_s, root%emitted_escape_flux_m2_s, 1e-13_dp, 'escape flux')
     call near(conditions%emitted_outward_flux_m2_s, &
         conditions%emitted_escape_flux_m2_s + conditions%emitted_return_flux_m2_s, 1e-14_dp, 'emitted flux split')
     current_scale = qe*max(conditions%electron_inward_flux_m2_s, conditions%ion_inward_flux_m2_s)
@@ -70,7 +70,7 @@ program test_matching
   field_input%branch = 'B'
   field_input%electron_drift_mps = 0.0_dp
   field_input%ion_entry_speed_mps = input%solar_wind_speed_mps*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
-  field_input%photoelectrons = maxwellian_photoelectrons( &
+  field_input%emission = maxwellian_emission( &
       input%photoelectron_reference_density_m3*sin(20.0_dp*acos(-1.0_dp)/180.0_dp), 2.2_dp)
   call evaluate_sheath_state(field_input%plasma_input, 'B', root%surface_potential_v, state, status, message)
   call ok('B state')
@@ -84,7 +84,7 @@ program test_matching
   call near(conditions%plane_field_v_m, field_input%electric_field_v_m, 1e-6_dp, 'prescribed plane field')
   call near(conditions%plane_potential_v, field_root%boundary_potential_v, 1e-15_dp, 'field plane potential')
   call near(conditions%electron_inward_flux_m2_s, field_root%electron_inward_flux_m2_s, 1e-13_dp, 'field electron flux')
-  call near(conditions%emitted_return_flux_m2_s, field_root%photoelectron_return_flux_m2_s, 1e-13_dp, 'field return')
+  call near(conditions%emitted_return_flux_m2_s, field_root%emitted_return_flux_m2_s, 1e-13_dp, 'field return')
   call near(conditions%net_current_a_m2, field_root%net_current_a_m2, 1e-10_dp, 'field current')
 
   root%valid = .false.

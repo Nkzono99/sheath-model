@@ -40,14 +40,14 @@ class AtlasTests(unittest.TestCase):
                 self.assertEqual(candidates.diagnostics.atlas_hits[k], 1)
 
     def test_dimensionless_map_reuse_and_empty_map_failure(self):
-        p = FixedEntryParams(photoelectron_density_m3=55.42562584220407e6, ion_temperature_ev=12.,
+        p = FixedEntryParams(emission_density_m3=55.42562584220407e6, ion_temperature_ev=12.,
                              ion_pressure_factor=3.)
         atlas = SheathSolver().build_equilibrium_atlas([p], branches=('A',))
         reference = SheathSolver().solve_equilibrium(p, branch='A')
         query = replace(p, ion_density_m3=p.ion_density_m3*1e9,
-                        photoelectron_density_m3=p.photoelectron_density_m3*1e9,
+                        emission_density_m3=p.emission_density_m3*1e9,
                         electron_temperature_ev=p.electron_temperature_ev*10,
-                        photoelectron_temperature_ev=p.photoelectron_temperature_ev*10,
+                        emission_temperature_ev=p.emission_temperature_ev*10,
                         ion_temperature_ev=p.ion_temperature_ev*10,
                         ion_entry_speed_mps=p.ion_entry_speed_mps*math.sqrt(10))
         search = SearchOptions(method="newton", use_default_guesses=False, max_iterations=0)
@@ -77,10 +77,10 @@ class AtlasTests(unittest.TestCase):
         self.assertGreater(arc_diag.continuation_steps[0], 10)
 
     def test_adaptive_continuation_recovers_a_sheath_with_small_corrector_budget(self):
-        base = FixedEntryParams(photoelectron_density_m3=55.42562584220407e6,
+        base = FixedEntryParams(emission_density_m3=55.42562584220407e6,
                                 ion_temperature_ev=12., ion_pressure_factor=3.)
         original = SheathSolver().build_equilibrium_atlas([base], branches=('A',))
-        query = replace(base, photoelectron_density_m3=120e6)
+        query = replace(base, emission_density_m3=120e6)
         reference = SheathSolver().solve_equilibrium(query, branch='A')
         limited = SearchOptions(method="newton", max_iterations=2, max_starts=1)
         with self.assertRaises(SearchFailure):

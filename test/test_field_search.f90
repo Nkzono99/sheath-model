@@ -17,7 +17,7 @@ program test_field_search
   character(len=512) :: message
 
   base%electron_drift_mps = 0.0_dp
-  base%photoelectrons = maxwellian_photoelectrons(5.5425625842204072e7_dp, 2.2_dp)
+  base%emission = maxwellian_emission(5.5425625842204072e7_dp, 2.2_dp)
   base%electric_field_v_m = 1.6_dp
   call solver%solve_prescribed_field_candidates(base, reference, status, message, reference_diagnostics)
   call check(status == SHEATH_OK, 'reference candidates')
@@ -33,7 +33,7 @@ program test_field_search
       temperature_scale = temperature_scales(j)
       input = base
       input%ion_density_m3 = base%ion_density_m3*density_scale
-      input%photoelectrons = maxwellian_photoelectrons(5.5425625842204072e7_dp*density_scale, 2.2_dp*temperature_scale)
+      input%emission = maxwellian_emission(5.5425625842204072e7_dp*density_scale, 2.2_dp*temperature_scale)
       input%electron_temperature_ev = base%electron_temperature_ev*temperature_scale
       input%ion_entry_speed_mps = base%ion_entry_speed_mps*sqrt(temperature_scale)
       input%electric_field_v_m = base%electric_field_v_m*sqrt(density_scale*temperature_scale)
@@ -66,7 +66,7 @@ program test_field_search
   do i = 1, size(small_fields)
     input = prescribed_field_input(electron_drift_mps=0.0_dp)
     input%ion_entry_speed_mps = 468e3_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
-    input%photoelectrons = maxwellian_photoelectrons(input%ion_density_m3*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)* &
+    input%emission = maxwellian_emission(input%ion_density_m3*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)* &
         0.5_dp*32.0_dp**(real(small_field_ratio_indices(i), dp)/128.0_dp), 2.2_dp)
     input%electric_field_v_m = small_fields(i) - 0.015625_dp
     call solver%solve_prescribed_field_candidates(input, previous, status, message)
@@ -81,7 +81,7 @@ program test_field_search
   ! A rejected root must not hide unresolved attempts in the same search.
   input = prescribed_field_input(branch='A', electron_drift_mps=0.0_dp)
   input%ion_entry_speed_mps = 468e3_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
-  input%photoelectrons = maxwellian_photoelectrons( &
+  input%emission = maxwellian_emission( &
       9.82784429_dp*input%ion_density_m3*sin(20.0_dp*acos(-1.0_dp)/180.0_dp), 2.2_dp)
   input%electric_field_v_m = 1.09375_dp
   input%branch = 'B'

@@ -1,8 +1,10 @@
 # sheath-model
 
-平面・定常の一次元光電子シースを解き、電位・電場・粒子流束を求める独立したライブラリです。
-Fortran / fpm は零電流条件 `J=0`、境界電場 `E_H` の指定、任意光電子スペクトルに対応します。
-Python は Maxwell 光電子源の `J=0` モデルに対応します。
+電子を放出する境界の上にできる平面・定常の一次元シース（Zhao の光電子シース）を解き、
+電位・電場・粒子流束を求める独立したライブラリです。
+Fortran / fpm は零電流条件 `J=0`、境界電場 `E_H` の指定、任意の放出電子スペクトルに対応し、
+粒子シミュレータの境界面を外部シースへ結合する API も提供します。
+Python は Maxwell 放出源の `J=0` モデルに対応します。
 
 ## 計算例
 
@@ -46,6 +48,7 @@ python examples/plot_profiles.py
 
 - [図の再生成・実行例](docs/examples.md)
 - [Fortran API](docs/fortran-api.md) / [Python API](docs/python-api.md) / [スペクトルと静的評価 API](docs/spectral-api.md)
+- [粒子シミュレータとの結合](docs/coupling-api.md)
 - [モデルの仮定](docs/kinetic-model.md) / [数値計算法](docs/algorithm.md)
 
 ## ライセンス

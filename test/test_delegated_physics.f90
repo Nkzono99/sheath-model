@@ -27,7 +27,7 @@ program test_delegated_physics
   closure = eps0*state%electric_field_v_m - 1.9250395951168886e-11_dp + 2*state%net_current_a_m2
   call check(abs(closure) < 2e-18_dp, 'caller-formed charge balance from generic state')
   call check(abs(state%connection_residual_normalized) < 1e-10_dp, 'normalized upper connection')
-  scale = input%photoelectrons%potential_scale(input%electron_temperature_ev)
+  scale = input%emission%potential_scale(input%electron_temperature_ev)
   call check(abs(state%connection_residual_normalized - state%connection_residual_v2_m2*eps0*sqrt(scale)/ &
       (qe*input%ion_density_m3*(-state%minimum_potential_v)**1.5_dp)) < 1e-12_dp, 'SI and normalized residual agree')
   input%electric_field_v_m = state%electric_field_v_m
@@ -40,8 +40,8 @@ program test_delegated_physics
   input%ion_entry_speed_mps = 309496.90072670573_dp
   input%electron_mass_kg = 9.1093837015e-31_dp
   gamma = 1989307674603.747_dp
-  input%photoelectrons = maxwellian_photoelectrons(0.0_dp, 2.0_dp)
-  input%photoelectrons = input%photoelectrons%with_outward_flux(gamma, input%electron_mass_kg)
+  input%emission = maxwellian_emission(0.0_dp, 2.0_dp)
+  input%emission = input%emission%with_outward_flux(gamma, input%electron_mass_kg)
   call evaluate_sheath_state(input, 'A', 0.22886728419952757_dp, state, status, message, minimum_potential_v=-8e-15_dp)
   call check(status == SHEATH_OK .and. .not. state%admissible, 'collapsed Maxwellian A rejected')
   call check(state%physical_status == SHEATH_NO_PHYSICAL_SOLUTION, 'finite evaluation differs from physical acceptance')
@@ -54,7 +54,7 @@ program test_delegated_physics
   call check(status == SHEATH_OK .and. .not. state%admissible, 'sub-ulp Maxwellian depth remains nonconnecting')
   call check(abs(state%connection_residual_normalized - leading) < 2e-7_dp, 'stable depth-normalized limit')
   ! The same guard also applies to a bin source; no source-dependent acceptance.
-  input%photoelectrons = binned_photoelectrons([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], [2e12_dp, 5e11_dp, 1e11_dp])
+  input%emission = binned_emission([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], [2e12_dp, 5e11_dp, 1e11_dp])
   call evaluate_sheath_state(input, 'A', 0.5_dp, state, status, message, minimum_potential_v=-1e-12_dp)
   call check(status == SHEATH_OK .and. .not. state%admissible, 'collapsed bin A rejected')
   call check(abs(state%connection_residual_normalized) > 1e-7_dp, 'bin upper residual exposed')
@@ -128,7 +128,7 @@ contains
       edges(j + 1) = high
     end do
     close (unit)
-    input%photoelectrons = binned_photoelectrons(edges, flux)
+    input%emission = binned_emission(edges, flux)
   end subroutine
   subroutine check(condition, label)
     logical, intent(in) :: condition

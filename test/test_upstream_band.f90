@@ -3,7 +3,7 @@ program test_upstream_band
   ! negative-E^2 band, when upstream_band_tolerance allows it. Reference values are algebraic roots
   ! solved independently in Python without the semi-infinite upstream check.
   use sheath_model
-  use sheath_model_photoelectrons, only: DEFAULT_PHOTOELECTRONS
+  use sheath_model_emission, only: DEFAULT_EMISSION
   implicit none
   real(dp), parameter :: pi = acos(-1.0_dp), qe = 1.602176634e-19_dp, me = 9.1093837139e-31_dp
   type(sheath_solver) :: strict, tolerant, narrow, floor, tight
@@ -18,7 +18,7 @@ program test_upstream_band
   source_density = 2.0_dp*sqrt(pi)*(4.5e-6_dp/qe)/sqrt(2.0_dp*qe*2.2_dp/me)
   input%plasma = plasma_input(ion_density_m3=5.0e6_dp, electron_temperature_ev=10.0_dp, &
       electron_drift_mps=4.0e5_dp, ion_entry_speed_mps=4.0e5_dp, &
-      photoelectrons=maxwellian_photoelectrons(source_density, 2.2_dp))
+      emission=maxwellian_emission(source_density, 2.2_dp))
   tolerant%search%upstream_band_tolerance = 0.15_dp
   narrow%search%upstream_band_tolerance = 0.02_dp
   ! Field floor: the upstream boundary sits where the sheath field has fallen to an external level.
@@ -62,7 +62,7 @@ program test_upstream_band
   if (status /= SHEATH_OK .or. root%branch /= 'A') error stop 'auto with tolerance selects A'
 
   input%branch = 'C'
-  input%plasma%photoelectrons = DEFAULT_PHOTOELECTRONS
+  input%plasma%emission = DEFAULT_EMISSION
   call strict%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_NO_PHYSICAL_SOLUTION) error stop 'strict search must reject drifting C'
   call tolerant%solve_equilibrium(input, root, status, message)
@@ -79,7 +79,7 @@ program test_upstream_band
   ! Without drift the tolerance changes nothing.
   input%branch = 'A'
   input%plasma%electron_drift_mps = 0.0_dp
-  input%plasma%photoelectrons = maxwellian_photoelectrons(source_density, 2.2_dp)
+  input%plasma%emission = maxwellian_emission(source_density, 2.2_dp)
   call strict%solve_equilibrium(input, reference, status, message)
   if (status /= SHEATH_OK) error stop 'zero-drift A'
   call tolerant%solve_equilibrium(input, root, status, message)

@@ -27,25 +27,25 @@ class SearchTests(unittest.TestCase):
                         self.assertGreater(diag.lm_steps["ABC".index(branch)], 0)
             if branch == "B":
                 # Eliminate density analytically for nondrifting Maxwellian electrons.
-                ratio = math.sqrt(params.electron_temperature_ev/params.photoelectron_temperature_ev)
-                ion = params.ion_density_m3*params.ion_entry_speed_mps*2*math.sqrt(math.pi)/params.v_phe_th_mps
+                ratio = math.sqrt(params.electron_temperature_ev/params.emission_temperature_ev)
+                ion = params.ion_density_m3*params.ion_entry_speed_mps*2*math.sqrt(math.pi)/params.v_emission_th_mps
                 escaping = (2*params.ion_density_m3*ratio-ion)/(1+ratio)
-                expected = params.photoelectron_temperature_ev*math.log(params.photoelectron_density_m3/escaping)
+                expected = params.emission_temperature_ev*math.log(params.emission_density_m3/escaping)
                 self.assertAlmostEqual(baseline.surface_potential_v, expected, delta=3e-09)
 
     def test_density_scaling_and_continuation(self):
-        base = FixedEntryParams(photoelectron_density_m3=64e6*math.sin(math.pi/3),
+        base = FixedEntryParams(emission_density_m3=64e6*math.sin(math.pi/3),
                                 ion_temperature_ev=12., ion_pressure_factor=3.)
         reference = SheathSolver().solve_equilibrium(base, branch='A')
         for scale in (1e-9, 1e9):
             params = replace(base, ion_density_m3=base.ion_density_m3*scale,
-                             photoelectron_density_m3=base.photoelectron_density_m3*scale)
+                             emission_density_m3=base.emission_density_m3*scale)
             for method in ("auto", "newton", "lm"):
                 with self.subTest(scale=scale, method=method):
                     result = SheathSolver(search=SearchOptions(method=method)).solve_equilibrium(params, branch='A')
                     self.assertAlmostEqual(result.surface_potential_v, reference.surface_potential_v, delta=2e-07)
                     self.assertAlmostEqual(result.ambient_electron_density_m3 / scale, reference.ambient_electron_density_m3, delta=0.1)
-        changed = replace(base, photoelectron_density_m3=base.photoelectron_density_m3*1.01)
+        changed = replace(base, emission_density_m3=base.emission_density_m3*1.01)
         solver = EquilibriumProblem(changed)
         seed = (reference.surface_potential_v, reference.minimum_potential_v, reference.ambient_electron_density_m3)
         result = SheathSolver(search=SearchOptions(method='newton', use_default_guesses=False)).solve_equilibrium(solver.p, branch='A', initial_guess=reference)
@@ -55,7 +55,7 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(result.inputs.ion_entry_speed_mps, base.ion_entry_speed_mps)
 
     def test_budget_exclusion_and_invalid_options(self):
-        params = FixedEntryParams(photoelectron_density_m3=55e6)
+        params = FixedEntryParams(emission_density_m3=55e6)
         with self.assertRaises(SearchFailure) as caught:
             SheathSolver(search=SearchOptions(method='newton', max_iterations=0)).solve_equilibrium(params, branch='A')
         diag = caught.exception.diagnostics

@@ -120,8 +120,8 @@ class OrbitTests(unittest.TestCase):
         # Fixed algebraic A root at the original 60-degree drift. Integrate its
         # upstream VDF with SciPy quad, without either production quadrature.
         p = ZhaoParams()
-        phi0 = 2.6544268139403324 / p.photoelectron_temperature_ev
-        phim = -1.1897238115913789 / p.photoelectron_temperature_ev
+        phi0 = 2.6544268139403324 / p.emission_temperature_ev
+        phim = -1.1897238115913789 / p.emission_temperature_ev
         density = 7923268.55824609 / p.density_scale_m3
 
         def rho(phi):
@@ -156,9 +156,9 @@ class OrbitTests(unittest.TestCase):
     def test_b_upstream_obstruction_despite_positive_boundary_integral(self):
         p = ZhaoParams(sun_elevation_deg=60.0, electron_drift_mode="zero")
         solver = EquilibriumProblem(p)
-        phi0 = 10.0 / p.photoelectron_temperature_ev
+        phi0 = 10.0 / p.emission_temperature_ev
         # At infinity B has one incoming half-Maxwellian and escaping PE.
-        density = 2 * (p.ion_density_m3 - 0.5 * p.photoelectron_density_m3 * math.exp(-phi0)) / p.density_scale_m3
+        density = 2 * (p.ion_density_m3 - 0.5 * p.emission_density_m3 * math.exp(-phi0)) / p.density_scale_m3
         field_squared = 2 * solver._integrate_rho("B", "monotonic", phi0, 0.0, phi0, 0.0, density)
         self.assertGreater(field_squared, 0.0)
         with self.assertRaisesRegex(RuntimeError, "arbitrarily near upstream infinity"):

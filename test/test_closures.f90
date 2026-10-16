@@ -37,7 +37,7 @@ program test_closures
     call near(root%net_current_a_m2, 0.0_dp, 1e-8_dp*current_scale, 'reported equilibrium current')
     call near(root%electron_inward_flux_m2_s, gamma_e, 1e-8_dp*gamma_e, 'electron flux diagnostic')
     call near(root%ion_inward_flux_m2_s, gamma_i, 1e-12_dp*gamma_i, 'ion flux diagnostic')
-    call near(root%photoelectron_escape_flux_m2_s, gamma_pe, 1e-12_dp*gamma_pe, 'escaping PE flux diagnostic')
+    call near(root%emitted_escape_flux_m2_s, gamma_pe, 1e-12_dp*gamma_pe, 'escaping PE flux diagnostic')
   end do
   input = zhao_equilibrium_input(branch='A', electron_drift_mode='zero')
   solver%profile = sheath_profile_options()
@@ -50,7 +50,7 @@ program test_closures
   n_source = input%photoelectron_reference_density_m3*sin(input%sun_elevation_deg*pi/180.0_dp)
   vth_pe = sqrt(2.0_dp*qe*input%photoelectron_temperature_ev/input%electron_mass_kg)
   field_input%electric_field_v_m = field
-  field_input%photoelectrons = maxwellian_photoelectrons(n_source, 2.2_dp)
+  field_input%emission = maxwellian_emission(n_source, 2.2_dp)
   call solver%solve_prescribed_field(field_input, response, status, message)
   call ok('E_H set to the J=0 solution field')
   call near(response%boundary_potential_v, root%surface_potential_v, 3e-5_dp, 'common solution potential')
@@ -71,7 +71,7 @@ program test_closures
     gamma_pe = n_source*vth_pe/(2.0_dp*sqrt(pi))* &
         exp((response%minimum_potential_v - response%boundary_potential_v)/input%photoelectron_temperature_ev)
     current_scale = qe*response%electron_inward_flux_m2_s
-    call near(response%photoelectron_escape_flux_m2_s, gamma_pe, 1e-12_dp*gamma_pe, 'E_H escaping flux')
+    call near(response%emitted_escape_flux_m2_s, gamma_pe, 1e-12_dp*gamma_pe, 'E_H escaping flux')
     call near(response%net_current_a_m2, qe*(response%electron_inward_flux_m2_s - &
         response%ion_inward_flux_m2_s - gamma_pe), 1e-12_dp*current_scale, 'E_H current diagnostic')
     call check(abs(response%net_current_a_m2) > 1e-3_dp*current_scale, 'E_H model does not impose J=0')

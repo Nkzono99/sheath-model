@@ -31,27 +31,27 @@ def parameter_key(p):
     log(Te/Tpe), asinh(ue/vthe), log(ui/vthpe), log(mi/me),
     log1p(pressure_factor*Ti/Tpe), log1p(npe/ni).
     """
-    return np.array([math.log(p.tau), math.asinh(p.u), math.log(p.ion_entry_speed_mps/p.v_phe_th_mps),
+    return np.array([math.log(p.tau), math.asinh(p.u), math.log(p.ion_entry_speed_mps/p.v_emission_th_mps),
                      math.log(p.ion_mass_kg/p.electron_mass_kg), math.log1p(p.ion_pressure_factor*p.ion_temperature_ev/
-                     p.photoelectron_temperature_ev), math.log1p(p.photoelectron_density_m3/p.ion_density_m3)])
+                     p.emission_temperature_ev), math.log1p(p.emission_density_m3/p.ion_density_m3)])
 
 
 def params_from_key(key, reference):
     """Reconstruct equivalent fixed-entry inputs using the query's SI scales."""
     if not np.all(np.isfinite(key)) or np.max(np.abs(key)) > 100 or min(key[4:]) < 0:
         raise ValueError("invalid dimensionless plasma key")
-    temperature = reference.photoelectron_temperature_ev
+    temperature = reference.emission_temperature_ev
     electron_temperature = temperature*math.exp(key[0])
     return FixedEntryParams(
         ion_density_m3=reference.ion_density_m3,
-        ion_entry_speed_mps=reference.v_phe_th_mps*math.exp(key[2]),
+        ion_entry_speed_mps=reference.v_emission_th_mps*math.exp(key[2]),
         ion_mass_kg=reference.electron_mass_kg*math.exp(key[3]),
         electron_mass_kg=reference.electron_mass_kg,
         ion_temperature_ev=temperature*math.expm1(key[4]), ion_pressure_factor=1.,
         electron_temperature_ev=electron_temperature,
-        electron_drift_mps=math.sinh(key[1])*reference.v_phe_th_mps*math.sqrt(math.exp(key[0])),
-        photoelectron_density_m3=reference.ion_density_m3*math.expm1(key[5]),
-        photoelectron_temperature_ev=temperature,
+        electron_drift_mps=math.sinh(key[1])*reference.v_emission_th_mps*math.sqrt(math.exp(key[0])),
+        emission_density_m3=reference.ion_density_m3*math.expm1(key[5]),
+        emission_temperature_ev=temperature,
     )
 
 
@@ -150,8 +150,8 @@ class EquilibriumAtlas:
         raw = solver._encoded_residual(branch, encoded, solver.search)
         if raw is None or np.max(np.abs(raw)) > solver.search.residual_tolerance:
             raise ValueError("atlas root does not satisfy the original equations")
-        solver._validate_profile_root(branch, physical[0]/params.photoelectron_temperature_ev,
-                                      physical[1]/params.photoelectron_temperature_ev,
+        solver._validate_profile_root(branch, physical[0]/params.emission_temperature_ev,
+                                      physical[1]/params.emission_temperature_ev,
                                       physical[2]/params.density_scale_m3)
         coordinates = np.zeros(3)
         coordinates[:len(encoded)] = encoded

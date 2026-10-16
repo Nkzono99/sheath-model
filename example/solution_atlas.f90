@@ -16,7 +16,7 @@ program solution_atlas
     inputs(i)%branch = 'A'
     inputs(i)%plasma%ion_temperature_ev = 12.0_dp
     inputs(i)%plasma%ion_pressure_factor = 3.0_dp
-    inputs(i)%plasma%photoelectrons = maxwellian_photoelectrons(real(51 + 3*i, dp)*1e6_dp, 2.2_dp)
+    inputs(i)%plasma%emission = maxwellian_emission(real(51 + 3*i, dp)*1e6_dp, 2.2_dp)
   end do
   ! Select 'arclength' to follow simple folds along the dimensionless input path.
   solver%continuation%method = 'parameter'
@@ -46,7 +46,7 @@ program solution_atlas
     if (io /= 0) stop 1
   end if
   query = inputs(1)
-  query%plasma%photoelectrons = maxwellian_photoelectrons(55.42562584220407e6_dp, 2.2_dp)
+  query%plasma%emission = maxwellian_emission(55.42562584220407e6_dp, 2.2_dp)
   solver%search%method = 'newton'
   solver%search%max_starts = 1
   solver%equilibrium_atlas = atlas

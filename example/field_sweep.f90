@@ -11,7 +11,7 @@ program field_sweep
   character(len=256) :: message
 
   input%electron_drift_mps = 0.0_dp
-  input%photoelectrons = maxwellian_photoelectrons(5.5425625842204072e7_dp, 2.2_dp)
+  input%emission = maxwellian_emission(5.5425625842204072e7_dp, 2.2_dp)
   allocate (previous(0))
   print '(a)', 'E_H [V/m], branch, phi_H [V], J_z [A/m^2]'
   do step = 0, 4

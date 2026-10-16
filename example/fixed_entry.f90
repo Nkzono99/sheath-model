@@ -17,7 +17,7 @@ program fixed_entry
   input%plasma%ion_pressure_factor = 3.0_dp
   input%plasma%electron_temperature_ev = 12.0_dp
   input%plasma%electron_drift_mps = 0.0_dp
-  input%plasma%photoelectrons = maxwellian_photoelectrons(55.42562584220407e6_dp, 2.2_dp)
+  input%plasma%emission = maxwellian_emission(55.42562584220407e6_dp, 2.2_dp)
   call solver%solve_equilibrium(input, result, status, message)
   if (status /= SHEATH_OK) then
     print *, trim(message)

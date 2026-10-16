@@ -42,13 +42,13 @@ program test_search
 
   solver = sheath_solver()
   fixed%branch = 'A'
-  fixed%plasma%photoelectrons = maxwellian_photoelectrons(55.42562584220407e6_dp, 2.2_dp)
+  fixed%plasma%emission = maxwellian_emission(55.42562584220407e6_dp, 2.2_dp)
   fixed%plasma%ion_temperature_ev = 12.0_dp
   fixed%plasma%ion_pressure_factor = 3.0_dp
   call solver%solve_equilibrium(fixed, baseline, status, message)
   if (status /= SHEATH_OK) error stop 'fixed baseline'
   seed(1) = baseline
-  fixed%plasma%photoelectrons = maxwellian_photoelectrons(1.01_dp*55.42562584220407e6_dp, 2.2_dp)
+  fixed%plasma%emission = maxwellian_emission(1.01_dp*55.42562584220407e6_dp, 2.2_dp)
   solver%search%method = 'newton'
   solver%search%use_default_guesses = .false.
   call solver%solve_equilibrium(fixed, result, status, message, diagnostics, seed)
@@ -60,7 +60,7 @@ program test_search
   do i = 1, 2
     factor = 10.0_dp**(18*i - 27)
     fixed%plasma%ion_density_m3 = 8.7e6_dp*factor
-    fixed%plasma%photoelectrons = maxwellian_photoelectrons(1.01_dp*55.42562584220407e6_dp*factor, 2.2_dp)
+    fixed%plasma%emission = maxwellian_emission(1.01_dp*55.42562584220407e6_dp*factor, 2.2_dp)
     do m = 1, 3
       solver%search%method = methods(m)
       call solver%solve_equilibrium(fixed, result, status, message, diagnostics)
@@ -69,7 +69,7 @@ program test_search
     end do
   end do
   fixed%plasma%ion_density_m3 = 8.7e6_dp
-  fixed%plasma%photoelectrons = maxwellian_photoelectrons(55.42562584220407e6_dp, 2.2_dp)
+  fixed%plasma%emission = maxwellian_emission(55.42562584220407e6_dp, 2.2_dp)
   solver%search%method = 'newton'
   solver%search%max_iterations = 0
   call solver%solve_equilibrium(fixed, result, status, message, diagnostics)

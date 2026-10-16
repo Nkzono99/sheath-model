@@ -4,8 +4,8 @@ module sheath_model_state
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_quiet_nan
   use sheath_model_constants, only: dp, i32, qe, eps0, electron_mass, proton_mass, lower_ascii
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NUMERICAL_FAILURE
-  use sheath_model_photoelectrons, only: photoelectron_source, validate_photoelectrons, photoelectron_density, &
-      DEFAULT_PHOTOELECTRONS
+  use sheath_model_emission, only: emission_source, validate_emission, emitted_density, &
+      DEFAULT_EMISSION
   use sheath_model_core, only: zhao_params_type, neutral_electron_density, integrate_zhao_rho, evaluate_zhao_fluxes, &
       evaluate_zhao_rho_hat, type_a_connection_residual
   use sheath_model_admissibility, only: validate_zhao_profile
@@ -14,7 +14,7 @@ module sheath_model_state
   private
   public :: plasma_input, sheath_state_result, evaluate_sheath_state, prepare_plasma_params, boundary_field
 
-  !> Fixed upstream ion state, electron distribution and outward boundary photoelectron source.
+  !> Fixed upstream ion state, electron distribution and outward boundary emission source.
   !! SI units except temperatures [eV]. Normal drifts are positive inward.
   type :: plasma_input
     real(dp) :: ion_density_m3 = 8.7e6_dp
@@ -25,7 +25,7 @@ module sheath_model_state
     real(dp) :: ion_entry_speed_mps = 4.0529988897111727e5_dp
     real(dp) :: ion_mass_kg = proton_mass
     real(dp) :: electron_mass_kg = electron_mass
-    type(photoelectron_source) :: photoelectrons = DEFAULT_PHOTOELECTRONS
+    type(emission_source) :: emission = DEFAULT_EMISSION
   end type
 
   !> Evaluation of a trial state, not necessarily a complete physical sheath solution.
@@ -43,8 +43,8 @@ module sheath_model_state
     real(dp) :: connection_residual_normalized = 0.0_dp
     real(dp) :: electric_field_v_m = 0.0_dp
     real(dp) :: electron_inward_flux_m2_s = 0.0_dp, ion_inward_flux_m2_s = 0.0_dp
-    real(dp) :: photoelectron_outward_flux_m2_s = 0.0_dp
-    real(dp) :: photoelectron_escape_flux_m2_s = 0.0_dp, photoelectron_return_flux_m2_s = 0.0_dp
+    real(dp) :: emitted_outward_flux_m2_s = 0.0_dp
+    real(dp) :: emitted_escape_flux_m2_s = 0.0_dp, emitted_return_flux_m2_s = 0.0_dp
     real(dp) :: net_current_a_m2 = 0.0_dp
     integer(i32) :: physical_status = SHEATH_INVALID_ARGUMENT
     character(len=256) :: physical_message = ''
@@ -70,15 +70,15 @@ contains
         input%ion_mass_kg, input%electron_mass_kg) <= 0.0_dp) return
     message = 'Ion temperature must be nonnegative and pressure factor positive.'
     if (input%ion_temperature_ev < 0.0_dp .or. input%ion_pressure_factor <= 0.0_dp) return
-    call validate_photoelectrons(input%photoelectrons, status, message)
+    call validate_emission(input%emission, status, message)
     if (status /= SHEATH_OK) return
-    params%photoelectrons = input%photoelectrons
+    params%emission = input%emission
     params%n_swi_inf_m3 = input%ion_density_m3
     params%density_scale_m3 = input%ion_density_m3
     params%t_swe_ev = input%electron_temperature_ev
     params%t_swi_ev = input%ion_temperature_ev
     params%ion_pressure_factor = input%ion_pressure_factor
-    params%potential_scale_v = input%photoelectrons%potential_scale(input%electron_temperature_ev)
+    params%potential_scale_v = input%emission%potential_scale(input%electron_temperature_ev)
     params%v_d_electron_mps = input%electron_drift_mps
     params%v_d_ion_mps = input%ion_entry_speed_mps
     params%m_i_kg = input%ion_mass_kg
@@ -94,7 +94,7 @@ contains
     params%u = params%v_d_electron_mps/params%v_swe_th_mps
     params%tau = params%t_swe_ev/params%potential_scale_v
     params%length_scale_m = sqrt(eps0*params%potential_scale_v/(params%density_scale_m3*qe))
-    call photoelectron_density(params%photoelectrons, params%m_e_kg, 0.0_dp, 0.0_dp, 0.0_dp, .false., pe, captured)
+    call emitted_density(params%emission, params%m_e_kg, 0.0_dp, 0.0_dp, 0.0_dp, .false., pe, captured)
     params%emission_density_scale_m3 = 2.0_dp*pe
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Plasma/source normalization is non-finite or underflowed.'
@@ -186,16 +186,16 @@ contains
       output%connection_residual_v2_m2 = output%connection_residual_normalized*(-phim)*sqrt(-phim)*factor
     end if
     call evaluate_zhao_fluxes(p, boundary_potential_v, output%minimum_potential_v, density, &
-        output%electron_inward_flux_m2_s, output%ion_inward_flux_m2_s, output%photoelectron_outward_flux_m2_s, &
-        output%photoelectron_escape_flux_m2_s, output%photoelectron_return_flux_m2_s)
+        output%electron_inward_flux_m2_s, output%ion_inward_flux_m2_s, output%emitted_outward_flux_m2_s, &
+        output%emitted_escape_flux_m2_s, output%emitted_return_flux_m2_s)
     output%net_current_a_m2 = qe*(output%electron_inward_flux_m2_s - output%ion_inward_flux_m2_s &
-        - output%photoelectron_escape_flux_m2_s)
+        - output%emitted_escape_flux_m2_s)
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Trial state has non-finite integrals, density, or fluxes.'
     if (.not. all(ieee_is_finite([density, output%neutrality_residual_m3, &
         output%boundary_field_squared_v2_m2, output%connection_residual_v2_m2, output%connection_residual_normalized, &
-        output%electron_inward_flux_m2_s, output%ion_inward_flux_m2_s, output%photoelectron_outward_flux_m2_s, &
-        output%photoelectron_escape_flux_m2_s, output%photoelectron_return_flux_m2_s, output%net_current_a_m2]))) return
+        output%electron_inward_flux_m2_s, output%ion_inward_flux_m2_s, output%emitted_outward_flux_m2_s, &
+        output%emitted_escape_flux_m2_s, output%emitted_return_flux_m2_s, output%net_current_a_m2]))) return
     call validate_zhao_profile(p, selected, phi0, phim, density/p%density_scale_m3, minimum_e2, boundary_e2, &
         output%physical_status, output%physical_message)
     if (output%physical_status == SHEATH_NUMERICAL_FAILURE) then

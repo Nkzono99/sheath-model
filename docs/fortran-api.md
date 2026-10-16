@@ -2,7 +2,7 @@
 
 公開窓口は `use sheath_model` です。物理条件を入力型、数値設定を `sheath_solver`、
 計算結果を結果型に分けています。Solver は前回解を保持せず、求解ごとに物理条件を渡します。
-実数は `real(dp)`、ステータスは `integer(i32)`。SI 単位を使い、温度・光電子の法線運動エネルギーは eV です。
+実数は `real(dp)`、ステータスは `integer(i32)`。SI 単位を使い、温度・放出電子の法線運動エネルギーは eV です。
 上流電位は 0 V、+z は表面から上流向き、電場は `E=-dphi/dz`、法線入口速度は内向きが正です。
 
 ## 求解とプロファイル
@@ -20,7 +20,7 @@ character(len=256) :: message
 
 input%branch = 'A'
 input%plasma%electron_drift_mps = 0.0_dp
-input%plasma%photoelectrons = maxwellian_photoelectrons(55.42562584220407e6_dp, 2.2_dp)
+input%plasma%emission = maxwellian_emission(55.42562584220407e6_dp, 2.2_dp)
 input%plasma%ion_temperature_ev = 12.0_dp
 input%plasma%ion_pressure_factor = 3.0_dp
 solver%search%method = 'newton'
@@ -52,7 +52,7 @@ deflation の既定値は J=0 候補探索で true、電場固定で false。`ma
 
 ## 物理入力
 
-`plasma_input` は入口状態と光電子源を固定する型です。
+`plasma_input` は入口状態と放出源（境界から外向きに出る電子）を固定する型です。
 `fixed_entry_equilibrium_input%plasma` にこれを渡すと J=0、
 `prescribed_field_input` に同じ値を渡すと電場固定を使えます。
 どちらも Maxwell 源と bin スペクトルに対応します。
@@ -66,7 +66,7 @@ deflation の既定値は J=0 候補探索で true、電場固定で false。`ma
 | `ion_temperature_ev` | 0 | 非負、0 で冷たいイオン |
 | `ion_pressure_factor` | 1 | 正、イオン流体圧力項の係数 |
 | `ion_mass_kg`, `electron_mass_kg` | 陽子・電子質量 | 正 |
-| `photoelectrons` | 密度 0、温度 2.2 eV の Maxwell 源 | [源の指定と制約](spectral-api.md#光電子源を指定する) |
+| `emission` | 密度 0、温度 2.2 eV の Maxwell 源 | [源の指定と制約](spectral-api.md#放出源を指定する) |
 
 すべて有限値が必要です。温かいイオンでは `m_i u_i²/e > ion_pressure_factor*T_i` が必要です。
 背景電子の規格化密度は入力で固定せず、準中性条件と closure から解きます。
@@ -132,11 +132,11 @@ J=0 は 6、電場固定は 7 次元の無次元キーを使い、スペクト�
 
 `sheath_equilibrium_result` は `valid`、`branch`、`surface_potential_v`、`minimum_potential_v`、
 `ambient_electron_density_m3`、`debye_length_m`、`residual_norm`、電子・イオン内向き流束、
-光電子 escape 流束、`net_current_a_m2`、`upstream_negative_band_v` を返します。電子密度は Maxwell 分布の規格化で、全上流密度とは異なります。
+放出電子の escape 流束 `emitted_escape_flux_m2_s`、`net_current_a_m2`、`upstream_negative_band_v` を返します。電子密度は Maxwell 分布の規格化で、全上流密度とは異なります。
 `upstream_negative_band_v` は上流に接する $E^2<0$ の電位幅 [V]、`upstream_field_deficit_v_m` はその内側の場の不足
 $\sqrt{-\min E^2}$ [V/m] で、`upstream_band_tolerance` または `upstream_field_floor_v_m` で受理した drift のある A/C 根だけが 0 より大きくなります。
 `prescribed_field_result` は表面電位を `boundary_potential_v` で返し、
-光電子 outward/return 流束、`nonlinear_iterations`、`minimum_field_squared_hat` も含みます。
+放出電子の outward/return 流束、`nonlinear_iterations`、`minimum_field_squared_hat` も含みます。
 
 `sheath_profile_result` の equilibrium と、同じ格子上の `z_m(:)`、`potential_v(:)`、
 `electric_field_v_m(:)`、`density(:)` を使います。`turning_height_m` は A の内部極小位置、B/C では -1。
@@ -157,4 +157,5 @@ NO_PHYSICAL_SOLUTION は探索で物理候補を採用できなかった結果�
 有限探索の成功・失敗から、全根の発見・解の不存在・動的安定性は保証しません。
 
 静的電位評価は Solver を必要としない [スペクトル API](spectral-api.md) を参照してください。
+粒子シミュレータの境界面を外部シースへつなぐ API は [シミュレータとの結合](coupling-api.md) にあります。
 利用例は [examples.md](examples.md)、モデルの適用条件は [kinetic-model.md](kinetic-model.md) にあります。

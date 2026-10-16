@@ -12,9 +12,9 @@ program test_solver_api
   character(len=512) :: message
 
   first%branch = 'A'
-  first%plasma%photoelectrons = maxwellian_photoelectrons(55.42562584220407e6_dp, 2.2_dp)
+  first%plasma%emission = maxwellian_emission(55.42562584220407e6_dp, 2.2_dp)
   second = first
-  second%plasma%photoelectrons = maxwellian_photoelectrons(60e6_dp, 2.2_dp)
+  second%plasma%emission = maxwellian_emission(60e6_dp, 2.2_dp)
   call solver%solve_equilibrium(first, root, status, message)
   call check(status == SHEATH_OK, 'first input')
   call solver%solve_equilibrium(second, other, status, message)

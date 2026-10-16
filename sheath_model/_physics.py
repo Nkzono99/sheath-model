@@ -30,11 +30,11 @@ class SheathPhysics:
             if params.ion_drift_mode not in {"normal", "full"}:
                 raise ValueError("ion_drift_mode must be normal or full")
         for name in ("ion_density_m3", "density_scale_m3", "electron_temperature_ev",
-                     "photoelectron_temperature_ev", "ion_mass_kg", "electron_mass_kg", "ion_pressure_factor"):
+                     "emission_temperature_ev", "ion_mass_kg", "electron_mass_kg", "ion_pressure_factor"):
             value = getattr(params, name)
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
-        for name in ("ion_temperature_ev", "photoelectron_density_m3"):
+        for name in ("ion_temperature_ev", "emission_density_m3"):
             value = getattr(params, name)
             if not math.isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be finite and nonnegative")
@@ -49,7 +49,7 @@ class SheathPhysics:
     def _ion_density_hat(self, phi_hat):
         p = self.p
         return (p.ion_density_m3/p.density_scale_m3)*ion_density_ratio(
-            np.asarray(phi_hat)*p.photoelectron_temperature_ev, 0.5*p.electron_temperature_ev*p.mach**2,
+            np.asarray(phi_hat)*p.emission_temperature_ev, 0.5*p.electron_temperature_ev*p.mach**2,
             p.ion_pressure_factor*p.ion_temperature_ev)
 
 
@@ -62,8 +62,8 @@ class SheathPhysics:
         """Normalized free solar-wind electron current term from Eq. (16)."""
         p = self.p
         return n_swe_inf_m3 * (
-            math.sqrt(p.electron_temperature_ev / p.photoelectron_temperature_ev) * math.exp(-(a_swe**2))
-            + math.sqrt(math.pi) * (p.electron_drift_mps / p.v_phe_th_mps) * erfc(a_swe)
+            math.sqrt(p.electron_temperature_ev / p.emission_temperature_ev) * math.exp(-(a_swe**2))
+            + math.sqrt(math.pi) * (p.electron_drift_mps / p.v_emission_th_mps) * erfc(a_swe)
         )
 
 
@@ -72,8 +72,8 @@ class SheathPhysics:
     ) -> float:
         """First integral of the orbit-mapped charge density; regular at u=0."""
         p = self.p
-        return -2 * self._integrate_rho("A", "upper", phi_m_V / p.photoelectron_temperature_ev, 0.0,
-                                      phi0_V / p.photoelectron_temperature_ev, phi_m_V / p.photoelectron_temperature_ev,
+        return -2 * self._integrate_rho("A", "upper", phi_m_V / p.emission_temperature_ev, 0.0,
+                                      phi0_V / p.emission_temperature_ev, phi_m_V / p.emission_temperature_ev,
                                       n_swe_inf_m3 / p.density_scale_m3)
 
 
@@ -95,19 +95,19 @@ class SheathPhysics:
         energy = .5*p.electron_temperature_ev*p.mach**2
         pressure = p.ion_pressure_factor*p.ion_temperature_ev
         sound = 2*energy-pressure
-        if p.u == 0 and depth*p.photoelectron_temperature_ev < 1e-8*min(
-                p.electron_temperature_ev, p.photoelectron_temperature_ev, sound*(sound/(6*energy+pressure))):
+        if p.u == 0 and depth*p.emission_temperature_ev < 1e-8*min(
+                p.electron_temperature_ev, p.emission_temperature_ev, sound*(sound/(6*energy+pressure))):
             # Integrate density differences from neutral infinity. Factoring
             # sqrt(depth) retains the residual when individual densities round
             # to their upstream values.
             f = np.cos(.5*np.pi*POTENTIAL_NODES)**2
             root_depth = math.sqrt(depth)
-            phi = -depth*f*p.photoelectron_temperature_ev
+            phi = -depth*f*p.emission_temperature_ev
             if pressure == 0:
                 ratio = np.sqrt(1-phi/energy)
-                ions = -root_depth*f*p.photoelectron_temperature_ev/(energy*ratio*(1+ratio))
+                ions = -root_depth*f*p.emission_temperature_ev/(energy*ratio*(1+ratio))
             else:
-                ions = -root_depth*f*p.photoelectron_temperature_ev*(1/sound+(6*energy-pressure)*phi/(2*sound**3))
+                ions = -root_depth*f*p.emission_temperature_ev*(1/sound+(6*energy-pressure)*phi/(2*sound**3))
             ions *= p.ion_density_m3/p.density_scale_m3
 
             def scaled_delta(temperature_ratio, sign):
@@ -120,9 +120,9 @@ class SheathPhysics:
                 return delta_exp*(1+sign*erf(s0))+sign*np.exp(psi)*delta_erf
 
             electrons = .5*density*scaled_delta(p.tau, 1)
-            photos = .5*p.photoelectron_density_m3/p.density_scale_m3*math.exp(-phi0)*scaled_delta(1., -1)
+            photos = .5*p.emission_density_m3/p.density_scale_m3*math.exp(-phi0)*scaled_delta(1., -1)
             coefficient = .5*(1+erf(math.sqrt(depth/p.tau)))
-            pe0 = .5*p.photoelectron_density_m3*math.exp(-phi0)*erfc(math.sqrt(depth))
+            pe0 = .5*p.emission_density_m3*math.exp(-phi0)*erfc(math.sqrt(depth))
             neutral = (p.ion_density_m3-pe0)/coefficient/p.density_scale_m3
             rho0 = (neutral-density)*coefficient/root_depth
             integral = float(np.sum(POTENTIAL_WEIGHTS*(ions-electrons-photos)*.5*np.pi*np.sin(np.pi*POTENTIAL_NODES)))
@@ -141,23 +141,23 @@ class SheathPhysics:
             return np.array([1e6, 1e6, 1e6], dtype=float)
 
         a_swe = math.sqrt(max(0.0, -phi_m_V / p.electron_temperature_ev)) - p.u
-        a_phe = math.sqrt(max(0.0, -phi_m_V / p.photoelectron_temperature_ev))
+        a_phe = math.sqrt(max(0.0, -phi_m_V / p.emission_temperature_ev))
         ion_term = (
             p.ion_density_m3
-            * math.sqrt(2.0 * math.pi * p.electron_temperature_ev / p.photoelectron_temperature_ev * p.electron_mass_kg / p.ion_mass_kg)
+            * math.sqrt(2.0 * math.pi * p.electron_temperature_ev / p.emission_temperature_ev * p.electron_mass_kg / p.ion_mass_kg)
             * p.mach
         )
 
         # Eq. (14) Charge Neutrality at Infinity
         r1 = (
             0.5 * n_swe_inf_m3 * (1.0 + 2.0 * erf(p.u) + erf(a_swe))
-            + 0.5 * p.photoelectron_density_m3 * math.exp(-phi0_V / p.photoelectron_temperature_ev) * (1.0 - erf(a_phe))
+            + 0.5 * p.emission_density_m3 * math.exp(-phi0_V / p.emission_temperature_ev) * (1.0 - erf(a_phe))
             - p.ion_density_m3
         )
 
         # Eq. (16) Zero Net Current Density at Infinity (equivalent: at Z = 0)
         r2 = (
-            p.photoelectron_density_m3 * math.exp((phi_m_V - phi0_V) / p.photoelectron_temperature_ev)
+            p.emission_density_m3 * math.exp((phi_m_V - phi0_V) / p.emission_temperature_ev)
             - self._swe_free_current_term(n_swe_inf_m3, a_swe)
             + ion_term
         )
@@ -176,20 +176,20 @@ class SheathPhysics:
 
         ion_term = (
             p.ion_density_m3
-            * math.sqrt(2.0 * math.pi * p.electron_temperature_ev / p.photoelectron_temperature_ev * p.electron_mass_kg / p.ion_mass_kg)
+            * math.sqrt(2.0 * math.pi * p.electron_temperature_ev / p.emission_temperature_ev * p.electron_mass_kg / p.ion_mass_kg)
             * p.mach
         )
 
         # Eq. (14) Charge Neutrality at Infinity
         r1 = (
             0.5 * n_swe_inf_m3 * (1.0 + erf(p.u))
-            + 0.5 * p.photoelectron_density_m3 * math.exp(-phi0_V / p.photoelectron_temperature_ev)
+            + 0.5 * p.emission_density_m3 * math.exp(-phi0_V / p.emission_temperature_ev)
             - p.ion_density_m3
         )
 
         # Eq. (16) Zero Net Current Density at Infinity (equivalent: at Z = 0)
         r2 = (
-            p.photoelectron_density_m3 * math.exp(-phi0_V / p.photoelectron_temperature_ev)
+            p.emission_density_m3 * math.exp(-phi0_V / p.emission_temperature_ev)
             - self._swe_free_current_term(n_swe_inf_m3, -p.u)
             + ion_term
         )
@@ -203,22 +203,22 @@ class SheathPhysics:
             return np.array([1e6, 1e6], dtype=float)
 
         a_swe = math.sqrt(max(0.0, -phi0_V / p.electron_temperature_ev)) - p.u
-        a_phe = math.sqrt(max(0.0, -phi0_V / p.photoelectron_temperature_ev))
+        a_phe = math.sqrt(max(0.0, -phi0_V / p.emission_temperature_ev))
         ion_term = (
             p.ion_density_m3
-            * math.sqrt(2.0 * math.pi * p.electron_temperature_ev / p.photoelectron_temperature_ev * p.electron_mass_kg / p.ion_mass_kg)
+            * math.sqrt(2.0 * math.pi * p.electron_temperature_ev / p.emission_temperature_ev * p.electron_mass_kg / p.ion_mass_kg)
             * p.mach
         )
 
         # Eq. (14) Charge Neutrality at Infinity
         r1 = (
             0.5 * n_swe_inf_m3 * (1.0 + 2.0 * erf(p.u) + erf(a_swe))
-            + 0.5 * p.photoelectron_density_m3 * math.exp(-phi0_V / p.photoelectron_temperature_ev) * erfc(a_phe)
+            + 0.5 * p.emission_density_m3 * math.exp(-phi0_V / p.emission_temperature_ev) * erfc(a_phe)
             - p.ion_density_m3
         )
 
         # Eq. (16) Zero Net Current Density at Infinity (equivalent: at Z = 0)
-        r2 = p.photoelectron_density_m3 - self._swe_free_current_term(n_swe_inf_m3, a_swe) + ion_term
+        r2 = p.emission_density_m3 - self._swe_free_current_term(n_swe_inf_m3, a_swe) + ion_term
 
         return np.array([r1, r2], dtype=float)
 
@@ -229,14 +229,14 @@ class SheathPhysics:
         With inward electron drift, A/C have E^2<0 in a band next to upstream and are accepted only when every
         enabled criterion holds: tolerance>0 bounds the band width by tolerance*|phi_m| (A) or tolerance*|phi_0| (C);
         field_floor_v_m>0 bounds the field deficit sqrt(-min E^2) inside the band by that external field level. The band
-        is returned in units of the photoelectron temperature and the deficit in V/m; both are 0 otherwise.
+        is returned in units of the emission temperature and the deficit in V/m; both are 0 otherwise.
         """
         if branch == "B" and phi0 > 0:
             ambient_edge = (
                 density * self.p.density_scale_m3 * math.exp(-self.p.u**2)
                 / math.sqrt(math.pi * self.p.electron_temperature_ev)
             )
-            photo_edge = self.p.photoelectron_density_m3 * math.exp(-phi0) / math.sqrt(math.pi * self.p.photoelectron_temperature_ev)
+            photo_edge = self.p.emission_density_m3 * math.exp(-phi0) / math.sqrt(math.pi * self.p.emission_temperature_ev)
             if ambient_edge - photo_edge > 128 * np.finfo(float).eps * max(abs(ambient_edge), abs(photo_edge)):
                 raise RuntimeError("Type B has negative field squared arbitrarily near upstream infinity")
         drifting = branch in ("A", "C") and self.p.u > 0
@@ -293,7 +293,7 @@ class SheathPhysics:
                 else:
                     outside = mid
         # Outside the band E^2>=0, so the sampled upstream minimum is the deficit inside the band.
-        e2_scale = QE*self.p.density_scale_m3*self.p.photoelectron_temperature_ev/EPS0
+        e2_scale = QE*self.p.density_scale_m3*self.p.emission_temperature_ev/EPS0
         deficit = math.sqrt(max(0., -min(e2 for _, e2 in upstream))*e2_scale)
         if tolerance > 0 and band > tolerance*reference:
             raise RuntimeError("negative E^2 next to upstream is wider than upstream_band_tolerance allows")
@@ -313,7 +313,7 @@ class SheathPhysics:
         p = self.p
         phi_hat = np.asarray(phi_hat, dtype=float)
         tau = p.tau
-        source_density_hat = p.photoelectron_density_m3 / p.density_scale_m3
+        source_density_hat = p.emission_density_m3 / p.density_scale_m3
 
         n_swi_hat = self._ion_density_hat(phi_hat)
 
@@ -351,7 +351,7 @@ class SheathPhysics:
         p = self.p
         phi_hat = np.asarray(phi_hat, dtype=float)
         tau = p.tau
-        source_density_hat = p.photoelectron_density_m3 / p.density_scale_m3
+        source_density_hat = p.emission_density_m3 / p.density_scale_m3
         n_swi_hat = self._ion_density_hat(phi_hat)
 
         if branch == "A":

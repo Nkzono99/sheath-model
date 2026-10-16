@@ -1,4 +1,4 @@
-"""Fixed-entry and solar-illumination photoelectron sheath models."""
+"""Fixed-entry and solar-illumination sheath models above an electron-emitting boundary."""
 
 from .params import FixedEntryParams, ZhaoParams
 from .solver import SheathSolver

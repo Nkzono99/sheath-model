@@ -28,7 +28,7 @@ program test_orbits
   p%density_scale_m3 = 64e6_dp
   p%emission_density_scale_m3 = 32e6_dp
   p%potential_scale_v = 2.2_dp
-  p%photoelectrons = maxwellian_photoelectrons(32e6_dp, 2.2_dp)
+  p%emission = maxwellian_emission(32e6_dp, 2.2_dp)
   p%t_swe_ev = 12.0_dp
   p%tau = p%t_swe_ev/p%potential_scale_v
   p%mach = 5.0_dp
@@ -79,7 +79,7 @@ program test_orbits
   call solver%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_NO_PHYSICAL_SOLUTION .or. root%valid) error stop 'unphysical C accepted'
   field_input = prescribed_field_input()
-  field_input%photoelectrons = maxwellian_photoelectrons(64e6_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp), 2.2_dp)
+  field_input%emission = maxwellian_emission(64e6_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp), 2.2_dp)
   field_input%electron_drift_mps = 0.0_dp
   field_input%ion_entry_speed_mps = 468e3_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
   do i = -1, 1

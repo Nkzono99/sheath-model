@@ -9,7 +9,7 @@ class SearchOptions:
     """auto: scalar B/C then Newton with LM recovery; bracket: explicit B/C only.
 
     Tolerance bounds every normalized equation. potential_extent is a finite
-    search limit in units of the photoelectron temperature, not an absence proof.
+    search limit in units of the emission temperature, not an absence proof.
     max_starts limits nonlinear starts; bracket_points controls the scalar grid.
     """
     method: str = "auto"

@@ -1,6 +1,6 @@
 # Python API
 
-Python は Maxwell 光電子源の J=0 モデルに対応します。
+Python は Maxwell 放出源の J=0 モデルに対応します。
 物理条件を `FixedEntryParams` または `ZhaoParams`、数値設定を `SheathSolver` に渡します。
 温度は eV、固定入口の密度・速度・質量は SI。入口速度は内向きが正で、Bohm 速度への自動補正はありません。
 
@@ -12,8 +12,8 @@ inputs = FixedEntryParams(
     ion_entry_speed_mps=405299.88897111727,
     ion_temperature_ev=12., ion_pressure_factor=3.,
     electron_temperature_ev=12., electron_drift_mps=0.,
-    photoelectron_density_m3=55.42562584220407e6,
-    photoelectron_temperature_ev=2.2,
+    emission_density_m3=55.42562584220407e6,
+    emission_temperature_ev=2.2,
 )
 solver = SheathSolver(search=SearchOptions(method="newton"),
                       profile=ProfileOptions(zmax_hat=120.))
@@ -32,8 +32,9 @@ Solver は別の物理入力にも再利用でき、前回解を保持しませ�
 
 ## 入力・出力
 
-`FixedEntryParams` は法線状態と光電子 Maxwell 分布の規格化密度を直接指定します。
-`ZhaoParams` は太陽高度・全風速・垂直入射光電子密度から同じ法線状態を計算します。
+`FixedEntryParams` は法線状態と、放出電子の Maxwell 分布（`emission_density_m3`、`emission_temperature_ev`）を直接指定します。
+`ZhaoParams` は太陽高度・全風速・垂直入射光電子密度から同じ法線状態と放出源を計算します。
+放出源は光電子で、`emission_density_m3` と `emission_temperature_ev` の読み取り専用属性として参照できます。
 例えば `ZhaoParams(sun_elevation_deg=60., electron_drift_mode="zero")` を同じ Solver に渡せます。
 Zhao の密度は `ion_density_m3` と `photoelectron_reference_density_m3`、温度は
 `electron_temperature_ev`、`ion_temperature_ev`、`photoelectron_temperature_ev` です。
@@ -49,7 +50,7 @@ upstream_band_tolerance または upstream_field_floor_v_m で受理した drift
 
 `SheathProfile` は equilibrium、z_m、potential_v、electric_field_v_m、density、turning_height_m を持ちます。
 配列は読み取り専用です。密度は ion_m3、electron_free_m3、electron_reflected_m3、
-photoelectron_free_m3、photoelectron_captured_m3 と charge_c_m3。
+emitted_free_m3、emitted_captured_m3 と charge_c_m3。
 sample/fluxes/vdf の位置は既定で m、無次元位置には `unit="hat"` を明示します。
 計算した区間外の位置は ValueError。温かいイオンの流体モデルはイオン VDF を定義しません。
 
@@ -66,7 +67,7 @@ profile_phi_tol_hat=1e-3、type_a_phi_m_eps_hat=1e-5。
 from dataclasses import replace
 from sheath_model import EquilibriumAtlas, ContinuationOptions
 
-sweep = [replace(inputs, photoelectron_density_m3=value) for value in (54e6, 57e6)]
+sweep = [replace(inputs, emission_density_m3=value) for value in (54e6, 57e6)]
 atlas = solver.build_equilibrium_atlas(sweep, branches=("A",))
 atlas.save("equilibrium-atlas.txt")
 worker = replace(solver, equilibrium_atlas=EquilibriumAtlas.load("equilibrium-atlas.txt"),

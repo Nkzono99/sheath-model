@@ -1,12 +1,12 @@
 ! SPDX-License-Identifier: MIT
-!> Standalone photoelectron sheaths with fixed-entry or solar-illumination inputs.
+!> Standalone sheaths above an electron-emitting boundary, with fixed-entry or solar-illumination inputs.
 !! J=0, prescribed E_H, and static potential evaluation support spectral sources.
 !! Matching conditions describe the outer sheath on a simulator's boundary plane.
 !! Public quantities use SI units except temperatures/normal energies [eV] and solar elevation [degrees].
 !! The potential reference is zero at infinity; +z points from the boundary toward upstream.
 !! Check status against SHEATH_OK before using results; message provides diagnostic details.
 module sheath_model
-  use sheath_model_photoelectrons, only: photoelectron_source, maxwellian_photoelectrons, binned_photoelectrons, &
+  use sheath_model_emission, only: emission_source, maxwellian_emission, binned_emission, &
       log_energy_edges, energy_bin, observed_outflow_source
   use sheath_model_ions, only: ion_density_ratio, ion_critical_potential
   use sheath_model_state, only: plasma_input, sheath_state_result, evaluate_sheath_state
@@ -27,7 +27,7 @@ module sheath_model
 
   private
 
-  public :: photoelectron_source, maxwellian_photoelectrons, binned_photoelectrons
+  public :: emission_source, maxwellian_emission, binned_emission
   public :: log_energy_edges, energy_bin, observed_outflow_source
   public :: sheath_matching_conditions, evaluate_matching_conditions, sheath_matching_iteration
   public :: ion_density_ratio, ion_critical_potential

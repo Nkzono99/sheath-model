@@ -9,7 +9,7 @@ program potential_scan
   real(dp) :: phi
   character(len=256) :: message
   plasma%electron_drift_mps = 0.0_dp
-  plasma%photoelectrons = binned_photoelectrons([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], &
+  plasma%emission = binned_emission([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], &
       [2e12_dp, 5e11_dp, 1e11_dp])
   print '(a)', 'phi_H_V,E_squared_V2_m2,E_V_m,N_e_m3,J_A_m2,admissible'
   do i = 1, 100

@@ -13,7 +13,7 @@ program field_atlas
   logical :: exists
   character(len=512) :: path, message
   query%electron_drift_mps = 0.0_dp
-  query%photoelectrons = maxwellian_photoelectrons(55.42562584220407e6_dp, 2.2_dp)
+  query%emission = maxwellian_emission(55.42562584220407e6_dp, 2.2_dp)
   query%electric_field_v_m = 1.62_dp
   path = ''
   call get_command_argument(1, path)

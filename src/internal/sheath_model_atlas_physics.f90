@@ -3,7 +3,7 @@ module sheath_model_atlas_physics
   use sheath_model_constants, only: dp, i32, pi, qe
   use sheath_model_core, only: zhao_params_type
   use sheath_model_atlas, only: sheath_equilibrium_atlas, sheath_atlas_point
-  use sheath_model_photoelectrons, only: photoelectron_fluxes
+  use sheath_model_emission, only: emitted_fluxes
   use sheath_model_equilibrium_physics, only: encoded_equilibrium_residual
   use sheath_model_coordinates, only: decode_unknowns
   use sheath_model_continuation, only: continue_guarded_system
@@ -21,11 +21,11 @@ contains
     real(dp), intent(out) :: key(6)
     real(dp), allocatable, intent(out) :: shape(:)
     real(dp) :: outward, escape, returning
-    call photoelectron_fluxes(p%photoelectrons, p%m_e_kg, 0.0_dp, outward, escape, returning)
+    call emitted_fluxes(p%emission, p%m_e_kg, 0.0_dp, outward, escape, returning)
     key = [log(p%tau), asinh(p%u), log(p%v_d_ion_mps/p%velocity_scale_mps), log(p%m_i_kg/p%m_e_kg), &
         log(1.0_dp + p%ion_pressure_factor*p%t_swi_ev/p%potential_scale_v), &
         log(1.0_dp + 2.0_dp*sqrt(pi)*outward/(p%n_swi_inf_m3*p%velocity_scale_mps))]
-    shape = p%photoelectrons%atlas_shape(p%potential_scale_v)
+    shape = p%emission%atlas_shape(p%potential_scale_v)
   end subroutine
 
   subroutine params_from_key(key, reference, p, valid)
@@ -45,7 +45,7 @@ contains
     p%t_swi_ev = p%potential_scale_v*(exp(key(5)) - 1.0_dp)
     p%ion_pressure_factor = 1.0_dp
     flux = p%n_swi_inf_m3*p%velocity_scale_mps*(exp(key(6)) - 1.0_dp)/(2.0_dp*sqrt(pi))
-    p%photoelectrons = reference%photoelectrons%with_outward_flux(flux, p%m_e_kg)
+    p%emission = reference%emission%with_outward_flux(flux, p%m_e_kg)
     p%cs_mps = sqrt(qe*p%t_swe_ev/p%m_i_kg)
     p%mach = p%v_d_ion_mps/p%cs_mps
     p%u = p%v_d_electron_mps/p%v_swe_th_mps

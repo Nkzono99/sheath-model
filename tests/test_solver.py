@@ -34,11 +34,11 @@ class ZhaoSolverTests(unittest.TestCase):
             a_swe,
             math.inf,
         )
-        direct = n_swe_inf_m3 * integral / (params.v_phe_th_mps / (2.0 * math.sqrt(math.pi)))
+        direct = n_swe_inf_m3 * integral / (params.v_emission_th_mps / (2.0 * math.sqrt(math.pi)))
 
         self.assertAlmostEqual(solver._swe_free_current_term(n_swe_inf_m3, a_swe), direct, places=7)
 
-    def test_type_c_photoelectron_density_keeps_erfc_cutoff(self) -> None:
+    def test_type_c_emitted_density_keeps_erfc_cutoff(self) -> None:
         params = ZhaoParams(sun_elevation_deg=10.0)
         solver = EquilibriumProblem(params)
 
@@ -53,10 +53,10 @@ class ZhaoSolverTests(unittest.TestCase):
         out_5 = SheathSolver().solve_equilibrium(ZhaoParams(sun_elevation_deg=5.0, electron_drift_mode='zero'), branch='C')
         out_10 = SheathSolver().solve_equilibrium(ZhaoParams(sun_elevation_deg=10.0, electron_drift_mode='zero'), branch='C')
 
-        self.assertLess(out_5.surface_potential_v / out_5.inputs.photoelectron_temperature_ev, -5.0)
-        self.assertGreater(out_5.surface_potential_v / out_5.inputs.photoelectron_temperature_ev, -7.0)
-        self.assertLess(out_10.surface_potential_v / out_10.inputs.photoelectron_temperature_ev, -1.5)
-        self.assertGreater(out_10.surface_potential_v / out_10.inputs.photoelectron_temperature_ev, -3.0)
+        self.assertLess(out_5.surface_potential_v / out_5.inputs.emission_temperature_ev, -5.0)
+        self.assertGreater(out_5.surface_potential_v / out_5.inputs.emission_temperature_ev, -7.0)
+        self.assertLess(out_10.surface_potential_v / out_10.inputs.emission_temperature_ev, -1.5)
+        self.assertGreater(out_10.surface_potential_v / out_10.inputs.emission_temperature_ev, -3.0)
         self.assertGreater(out_10.ambient_electron_density_m3, 0.0)
 
     def test_zero_sun_elevation_normal_drift_raises_clear_error(self) -> None:

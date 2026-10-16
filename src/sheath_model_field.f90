@@ -43,9 +43,9 @@ module sheath_model_field
     real(dp) :: ambient_electron_density_m3 = 0.0_dp
     real(dp) :: electron_inward_flux_m2_s = 0.0_dp
     real(dp) :: ion_inward_flux_m2_s = 0.0_dp
-    real(dp) :: photoelectron_outward_flux_m2_s = 0.0_dp
-    real(dp) :: photoelectron_return_flux_m2_s = 0.0_dp
-    real(dp) :: photoelectron_escape_flux_m2_s = 0.0_dp
+    real(dp) :: emitted_outward_flux_m2_s = 0.0_dp
+    real(dp) :: emitted_return_flux_m2_s = 0.0_dp
+    real(dp) :: emitted_escape_flux_m2_s = 0.0_dp
     real(dp) :: net_current_a_m2 = 0.0_dp
     real(dp) :: residual_norm = huge(1.0_dp)
     real(dp) :: minimum_field_squared_hat = huge(1.0_dp)
@@ -338,13 +338,13 @@ contains
     trial%ambient_electron_density_m3 = root%ambient_electron_density_m3
 
     call evaluate_zhao_fluxes(params, root%phi0_v, trial%minimum_potential_v, root%ambient_electron_density_m3, &
-        trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, trial%photoelectron_outward_flux_m2_s, &
-        trial%photoelectron_escape_flux_m2_s, trial%photoelectron_return_flux_m2_s)
+        trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, trial%emitted_outward_flux_m2_s, &
+        trial%emitted_escape_flux_m2_s, trial%emitted_return_flux_m2_s)
     trial%net_current_a_m2 = qe*(trial%electron_inward_flux_m2_s - trial%ion_inward_flux_m2_s - &
-        trial%photoelectron_escape_flux_m2_s)
+        trial%emitted_escape_flux_m2_s)
     if (.not. all(ieee_is_finite([trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, &
-        trial%photoelectron_outward_flux_m2_s, trial%photoelectron_return_flux_m2_s, &
-        trial%photoelectron_escape_flux_m2_s, trial%net_current_a_m2]))) then
+        trial%emitted_outward_flux_m2_s, trial%emitted_return_flux_m2_s, &
+        trial%emitted_escape_flux_m2_s, trial%net_current_a_m2]))) then
       status = SHEATH_NUMERICAL_FAILURE
       message = 'Prescribed-field flux or current evaluation is non-finite.'
       return

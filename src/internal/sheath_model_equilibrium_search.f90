@@ -212,7 +212,7 @@ contains
       if (branch == 'B') limit = min(limit, nearest(ion_critical_potential(0.5_dp*p%t_swe_ev*p%mach**2, &
           p%ion_pressure_factor*p%t_swi_ev), -1.0_dp))
       if (limit <= 0.0_dp) return
-      edges = p%photoelectrons%search_breakpoints()
+      edges = p%emission%search_breakpoints()
       allocate (grid(2*p%search%bracket_points + size(edges)))
       ngrid = 0
       do point = 1, p%search%bracket_points

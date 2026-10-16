@@ -314,7 +314,7 @@ contains
       if (branch == 'B') limit = min(limit, nearest(ion_critical_potential(0.5_dp*params%t_swe_ev*params%mach**2, &
           params%ion_pressure_factor*params%t_swi_ev)/params%potential_scale_v, -1.0_dp))
       if (limit <= 0.0_dp) return
-      edges = params%photoelectrons%search_breakpoints()/params%potential_scale_v
+      edges = params%emission%search_breakpoints()/params%potential_scale_v
       allocate (knots(2*params%search%bracket_points + 3*size(edges)))
       ngrid = 0
       do point = 1, params%search%bracket_points

@@ -2,7 +2,7 @@
 module sheath_model_equilibrium
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use sheath_model_constants, only: dp, i32, pi, eps0, qe, electron_mass, proton_mass, lower_ascii
-  use sheath_model_photoelectrons, only: maxwellian_photoelectrons
+  use sheath_model_emission, only: maxwellian_emission
   use sheath_model_ions, only: ion_critical_potential, ion_density_ratio
   use sheath_model_state, only: plasma_input, prepare_plasma_params
   use sheath_model_core, only: zhao_params_type, &
@@ -68,7 +68,7 @@ module sheath_model_equilibrium
     real(dp) :: residual_norm = huge(1.0_dp) ! scaled neutrality/current/E^2 residual
     real(dp) :: electron_inward_flux_m2_s = 0.0_dp
     real(dp) :: ion_inward_flux_m2_s = 0.0_dp
-    real(dp) :: photoelectron_escape_flux_m2_s = 0.0_dp
+    real(dp) :: emitted_escape_flux_m2_s = 0.0_dp
     real(dp) :: net_current_a_m2 = 0.0_dp ! Conventional electric current along +z
     !> Potential width next to upstream where E^2<0 [V]; nonzero only for drifting A/C roots accepted by
     !! upstream_band_tolerance or upstream_field_floor_v_m.
@@ -82,8 +82,8 @@ module sheath_model_equilibrium
     real(dp) :: ion_m3 = 0.0_dp
     real(dp) :: electron_free_m3 = 0.0_dp
     real(dp) :: electron_reflected_m3 = 0.0_dp
-    real(dp) :: photoelectron_free_m3 = 0.0_dp
-    real(dp) :: photoelectron_captured_m3 = 0.0_dp
+    real(dp) :: emitted_free_m3 = 0.0_dp
+    real(dp) :: emitted_captured_m3 = 0.0_dp
     real(dp) :: charge_c_m3 = 0.0_dp
   end type sheath_density_result
 
@@ -170,7 +170,7 @@ contains
       p%t_swi_ev = input%ion_temperature_ev
       p%ion_pressure_factor = input%ion_pressure_factor
       p%potential_scale_v = input%photoelectron_temperature_ev
-      p%photoelectrons = maxwellian_photoelectrons(p%emission_density_scale_m3, input%photoelectron_temperature_ev)
+      p%emission = maxwellian_emission(p%emission_density_scale_m3, input%photoelectron_temperature_ev)
       p%m_i_kg = input%ion_mass_kg
       p%m_e_kg = input%electron_mass_kg
 
@@ -339,13 +339,13 @@ contains
     trial = sheath_equilibrium_result(.false., branch, physical(1), physical(2), physical(3), p%length_scale_m, &
         maxval(abs(residual)))
     call evaluate_zhao_fluxes(p, physical(1), physical(2), physical(3), trial%electron_inward_flux_m2_s, &
-        trial%ion_inward_flux_m2_s, outward, trial%photoelectron_escape_flux_m2_s, returning)
+        trial%ion_inward_flux_m2_s, outward, trial%emitted_escape_flux_m2_s, returning)
     trial%net_current_a_m2 = qe*(trial%electron_inward_flux_m2_s - trial%ion_inward_flux_m2_s - &
-        trial%photoelectron_escape_flux_m2_s)
+        trial%emitted_escape_flux_m2_s)
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Equilibrium flux or current evaluation is non-finite.'
     if (.not. all(ieee_is_finite([trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, &
-        trial%photoelectron_escape_flux_m2_s, trial%net_current_a_m2]))) return
+        trial%emitted_escape_flux_m2_s, trial%net_current_a_m2]))) return
 
     call validate_zhao_profile(p, branch, physical(1)/p%potential_scale_v, physical(2)/p%potential_scale_v, &
         physical(3)/p%density_scale_m3, minimum_e2, boundary_e2, status, message, band, deficit)

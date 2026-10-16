@@ -13,8 +13,8 @@ class _PlasmaScales:
         return math.sqrt(2.0 * QE * self.electron_temperature_ev / self.electron_mass_kg)
 
     @property
-    def v_phe_th_mps(self) -> float:
-        return math.sqrt(2.0 * QE * self.photoelectron_temperature_ev / self.electron_mass_kg)
+    def v_emission_th_mps(self) -> float:
+        return math.sqrt(2.0 * QE * self.emission_temperature_ev / self.electron_mass_kg)
 
     @property
     def cs_mps(self) -> float:
@@ -31,19 +31,20 @@ class _PlasmaScales:
 
     @property
     def tau(self) -> float:
-        return self.electron_temperature_ev / self.photoelectron_temperature_ev
+        return self.electron_temperature_ev / self.emission_temperature_ev
 
     @property
     def length_scale_m(self) -> float:
-        return math.sqrt(EPS0 * self.photoelectron_temperature_ev / (self.density_scale_m3 * QE))
+        return math.sqrt(EPS0 * self.emission_temperature_ev / (self.density_scale_m3 * QE))
 
 
 @dataclass(frozen=True)
 class FixedEntryParams(_PlasmaScales):
     """Fixed normal entrance state, with SI units except temperatures [eV].
 
-    Speeds are positive inward. Photoelectron density is the normalization of
-    the emitted Maxwellian; its outward half has half this density.
+    Speeds are positive inward. Emission density is the normalization of the
+    Maxwellian of electrons emitted by the boundary (photoelectrons or any other
+    outward population); its outward half has half this density.
     Electron normalization is solved from neutrality, rather than prescribed.
     """
 
@@ -53,8 +54,8 @@ class FixedEntryParams(_PlasmaScales):
     ion_pressure_factor: float = 1.0
     electron_temperature_ev: float = 12.0
     electron_drift_mps: float = 0.0
-    photoelectron_density_m3: float = 0.0
-    photoelectron_temperature_ev: float = 2.2
+    emission_density_m3: float = 0.0
+    emission_temperature_ev: float = 2.2
     ion_mass_kg: float = MP
     electron_mass_kg: float = ME
 
@@ -89,8 +90,13 @@ class ZhaoParams(_PlasmaScales):
         return self.photoelectron_reference_density_m3
 
     @property
-    def photoelectron_density_m3(self) -> float:
+    def emission_density_m3(self) -> float:
+        """Photoelectron emission at this elevation, as the emitted Maxwellian normalization."""
         return self.density_scale_m3 * math.sin(self.alpha_rad)
+
+    @property
+    def emission_temperature_ev(self) -> float:
+        return self.photoelectron_temperature_ev
 
     @property
     def normal_wind_speed_mps(self) -> float:

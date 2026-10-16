@@ -42,7 +42,7 @@ The static potential API instead obtains N_e directly from upstream neutrality
 at the supplied potentials. It returns signed boundary E squared and A's upper
 connection residual without imposing either the current or boundary-field closure.
 
-## Photoelectron energy spectra
+## Emitted-electron energy spectra
 
 The Fortran fixed-entry equilibrium, field and static APIs accept either an analytic Maxwellian source or
 arbitrary normal-energy bins. A bin stores its **integrated outward number flux**;
@@ -56,9 +56,9 @@ n_free = 2g/v* [sqrt(b-q) - sqrt(max(a,B,q)-q)]
 when `b>max(a,B,q)`, and zero otherwise. On the lower side, the returning density
 uses `[max(a,q), min(b,B)]` and twice this prefactor for the two orbit directions.
 Fluxes integrate g over the escaping or returning energy interval, counting return
-only once at the boundary. A's upper side and C have no captured photoelectrons.
+only once at the boundary. A's upper side and C have no captured emitted electrons.
 
-PE density integrals in potential are analytic differences of 3/2 powers, split
+Emitted-electron density integrals in potential are analytic differences of 3/2 powers, split
 at turning points. Square-root differences are rationalized; mixed 3/2-power
 differences factor both bin width and potential interval. This avoids subtracting
 nearly equal primitives for narrow bins or adjacent floating-point endpoints.
@@ -67,7 +67,7 @@ source. No Maxwellian moment fit enters either density or current.
 
 Type A root searches, static evaluation and acceptance divide the upper connection residual by
 `(-phi_min_hat)^(3/2)`, so a shallow minimum alone cannot make that residual appear
-converged. Numerical potential scales are T_PE for a Maxwellian source and T_e for
+converged. Numerical potential scales are T_em for a Maxwellian source and T_e for
 a bin source, rounded down to a power of two. Binary scaling preserves spectral
 bin edges through normalization round trips; it is not an inferred source temperature.
 For a shallow zero-drift A segment, the connection integral uses density differences
@@ -101,7 +101,7 @@ E squared arbitrarily near that endpoint. Both implementations reject the Maxwel
 case with
 
 ```text
-C = N_e exp(-u^2)/sqrt(pi T_e) - N_PE exp(-phi_H/T_PE)/sqrt(pi T_PE).
+C = N_e exp(-u^2)/sqrt(pi T_e) - N_em exp(-phi_H/T_em)/sqrt(pi T_em).
 ```
 
 For bins, the second term is `2(2g_left-g_right)/v*`. At a bin edge, returning and

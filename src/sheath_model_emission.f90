@@ -1,21 +1,22 @@
 ! SPDX-License-Identifier: MIT
-!> Boundary photoelectron distributions and orbit-conserving moments.
-module sheath_model_photoelectrons
+!> Electrons emitted outward from the boundary: distributions and orbit-conserving moments.
+!! The source is any outward electron population (photoelectrons, secondaries, reflected electrons).
+module sheath_model_emission
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use sheath_model_constants, only: dp, i32, pi, qe
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT
   implicit none
   private
-  public :: photoelectron_source, maxwellian_photoelectrons, binned_photoelectrons
-  public :: validate_photoelectrons, photoelectron_density, photoelectron_fluxes
-  public :: photoelectron_density_integral, photoelectron_sqrt_coefficient
-  public :: photoelectron_upper_delta_scaled
+  public :: emission_source, maxwellian_emission, binned_emission
+  public :: validate_emission, emitted_density, emitted_fluxes
+  public :: emitted_density_integral, emitted_sqrt_coefficient
+  public :: emitted_upper_delta_scaled
   public :: log_energy_edges, energy_bin, observed_outflow_source
-  public :: write_photoelectron_source, read_photoelectron_source
+  public :: write_emission_source, read_emission_source
 
   !> Outward boundary distribution: analytic Maxwellian or piecewise constant dGamma/dK.
-  !! Construct with maxwellian_photoelectrons or binned_photoelectrons; no history is stored.
-  type :: photoelectron_source
+  !! Construct with maxwellian_emission or binned_emission; no history is stored.
+  type :: emission_source
     private
     logical :: binned = .false.
     real(dp) :: density_m3 = 0.0_dp
@@ -32,14 +33,14 @@ module sheath_model_photoelectrons
 
   !> Immutable zero-emission default for opaque sources nested in physical inputs.
   !! Explicit component initialization keeps enclosing constructors portable across compilers.
-  type(photoelectron_source), parameter, public :: DEFAULT_PHOTOELECTRONS = photoelectron_source()
+  type(emission_source), parameter, public :: DEFAULT_EMISSION = emission_source()
 
 contains
 
   !> Dimensionless spectral shape for identifying compatible atlas entries.
   !! Maxwellians use an empty shape; their temperature is the potential scale.
   pure function atlas_shape(self, potential_scale_v) result(shape)
-    class(photoelectron_source), intent(in) :: self
+    class(emission_source), intent(in) :: self
     real(dp), intent(in) :: potential_scale_v
     real(dp), allocatable :: shape(:)
     real(dp) :: total
@@ -57,9 +58,9 @@ contains
 
   !> Change source amplitude while preserving its energy distribution.
   pure function with_outward_flux(self, total_flux_m2_s, mass_kg) result(source)
-    class(photoelectron_source), intent(in) :: self
+    class(emission_source), intent(in) :: self
     real(dp), intent(in) :: total_flux_m2_s, mass_kg
-    type(photoelectron_source) :: source
+    type(emission_source) :: source
     real(dp) :: total
     source = self
     if (self%binned) then
@@ -73,7 +74,7 @@ contains
   !> Flux-weighted mean outward normal energy [eV]: the temperature for a half-Maxwellian,
   !! bin midpoints for a spectrum (dGamma/dK is constant in each bin), and 0 for an empty spectrum.
   pure real(dp) function mean_normal_energy(self) result(energy_ev)
-    class(photoelectron_source), intent(in) :: self
+    class(emission_source), intent(in) :: self
     real(dp) :: total
     integer :: n
     energy_ev = self%temperature_ev
@@ -86,18 +87,18 @@ contains
 
   !> Construct an analytic source from Maxwellian normalization [m^-3] and temperature [eV].
   !! Validity is checked by the model entry points, including zero emission.
-  pure function maxwellian_photoelectrons(density_m3, temperature_ev) result(source)
+  pure function maxwellian_emission(density_m3, temperature_ev) result(source)
     real(dp), intent(in) :: density_m3, temperature_ev
-    type(photoelectron_source) :: source
+    type(emission_source) :: source
     source%density_m3 = density_m3
     source%temperature_ev = temperature_ev
   end function
 
   !> Construct a source from ascending normal-energy edges [eV] and integrated bin fluxes [m^-2 s^-1].
   !! There must be one more edge than flux. dGamma/dK is constant in each bin and zero outside the edges.
-  pure function binned_photoelectrons(energy_edges_ev, bin_flux_m2_s) result(source)
+  pure function binned_emission(energy_edges_ev, bin_flux_m2_s) result(source)
     real(dp), intent(in) :: energy_edges_ev(:), bin_flux_m2_s(:)
-    type(photoelectron_source) :: source
+    type(emission_source) :: source
     source%binned = .true.
     source%edges_ev = energy_edges_ev
     source%flux_m2_s = bin_flux_m2_s
@@ -157,7 +158,7 @@ contains
   !! Empty end bins are trimmed and interior empty bins kept. The total must be positive.
   subroutine observed_outflow_source(edges_ev, flux_m2_s, source, status, message)
     real(dp), intent(in) :: edges_ev(:), flux_m2_s(:)
-    type(photoelectron_source), intent(out) :: source
+    type(emission_source), intent(out) :: source
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     integer :: n, first, last
@@ -175,20 +176,20 @@ contains
     do while (flux_m2_s(last) <= 0.0_dp)
       last = last - 1
     end do
-    source = binned_photoelectrons(edges_ev(first:last + 1), flux_m2_s(first:last))
-    call validate_photoelectrons(source, status, message)
+    source = binned_emission(edges_ev(first:last + 1), flux_m2_s(first:last))
+    call validate_emission(source, status, message)
   end subroutine observed_outflow_source
 
   !> True for a piecewise constant energy-flux source.
   pure logical function is_binned(self)
-    class(photoelectron_source), intent(in) :: self
+    class(emission_source), intent(in) :: self
     is_binned = self%binned
   end function
 
   !> Numerical potential scale [V]: Maxwellian temperature, or a power of two near the supplied spectral scale.
   !! Binary scaling preserves physical bin edges exactly when converting potentials to and from internal units.
   pure real(dp) function potential_scale(self, spectrum_scale_v) result(scale)
-    class(photoelectron_source), intent(in) :: self
+    class(emission_source), intent(in) :: self
     real(dp), intent(in) :: spectrum_scale_v
     scale = self%temperature_ev
     if (self%binned) then
@@ -198,20 +199,20 @@ contains
 
   !> Exact normal-energy bin edges for numerical searches; empty for a Maxwellian.
   pure function search_breakpoints(self) result(edges)
-    class(photoelectron_source), intent(in) :: self
+    class(emission_source), intent(in) :: self
     real(dp), allocatable :: edges(:)
     allocate (edges(0))
     if (allocated(self%edges_ev)) edges = self%edges_ev
   end function search_breakpoints
 
   !> Validate finite nonnegative source strength, positive Maxwellian temperature, and strict bin ordering.
-  subroutine validate_photoelectrons(source, status, message)
-    type(photoelectron_source), intent(in) :: source
+  subroutine validate_emission(source, status, message)
+    type(emission_source), intent(in) :: source
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
     integer :: n
     status = SHEATH_INVALID_ARGUMENT
-    message = 'Invalid Maxwellian photoelectron density or temperature.'
+    message = 'Invalid Maxwellian emission density or temperature.'
     if (.not. source%binned) then
       if (.not. all(ieee_is_finite([source%density_m3, source%temperature_ev]))) return
       if (source%density_m3 < 0.0_dp .or. source%temperature_ev <= 0.0_dp) return
@@ -233,8 +234,8 @@ contains
   !> [n_PE(-depth*f)-n_PE(0)]/sqrt(depth) on an A upper segment [m^-3 V^-1/2].
   !! The Maxwellian expression is for depth/T << 1; bin differences are exact.
   !! Factored square-root differences retain small depths and narrow bin widths.
-  pure real(dp) function photoelectron_upper_delta_scaled(source, mass_kg, boundary, depth, f) result(value)
-    type(photoelectron_source), intent(in) :: source
+  pure real(dp) function emitted_upper_delta_scaled(source, mass_kg, boundary, depth, f) result(value)
+    type(emission_source), intent(in) :: source
     real(dp), intent(in) :: mass_kg, boundary, depth, f
     real(dp) :: a, b, sa, sb, ta, tb, g, w, ratio, psi, s, s0, polynomial, erf_delta, exp_delta
     integer :: i
@@ -270,8 +271,8 @@ contains
 
   !> Return outward, escaping and returning number fluxes [m^-2 s^-1] for a validated source.
   !! barrier_v >= 0 is the boundary-to-minimum potential drop [V]; return counts one inward crossing.
-  pure subroutine photoelectron_fluxes(source, mass_kg, barrier_v, outward, escape, returning)
-    type(photoelectron_source), intent(in) :: source
+  pure subroutine emitted_fluxes(source, mass_kg, barrier_v, outward, escape, returning)
+    type(emission_source), intent(in) :: source
     real(dp), intent(in) :: mass_kg, barrier_v
     real(dp), intent(out) :: outward, escape, returning
     real(dp) :: a, b
@@ -295,8 +296,8 @@ contains
 
   !> Return escaping and captured densities [m^-3] at phi_v for a validated source and physical orbit domain.
   !! Potentials are in V with minimum_v <= min(boundary_v,0); lower_side includes both legs of returning orbits.
-  pure subroutine photoelectron_density(source, mass_kg, boundary_v, minimum_v, phi_v, lower_side, free, captured)
-    type(photoelectron_source), intent(in) :: source
+  pure subroutine emitted_density(source, mass_kg, boundary_v, minimum_v, phi_v, lower_side, free, captured)
+    type(emission_source), intent(in) :: source
     real(dp), intent(in) :: mass_kg, boundary_v, minimum_v, phi_v
     logical, intent(in) :: lower_side
     real(dp), intent(out) :: free, captured
@@ -326,11 +327,11 @@ contains
     end do
   end subroutine
 
-  !> Analytic integral of binned PE number density over potential [m^-3 V], with the same orbit populations.
+  !> Analytic integral of binned emitted-electron number density over potential [m^-3 V], with the same orbit populations.
   !! Requires a validated binned source; the Maxwellian path is integrated with the other smooth densities.
-  pure real(dp) function photoelectron_density_integral(source, mass_kg, boundary_v, minimum_v, lo_v, hi_v, lower_side) &
+  pure real(dp) function emitted_density_integral(source, mass_kg, boundary_v, minimum_v, lo_v, hi_v, lower_side) &
       result(value)
-    type(photoelectron_source), intent(in) :: source
+    type(emission_source), intent(in) :: source
     real(dp), intent(in) :: mass_kg, boundary_v, minimum_v, lo_v, hi_v
     logical, intent(in) :: lower_side
     real(dp) :: a, b, g, barrier, lo, hi, velocity
@@ -353,10 +354,10 @@ contains
     value = sign(1.0_dp, hi_v - lo_v)*value/velocity
   end function
 
-  !> PE coefficient of sqrt(phi) in Type-B density [m^-3 V^-1/2] near upstream phi=0+.
+  !> Emitted-electron coefficient of sqrt(phi) in Type-B density [m^-3 V^-1/2] near upstream phi=0+.
   !! At an energy-bin edge, 2*g_left-g_right accounts separately for returning and escaping orbits.
-  pure real(dp) function photoelectron_sqrt_coefficient(source, mass_kg, boundary_v) result(coefficient)
-    type(photoelectron_source), intent(in) :: source
+  pure real(dp) function emitted_sqrt_coefficient(source, mass_kg, boundary_v) result(coefficient)
+    type(emission_source), intent(in) :: source
     real(dp), intent(in) :: mass_kg, boundary_v
     real(dp) :: left, right, a, b, g
     integer :: i
@@ -442,8 +443,8 @@ contains
   end function
 
   !> Write a source to an unformatted unit; the caller owns the unit and its access mode.
-  subroutine write_photoelectron_source(source, unit, iostat)
-    type(photoelectron_source), intent(in) :: source
+  subroutine write_emission_source(source, unit, iostat)
+    type(emission_source), intent(in) :: source
     integer, intent(in) :: unit
     integer, intent(out) :: iostat
     integer :: n
@@ -452,11 +453,11 @@ contains
     write (unit, iostat=iostat) source%binned, source%density_m3, source%temperature_ev, n
     if (iostat /= 0 .or. n == 0) return
     write (unit, iostat=iostat) source%edges_ev, source%flux_m2_s
-  end subroutine write_photoelectron_source
+  end subroutine write_emission_source
 
-  !> Read a source written by write_photoelectron_source. The result is not validated here.
-  subroutine read_photoelectron_source(source, unit, iostat)
-    type(photoelectron_source), intent(out) :: source
+  !> Read a source written by write_emission_source. The result is not validated here.
+  subroutine read_emission_source(source, unit, iostat)
+    type(emission_source), intent(out) :: source
     integer, intent(in) :: unit
     integer, intent(out) :: iostat
     integer :: n
@@ -469,5 +470,5 @@ contains
     if (n == 0) return
     allocate (source%edges_ev(n + 1), source%flux_m2_s(n))
     read (unit, iostat=iostat) source%edges_ev, source%flux_m2_s
-  end subroutine read_photoelectron_source
+  end subroutine read_emission_source
 end module

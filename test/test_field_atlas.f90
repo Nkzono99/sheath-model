@@ -17,7 +17,7 @@ program test_field_atlas
   character(len=512) :: message
 
   base%electron_drift_mps = 0.0_dp
-  base%photoelectrons = maxwellian_photoelectrons(55.42562584220407e6_dp, 2.2_dp)
+  base%emission = maxwellian_emission(55.42562584220407e6_dp, 2.2_dp)
   base%electric_field_v_m = 1.6_dp
   do i = 1, 2
     inputs(i) = base
@@ -72,7 +72,7 @@ program test_field_atlas
   call solver%solve_prescribed_field(query, reference, status, message)
   call check(status == SHEATH_OK, 'reference stored field')
   query%ion_density_m3 = query%ion_density_m3*1e8_dp
-  query%photoelectrons = maxwellian_photoelectrons(55.42562584220407e14_dp, 22.0_dp)
+  query%emission = maxwellian_emission(55.42562584220407e14_dp, 22.0_dp)
   query%electron_temperature_ev = query%electron_temperature_ev*10.0_dp
   query%ion_entry_speed_mps = query%ion_entry_speed_mps*sqrt(10.0_dp)
   query%electric_field_v_m = query%electric_field_v_m*sqrt(1e9_dp)
@@ -143,7 +143,7 @@ program test_field_atlas
   solver%continuation%max_steps = 1
   solver%continuation%method = 'parameter'
   query%ion_entry_speed_mps = 468e3_dp*sin(20.0_dp*acos(-1.0_dp)/180.0_dp)
-  query%photoelectrons = maxwellian_photoelectrons( &
+  query%emission = maxwellian_emission( &
       9.82784429_dp*query%ion_density_m3*sin(20.0_dp*acos(-1.0_dp)/180.0_dp), 2.2_dp)
   query%electric_field_v_m = 1.09375_dp
   call solver%solve_prescribed_field_candidates(query, mapped, status, message, diagnostics)
@@ -159,7 +159,7 @@ program test_field_atlas
   ! A changed spectrum shape must not borrow solutions from another family.
   solver%search = sheath_search_options()
   query = prescribed_field_input(branch='C', electric_field_v_m=-0.02_dp, electron_drift_mps=0.0_dp)
-  query%photoelectrons = binned_photoelectrons([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], [2e10_dp, 5e9_dp, 1e9_dp])
+  query%emission = binned_emission([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], [2e10_dp, 5e9_dp, 1e9_dp])
   call solver%solve_prescribed_field(query, reference, status, message)
   call check(status == SHEATH_OK, 'spectral C reference')
   call single%clear()

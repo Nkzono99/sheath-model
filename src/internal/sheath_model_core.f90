@@ -3,9 +3,9 @@
 ! Modified: standalone modules; status-returning public facade in sheath_model.
 !> Zhao 系シースの物理量、残差、および枝ごとの初期値・探索。
 module sheath_model_core
-  use sheath_model_photoelectrons, only: photoelectron_source, DEFAULT_PHOTOELECTRONS, &
-      photoelectron_density, photoelectron_fluxes, &
-      photoelectron_density_integral, photoelectron_upper_delta_scaled
+  use sheath_model_emission, only: emission_source, DEFAULT_EMISSION, &
+      emitted_density, emitted_fluxes, &
+      emitted_density_integral, emitted_upper_delta_scaled
   use sheath_model_orbits, only: electron_density, gauss_x, gauss_w
   use sheath_model_ions, only: ion_density_ratio
   use sheath_model_constants, only: dp
@@ -20,7 +20,7 @@ module sheath_model_core
   type :: zhao_params_type
     type(sheath_search_options) :: search
     type(sheath_continuation_options) :: continuation
-    type(photoelectron_source) :: photoelectrons = DEFAULT_PHOTOELECTRONS
+    type(emission_source) :: emission = DEFAULT_EMISSION
     real(dp) :: alpha_rad = 0.0d0
     real(dp) :: n_swi_inf_m3 = 0.0d0
     real(dp) :: density_scale_m3 = 0.0d0
@@ -73,7 +73,7 @@ contains
     rho_hat = n_swi_hat - n_swe_f_hat - n_swe_r_hat - n_phe_f_hat - n_phe_c_hat
   end subroutine evaluate_zhao_rho_hat
 
-  !> Return ion, free/reflected electron, and free/captured photoelectron densities / p%density_scale_m3.
+  !> Return ion, free/reflected electron, and free/captured emitted-electron densities / p%density_scale_m3.
   !! Potentials are divided by p%potential_scale_v; n_swe_inf_hat uses the same density normalization as the outputs.
   !! branch is A/B/C; Type A requires side='lower' or 'upper'. A blocked ion flow produces NaN densities.
   subroutine evaluate_zhao_density_hat( &
@@ -91,7 +91,7 @@ contains
 
     call evaluate_background_hat(p, branch, side, phi_hat, phi_m_hat, n_swe_inf_hat, n_swi_hat, n_swe_f_hat, n_swe_r_hat)
     lower_side = branch == 'B' .or. (branch == 'A' .and. side == 'lower')
-    call photoelectron_density(p%photoelectrons, p%m_e_kg, phi0_hat*p%potential_scale_v, &
+    call emitted_density(p%emission, p%m_e_kg, phi0_hat*p%potential_scale_v, &
         phi_m_hat*p%potential_scale_v, phi_hat*p%potential_scale_v, lower_side, photo_free, photo_captured)
     n_phe_f_hat = photo_free/p%density_scale_m3
     n_phe_c_hat = photo_captured/p%density_scale_m3
@@ -116,12 +116,12 @@ contains
     case ('B')
       if (phi_v <= 0.0_dp) return
       cutoff = -p%u
-      call photoelectron_fluxes(p%photoelectrons, p%m_e_kg, phi_v, outward, escape, returning)
+      call emitted_fluxes(p%emission, p%m_e_kg, phi_v, outward, escape, returning)
       source_current_term = escape/(p%velocity_scale_mps/(2.0_dp*sqrt(pi)))
     case ('C')
       if (phi_v >= 0.0_dp) return
       cutoff = sqrt(max(0.0_dp, -phi_v/p%t_swe_ev)) - p%u
-      call photoelectron_fluxes(p%photoelectrons, p%m_e_kg, 0.0_dp, outward, escape, returning)
+      call emitted_fluxes(p%emission, p%m_e_kg, 0.0_dp, outward, escape, returning)
       source_current_term = escape/(p%velocity_scale_mps/(2.0_dp*sqrt(pi)))
     case default
       return
@@ -298,7 +298,7 @@ contains
             (s**4 + s**3*s0 + s*s*s0*s0 + s*s0**3 + s0**4)/10.0_dp
         electron_delta = 0.5_dp*density*(-root_d*f/p%tau*(1.0_dp + psi*(0.5_dp + psi*(1.0_dp/6.0_dp + psi/24.0_dp)))* &
             (1.0_dp + erf(s0)) - exp(psi)*2.0_dp*f*polynomial/(sqrt(pi*p%tau)*(1.0_dp + sqrt(1.0_dp - f))))
-        photo_delta = photoelectron_upper_delta_scaled(p%photoelectrons, p%m_e_kg, phi0*p%potential_scale_v, &
+        photo_delta = emitted_upper_delta_scaled(p%emission, p%m_e_kg, phi0*p%potential_scale_v, &
             d*p%potential_scale_v, f)*sqrt(p%potential_scale_v)/p%density_scale_m3
         value = value + gauss_w(j)*(ion_delta - electron_delta - photo_delta)*0.5_dp*pi*sin(pi*t)
       end do
@@ -326,7 +326,7 @@ contains
       do j = 1, 16
         t = (real(panel, dp) + 0.5_dp*(1.0_dp + gauss_x(j)))/4.0_dp
         phi = lo + (hi - lo)*sin(0.5_dp*pi*t)**2
-        if (p%photoelectrons%is_binned()) then
+        if (p%emission%is_binned()) then
           call evaluate_background_hat(p, branch, side, phi, phim, density, ni, ne, nr)
           rho = ni - ne - nr
         else
@@ -336,9 +336,9 @@ contains
       end do
     end do
     value = value/8.0_dp
-    if (p%photoelectrons%is_binned()) then
+    if (p%emission%is_binned()) then
       lower_side = branch == 'B' .or. (branch == 'A' .and. side == 'lower')
-      pe_integral = photoelectron_density_integral(p%photoelectrons, p%m_e_kg, phi0*p%potential_scale_v, &
+      pe_integral = emitted_density_integral(p%emission, p%m_e_kg, phi0*p%potential_scale_v, &
           phim*p%potential_scale_v, lo*p%potential_scale_v, hi*p%potential_scale_v, lower_side)
       value = value - pe_integral/(p%density_scale_m3*p%potential_scale_v)
     end if
@@ -355,7 +355,7 @@ contains
       reflected = 0.0_dp
     end if
     coefficient = free + reflected
-    call photoelectron_density(p%photoelectrons, p%m_e_kg, phi0, phim, 0.0_dp, .false., pe, captured)
+    call emitted_density(p%emission, p%m_e_kg, phi0, phim, 0.0_dp, .false., pe, captured)
     density = ieee_value(0.0_dp, ieee_quiet_nan)
     if (coefficient > 0.0_dp) then
       density = (p%n_swi_inf_m3 - pe)/coefficient
@@ -371,7 +371,7 @@ contains
     cutoff = sqrt(max(0.0_dp, -phim/p%t_swe_ev)) - p%u
     electron = p%velocity_scale_mps/(2.0_dp*sqrt(pi))*swe_free_current_term(p, density, cutoff)
     ion = p%n_swi_inf_m3*p%v_d_ion_mps
-    call photoelectron_fluxes(p%photoelectrons, p%m_e_kg, phi0 - phim, outward, escape, returning)
+    call emitted_fluxes(p%emission, p%m_e_kg, phi0 - phim, outward, escape, returning)
   end subroutine
 
   subroutine evaluate_background_hat(p, branch, side, phi, phim, density, ni, ne, nr)

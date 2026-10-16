@@ -8,7 +8,7 @@ def main():
         ion_density_m3=8.7e6, ion_entry_speed_mps=405299.88897111727,
         ion_temperature_ev=12., ion_pressure_factor=3.,
         electron_temperature_ev=12., electron_drift_mps=0.,
-        photoelectron_density_m3=55.42562584220407e6, photoelectron_temperature_ev=2.2,
+        emission_density_m3=55.42562584220407e6, emission_temperature_ev=2.2,
     )
     # Select auto, newton or lm here; bracket is available for B/C.
     solver = SheathSolver(search=SearchOptions(method="newton"))

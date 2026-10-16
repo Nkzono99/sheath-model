@@ -21,7 +21,7 @@ program test_static_state
   call solver%solve_equilibrium(equilibrium_input, equilibrium, status, message)
   call ok('equilibrium reference')
   plasma%electron_drift_mps = 0.0_dp
-  plasma%photoelectrons = maxwellian_photoelectrons(64e6_dp*sin(pi/3.0_dp), 2.2_dp)
+  plasma%emission = maxwellian_emission(64e6_dp*sin(pi/3.0_dp), 2.2_dp)
   call evaluate_sheath_state(plasma, 'A', equilibrium%surface_potential_v, state, status, message, &
       minimum_potential_v=equilibrium%minimum_potential_v)
   call ok('static A')
@@ -43,12 +43,12 @@ program test_static_state
     phi = -1.0_dp
     if (i /= 1) then
       phi = 0.5_dp
-      plasma%photoelectrons = binned_photoelectrons([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], [2e12_dp, 5e11_dp, 1e11_dp])
+      plasma%emission = binned_emission([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], [2e12_dp, 5e11_dp, 1e11_dp])
     end if
-    if (i == 3) plasma%photoelectrons = maxwellian_photoelectrons(2e7_dp, 2.2_dp)
+    if (i == 3) plasma%emission = maxwellian_emission(2e7_dp, 2.2_dp)
     if (i == 4) then
       phi = -1.0_dp
-      plasma%photoelectrons = binned_photoelectrons([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], [2e10_dp, 5e9_dp, 1e9_dp])
+      plasma%emission = binned_emission([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], [2e10_dp, 5e9_dp, 1e9_dp])
     end if
     call evaluate_sheath_state(plasma, merge('C', 'B', phi < 0.0_dp), phi, state, status, message)
     call ok('static B/C')
@@ -66,27 +66,27 @@ program test_static_state
     call solver%solve_prescribed_field_candidates(field_input, candidates, status, message)
     call ok('B/C field inversion')
     call check(any(abs(candidates%boundary_potential_v - phi) < 1e-6_dp), 'static candidate recovered')
-    call near(state%photoelectron_outward_flux_m2_s, &
-        state%photoelectron_escape_flux_m2_s + state%photoelectron_return_flux_m2_s, 1e-14_dp, 'state flux conservation')
+    call near(state%emitted_outward_flux_m2_s, &
+        state%emitted_escape_flux_m2_s + state%emitted_return_flux_m2_s, 1e-14_dp, 'state flux conservation')
   end do
 
-  plasma%photoelectrons = maxwellian_photoelectrons(0.0_dp, 2.2_dp)
+  plasma%emission = maxwellian_emission(0.0_dp, 2.2_dp)
   call evaluate_sheath_state(plasma, 'B', 0.5_dp, state, status, message)
   call ok('finite nonphysical B')
   call check(.not. state%admissible .and. state%physical_status == SHEATH_NO_PHYSICAL_SOLUTION, 'B asymptotic exclusion')
   call check(state%boundary_field_squared_v2_m2 < 0.0_dp, 'signed E squared retained')
   call check(.not. ieee_is_finite(state%electric_field_v_m), 'imaginary field not clipped to zero')
-  plasma%photoelectrons = maxwellian_photoelectrons(64e6_dp*sin(pi/3.0_dp), 2.2_dp)
+  plasma%emission = maxwellian_emission(64e6_dp*sin(pi/3.0_dp), 2.2_dp)
   call evaluate_sheath_state(plasma, 'B', 10.0_dp, state, status, message)
   call ok('positive boundary E squared does not establish a physical B profile')
   call check(state%boundary_field_squared_v2_m2 > 0.0_dp .and. .not. state%admissible, 'B upstream guard')
-  plasma%photoelectrons = maxwellian_photoelectrons(0.0_dp, 2.2_dp)
+  plasma%emission = maxwellian_emission(0.0_dp, 2.2_dp)
   call evaluate_sheath_state(plasma, 'B', 0.0_dp, state, status, message)
   call ok('flat zero emission state')
   call check(state%admissible, 'flat state')
 
   ! Rounding-cell correction at a spectral edge affects ALL electron observables consistently.
-  plasma%photoelectrons = binned_photoelectrons([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], [2e12_dp, 5e11_dp, 1e11_dp])
+  plasma%emission = binned_emission([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], [2e12_dp, 5e11_dp, 1e11_dp])
   phi = 1.0_dp
   call evaluate_sheath_state(plasma, 'B', nearest(phi, -1.0_dp), left, status, message)
   call ok('left neighbor')
@@ -113,15 +113,15 @@ program test_static_state
     if ((phi/12.0_dp)*12.0_dp > phi) exit
   end do
   call check(i <= 1000, 'decimal bin-edge regression setup')
-  plasma%photoelectrons = binned_photoelectrons([0.0_dp, phi], [1e13_dp])
+  plasma%emission = binned_emission([0.0_dp, phi], [1e13_dp])
   call evaluate_sheath_state(plasma, 'B', phi, state, status, message)
   call ok('exact decimal bin edge')
   call check(state%admissible, 'internal scaling must not move the boundary outside spectral support')
 
-  plasma%photoelectrons = binned_photoelectrons([0.0_dp, 1.0_dp], [0.0_dp])
+  plasma%emission = binned_emission([0.0_dp, 1.0_dp], [0.0_dp])
   call evaluate_sheath_state(plasma, 'C', -1.0_dp, state, status, message)
   call ok('zero spectral emission')
-  call check(state%admissible .and. state%photoelectron_outward_flux_m2_s == 0.0_dp, 'zero spectrum C')
+  call check(state%admissible .and. state%emitted_outward_flux_m2_s == 0.0_dp, 'zero spectrum C')
 
   ! Refined Maxwellian spectrum also closes the nonmonotonic upper segment independently of the source temperature.
   scale = 2.2_dp
@@ -130,7 +130,7 @@ program test_static_state
     edges(i) = (i - 1)*44.0_dp/256
   end do
   flux = gamma*(exp(-edges(:256)/scale) - exp(-edges(2:)/scale))
-  plasma%photoelectrons = binned_photoelectrons(edges, flux)
+  plasma%emission = binned_emission(edges, flux)
   field_input%plasma_input = plasma
   field_input%branch = 'A'
   call evaluate_sheath_state(plasma, 'A', equilibrium%surface_potential_v, state, status, message, &

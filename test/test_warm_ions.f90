@@ -56,7 +56,7 @@ program test_warm_ions
   plasma%electron_drift_mps = 0.0_dp
   plasma%ion_temperature_ev = 12.0_dp
   plasma%ion_pressure_factor = 3.0_dp
-  plasma%photoelectrons = maxwellian_photoelectrons(64e6_dp*sin(acos(-1.0_dp)/3.0_dp), 2.2_dp)
+  plasma%emission = maxwellian_emission(64e6_dp*sin(acos(-1.0_dp)/3.0_dp), 2.2_dp)
   call evaluate_sheath_state(plasma, 'A', warm%surface_potential_v, state, status, message, &
       minimum_potential_v=warm%minimum_potential_v)
   if (status /= SHEATH_OK .or. .not. state%admissible) error stop 'warm static closure'
@@ -64,7 +64,7 @@ program test_warm_ions
   field_input%electron_drift_mps = plasma%electron_drift_mps
   field_input%ion_temperature_ev = plasma%ion_temperature_ev
   field_input%ion_pressure_factor = plasma%ion_pressure_factor
-  field_input%photoelectrons = plasma%photoelectrons
+  field_input%emission = plasma%emission
   field_input%branch = 'A'
   field_input%electric_field_v_m = state%electric_field_v_m
   call solver%solve_prescribed_field_candidates(field_input, candidates, status, message)

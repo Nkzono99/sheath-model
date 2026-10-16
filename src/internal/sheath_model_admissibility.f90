@@ -4,7 +4,7 @@ module sheath_model_admissibility
   use sheath_model_constants, only: dp, i32, pi
   use sheath_model_status, only: SHEATH_OK, SHEATH_NO_PHYSICAL_SOLUTION, SHEATH_NUMERICAL_FAILURE
   use sheath_model_core, only: zhao_params_type, integrate_zhao_rho, evaluate_zhao_rho_hat, type_a_connection_residual
-  use sheath_model_photoelectrons, only: photoelectron_sqrt_coefficient
+  use sheath_model_emission, only: emitted_sqrt_coefficient
   use sheath_model_ions, only: ion_density_ratio
 
   implicit none
@@ -62,7 +62,7 @@ contains
 
     if (branch == 'B' .and. phi0 > 0.0_dp) then
       ambient_edge = density*p%density_scale_m3*exp(-p%u**2)/sqrt(pi*p%t_swe_ev)
-      photo_edge = photoelectron_sqrt_coefficient(p%photoelectrons, p%m_e_kg, phi0*p%potential_scale_v)
+      photo_edge = emitted_sqrt_coefficient(p%emission, p%m_e_kg, phi0*p%potential_scale_v)
       if (ambient_edge - photo_edge > 128.0_dp*epsilon(1.0_dp)*max(abs(ambient_edge), abs(photo_edge))) then
         message = 'Type B has negative field squared arbitrarily near upstream infinity.'
         return

@@ -77,7 +77,7 @@ program test_atlas
 
   solver = sheath_solver()
   fixed%branch = 'A'
-  fixed%plasma%photoelectrons = maxwellian_photoelectrons(55.42562584220407e6_dp, 2.2_dp)
+  fixed%plasma%emission = maxwellian_emission(55.42562584220407e6_dp, 2.2_dp)
   fixed%plasma%ion_temperature_ev = 12.0_dp
   fixed%plasma%ion_pressure_factor = 3.0_dp
   call atlas%clear()
@@ -85,7 +85,7 @@ program test_atlas
   if (status /= SHEATH_OK) error stop 'fixed reference'
   call solver%add_equilibrium_to_atlas(fixed, reference, atlas, status, message)
   if (status /= SHEATH_OK) error stop 'fixed atlas add'
-  fixed%plasma%photoelectrons = maxwellian_photoelectrons(120e6_dp, 2.2_dp)
+  fixed%plasma%emission = maxwellian_emission(120e6_dp, 2.2_dp)
   call solver%solve_equilibrium(fixed, reference, status, message)
   if (status /= SHEATH_OK) error stop 'difficult independent reference'
   solver%search%method = 'newton'
@@ -106,7 +106,7 @@ program test_atlas
     if (diagnostics%continuation_steps(1) == 0 .or. diagnostics%continuation_retries(1) == 0) &
         error stop 'adaptive recovery exercised'
   end do
-  fixed%plasma%photoelectrons = maxwellian_photoelectrons(55.42562584220407e6_dp, 2.2_dp)
+  fixed%plasma%emission = maxwellian_emission(55.42562584220407e6_dp, 2.2_dp)
   solver%search = sheath_search_options()
   call solver%solve_equilibrium(fixed, reference, status, message)
   if (status /= SHEATH_OK) error stop 'restored reference'
@@ -118,7 +118,7 @@ program test_atlas
   call solver%build_equilibrium_atlas(fixed_sweep, loaded, status, message, deflation=.true.)
   if (status /= SHEATH_OK .or. loaded%size() /= 1) error stop 'deflated map build'
   fixed%plasma%ion_density_m3 = fixed%plasma%ion_density_m3*1e9_dp
-  fixed%plasma%photoelectrons = maxwellian_photoelectrons(55.42562584220407e15_dp, 22.0_dp)
+  fixed%plasma%emission = maxwellian_emission(55.42562584220407e15_dp, 22.0_dp)
   fixed%plasma%ion_temperature_ev = 120.0_dp
   fixed%plasma%electron_temperature_ev = 120.0_dp
   fixed%plasma%ion_entry_speed_mps = fixed%plasma%ion_entry_speed_mps*sqrt(10.0_dp)
@@ -140,7 +140,7 @@ program test_atlas
   solver = sheath_solver()
   fixed = fixed_entry_equilibrium_input()
   fixed%branch = 'C'
-  fixed%plasma%photoelectrons = binned_photoelectrons([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], &
+  fixed%plasma%emission = binned_emission([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], &
       [2e10_dp, 5e9_dp, 1e9_dp])
   call solver%solve_equilibrium(fixed, reference, status, message)
   if (status /= SHEATH_OK) error stop 'spectral reference'
@@ -153,7 +153,7 @@ program test_atlas
   call loaded%read(unit, io)
   close (unit)
   if (io /= 0) error stop 'spectral read'
-  fixed%plasma%photoelectrons = binned_photoelectrons([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], &
+  fixed%plasma%emission = binned_emission([0.0_dp, 1.0_dp, 3.0_dp, 8.0_dp], &
       [2.02e10_dp, 5.05e9_dp, 1.01e9_dp])
   solver%search%method = 'newton'
   solver%search%use_default_guesses = .false.

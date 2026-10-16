@@ -156,9 +156,9 @@ class ProfilePhysics(SheathPhysics):
             "z_m_m": z_m_hat * p.length_scale_m,
             "z_m_array_m": z_hat * p.length_scale_m,
             "phi_hat": phi_hat,
-            "phi_V": phi_hat * p.photoelectron_temperature_ev,
+            "phi_V": phi_hat * p.emission_temperature_ev,
             "dphi_dzhat": ehat,
-            "E_Vpm": -(p.photoelectron_temperature_ev / p.length_scale_m) * ehat,
+            "E_Vpm": -(p.emission_temperature_ev / p.length_scale_m) * ehat,
             "length_scale_m": p.length_scale_m,
             **dens,
         }
@@ -180,7 +180,7 @@ class ProfilePhysics(SheathPhysics):
         branch = root.branch
 
         # Stop the upstream end before an accepted band of negative E^2.
-        band_hat = root.upstream_negative_band_v / p.photoelectron_temperature_ev
+        band_hat = root.upstream_negative_band_v / p.emission_temperature_ev
         if branch == "A":
             return self._build_type_a_profile(uk, band_hat)
 
@@ -218,9 +218,9 @@ class ProfilePhysics(SheathPhysics):
             "z_m_m": float(z_hat[np.argmin(phi_hat)] * p.length_scale_m),
             "z_m_array_m": z_hat * p.length_scale_m,
             "phi_hat": phi_hat,
-            "phi_V": phi_hat * p.photoelectron_temperature_ev,
+            "phi_V": phi_hat * p.emission_temperature_ev,
             "dphi_dzhat": e_hat,
-            "E_Vpm": -(p.photoelectron_temperature_ev / p.length_scale_m) * e_hat,
+            "E_Vpm": -(p.emission_temperature_ev / p.length_scale_m) * e_hat,
             "length_scale_m": p.length_scale_m,
             **dens,
         }
@@ -335,11 +335,11 @@ class ProfilePhysics(SheathPhysics):
             "z_hat": z_hat,
             "z_m": z_hat * p.length_scale_m,
             "phi_hat": phi_hat,
-            "phi_V": phi_hat * p.photoelectron_temperature_ev,
+            "phi_V": phi_hat * p.emission_temperature_ev,
             "phi0_hat": phi0_hat,
-            "phi0_V": phi0_hat * p.photoelectron_temperature_ev,
+            "phi0_V": phi0_hat * p.emission_temperature_ev,
             "phi_m_hat": phi_m_hat,
-            "phi_m_V": phi_m_hat * p.photoelectron_temperature_ev if math.isfinite(phi_m_hat) else math.nan,
+            "phi_m_V": phi_m_hat * p.emission_temperature_ev if math.isfinite(phi_m_hat) else math.nan,
             "z_m_hat": z_m_hat,
             "dphi_dzhat": dphi_dzhat,
             "E_Vpm": E_Vpm,
@@ -348,7 +348,7 @@ class ProfilePhysics(SheathPhysics):
             "a_swe": a_swe,
             "a_phe": a_phe,
             "vcut_swe_mps": a_swe * p.v_swe_th_mps,
-            "vcut_phe_mps": a_phe * p.v_phe_th_mps,
+            "vcut_phe_mps": a_phe * p.v_emission_th_mps,
             "v_i_mps": v_i_local,
             "swe_reflected_active": swe_reflected_active,
             "phe_captured_active": phe_captured_active,
@@ -388,7 +388,7 @@ class ProfilePhysics(SheathPhysics):
         if species == "phe":
             vmax = max(
                 state["vcut_phe_mps"],
-                p.v_phe_th_mps * math.sqrt(n_sigma**2 + max(0.0, float(state["phi_hat"])-float(state["phi0_hat"]))),
+                p.v_emission_th_mps * math.sqrt(n_sigma**2 + max(0.0, float(state["phi_hat"])-float(state["phi0_hat"]))),
             )
             vmax = float(vmax)
             return np.linspace(-vmax, vmax, n_v)
@@ -432,11 +432,11 @@ class ProfilePhysics(SheathPhysics):
     def _phe_vdf_components(self, state: Dict[str, float | str], vz_mps: np.ndarray) -> Dict[str, np.ndarray]:
         p = self.p
         vz = np.asarray(vz_mps, dtype=float)
-        amp = p.photoelectron_density_m3 * math.exp(float(state["phi_hat"]) - float(state["phi0_hat"])) / (
-            math.sqrt(math.pi) * p.v_phe_th_mps
+        amp = p.emission_density_m3 * math.exp(float(state["phi_hat"]) - float(state["phi0_hat"])) / (
+            math.sqrt(math.pi) * p.v_emission_th_mps
         )
         vcut = float(state["vcut_phe_mps"])
-        w = vz / p.v_phe_th_mps
+        w = vz / p.v_emission_th_mps
         free_out = amp * np.exp(-(w**2)) * (vz >= vcut)
 
         if bool(state["phe_captured_active"]):
@@ -525,17 +525,17 @@ class ProfilePhysics(SheathPhysics):
         psi = float(state["phi_hat"]) / p.tau
         barrier = (0.0 if state["branch"] == "B" else float(state["phi_m_hat"]) / p.tau)
         cutoff = math.sqrt(max(0.0, -barrier))
-        coefficient = p.v_phe_th_mps / (2 * math.sqrt(math.pi))
+        coefficient = p.v_emission_th_mps / (2 * math.sqrt(math.pi))
         free_e = coefficient * self._swe_free_current_term(float(state["n_swe_inf_m3"]), cutoff - p.u)
         reflected_e = 0.0
         if state["swe_reflected_active"]:
             accessible = coefficient * self._swe_free_current_term(float(state["n_swe_inf_m3"]),
                                                                    math.sqrt(max(0., -psi)) - p.u)
             reflected_e = max(0., accessible - free_e)
-        free_pe = coefficient*p.photoelectron_density_m3*math.exp(barrier*p.tau - float(state["phi0_hat"]))
+        free_pe = coefficient*p.emission_density_m3*math.exp(barrier*p.tau - float(state["phi0_hat"]))
         captured_pe = 0.0
         if state["phe_captured_active"]:
-            captured_pe = max(0., coefficient*p.photoelectron_density_m3*math.exp(float(state["phi_hat"])-float(state["phi0_hat"]))-free_pe)
+            captured_pe = max(0., coefficient*p.emission_density_m3*math.exp(float(state["phi_hat"])-float(state["phi0_hat"]))-free_pe)
         ion_flux = p.ion_density_m3*p.ion_entry_speed_mps
 
         def moment(density, plus, minus, charge):

@@ -32,13 +32,13 @@ class DensityResult:
     ion_m3: object
     electron_free_m3: object
     electron_reflected_m3: object
-    photoelectron_free_m3: object
-    photoelectron_captured_m3: object
+    emitted_free_m3: object
+    emitted_captured_m3: object
 
     @property
     def charge_c_m3(self):
         return QE*(self.ion_m3-self.electron_free_m3-self.electron_reflected_m3
-                   -self.photoelectron_free_m3-self.photoelectron_captured_m3)
+                   -self.emitted_free_m3-self.emitted_captured_m3)
 
     @classmethod
     def _from_normalized(cls, data, scale):
@@ -89,8 +89,8 @@ class EquilibriumResult:
         p = self.inputs
         return dict(branch=self.branch, phi0_V=self.surface_potential_v,
                     phi_m_V=self.minimum_potential_v, n_swe_inf_m3=self.ambient_electron_density_m3,
-                    phi0_hat=self.surface_potential_v/p.photoelectron_temperature_ev,
-                    phi_m_hat=self.minimum_potential_v/p.photoelectron_temperature_ev,
+                    phi0_hat=self.surface_potential_v/p.emission_temperature_ev,
+                    phi_m_hat=self.minimum_potential_v/p.emission_temperature_ev,
                     n_swe_inf_hat=self.ambient_electron_density_m3/p.density_scale_m3)
 
     def density(self, potential_v, *, side='upper'):
@@ -99,15 +99,15 @@ class EquilibriumResult:
         if self.branch == 'A' and side not in {'lower', 'upper'}:
             raise ValueError('A requires side=lower or upper')
         p = self.inputs
-        phi = np.asarray(potential_v)/p.photoelectron_temperature_ev
+        phi = np.asarray(potential_v)/p.emission_temperature_ev
         lo = self.minimum_potential_v if self.branch == 'A' else min(self.surface_potential_v, 0.)
         hi = self.surface_potential_v if self.branch == 'A' and side == 'lower' else (0. if self.branch == 'A' else max(self.surface_potential_v, 0.))
         if not np.all(np.isfinite(phi)) or np.any(np.asarray(potential_v) < lo) or np.any(np.asarray(potential_v) > hi):
             raise ValueError('potential is outside the selected profile segment')
         physics = SheathPhysics(p)
-        args = (phi, self.surface_potential_v/p.photoelectron_temperature_ev,
+        args = (phi, self.surface_potential_v/p.emission_temperature_ev,
                 self.ambient_electron_density_m3/p.density_scale_m3,
-                self.minimum_potential_v/p.photoelectron_temperature_ev)
+                self.minimum_potential_v/p.emission_temperature_ev)
         data = (physics._densities_hat_type_a_side(*args, side=side) if self.branch == 'A'
                 else physics._densities_hat(self.branch, *args))
         return DensityResult._from_normalized(data, p.density_scale_m3)
