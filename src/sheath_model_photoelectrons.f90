@@ -11,6 +11,7 @@ module sheath_model_photoelectrons
   public :: photoelectron_density_integral, photoelectron_sqrt_coefficient
   public :: photoelectron_upper_delta_scaled
   public :: log_energy_edges, energy_bin, observed_outflow_source
+  public :: write_photoelectron_source, read_photoelectron_source
 
   !> Outward boundary distribution: analytic Maxwellian or piecewise constant dGamma/dK.
   !! Construct with maxwellian_photoelectrons or binned_photoelectrons; no history is stored.
@@ -26,6 +27,7 @@ module sheath_model_photoelectrons
     procedure :: potential_scale
     procedure :: atlas_shape
     procedure :: with_outward_flux
+    procedure :: mean_normal_energy
   end type
 
   !> Immutable zero-emission default for opaque sources nested in physical inputs.
@@ -67,6 +69,20 @@ contains
       source%density_m3 = total_flux_m2_s*2.0_dp*sqrt(pi)/sqrt(2.0_dp*qe*self%temperature_ev/mass_kg)
     end if
   end function with_outward_flux
+
+  !> Flux-weighted mean outward normal energy [eV]: the temperature for a half-Maxwellian,
+  !! bin midpoints for a spectrum (dGamma/dK is constant in each bin), and 0 for an empty spectrum.
+  pure real(dp) function mean_normal_energy(self) result(energy_ev)
+    class(photoelectron_source), intent(in) :: self
+    real(dp) :: total
+    integer :: n
+    energy_ev = self%temperature_ev
+    if (.not. self%binned) return
+    energy_ev = 0.0_dp
+    n = size(self%flux_m2_s)
+    total = sum(self%flux_m2_s)
+    if (total > 0.0_dp) energy_ev = sum(self%flux_m2_s*0.5_dp*(self%edges_ev(:n) + self%edges_ev(2:)))/total
+  end function mean_normal_energy
 
   !> Construct an analytic source from Maxwellian normalization [m^-3] and temperature [eV].
   !! Validity is checked by the model entry points, including zero emission.
@@ -424,4 +440,34 @@ contains
       value = 1.0_dp - exp(x)
     end if
   end function
+
+  !> Write a source to an unformatted unit; the caller owns the unit and its access mode.
+  subroutine write_photoelectron_source(source, unit, iostat)
+    type(photoelectron_source), intent(in) :: source
+    integer, intent(in) :: unit
+    integer, intent(out) :: iostat
+    integer :: n
+    n = 0
+    if (source%binned) n = size(source%flux_m2_s)
+    write (unit, iostat=iostat) source%binned, source%density_m3, source%temperature_ev, n
+    if (iostat /= 0 .or. n == 0) return
+    write (unit, iostat=iostat) source%edges_ev, source%flux_m2_s
+  end subroutine write_photoelectron_source
+
+  !> Read a source written by write_photoelectron_source. The result is not validated here.
+  subroutine read_photoelectron_source(source, unit, iostat)
+    type(photoelectron_source), intent(out) :: source
+    integer, intent(in) :: unit
+    integer, intent(out) :: iostat
+    integer :: n
+    read (unit, iostat=iostat) source%binned, source%density_m3, source%temperature_ev, n
+    if (iostat /= 0) return
+    if (n < 0 .or. (source%binned .neqv. n > 0)) then
+      iostat = -1
+      return
+    end if
+    if (n == 0) return
+    allocate (source%edges_ev(n + 1), source%flux_m2_s(n))
+    read (unit, iostat=iostat) source%edges_ev, source%flux_m2_s
+  end subroutine read_photoelectron_source
 end module

@@ -20,6 +20,7 @@ module sheath_model
   use sheath_model_field, only: prescribed_field_input, prescribed_field_result
   use sheath_model_solver, only: sheath_solver
   use sheath_model_matching, only: sheath_matching_conditions, evaluate_matching_conditions
+  use sheath_model_matching_iteration, only: sheath_matching_iteration
   use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, sheath_continuation_options
   use sheath_model_atlas, only: sheath_equilibrium_atlas, sheath_field_atlas, sheath_atlas_options, sheath_atlas_point
   implicit none
@@ -28,7 +29,7 @@ module sheath_model
 
   public :: photoelectron_source, maxwellian_photoelectrons, binned_photoelectrons
   public :: log_energy_edges, energy_bin, observed_outflow_source
-  public :: sheath_matching_conditions, evaluate_matching_conditions
+  public :: sheath_matching_conditions, evaluate_matching_conditions, sheath_matching_iteration
   public :: ion_density_ratio, ion_critical_potential
   public :: plasma_input, sheath_state_result, evaluate_sheath_state
   public :: dp, i32, SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NO_PHYSICAL_SOLUTION
