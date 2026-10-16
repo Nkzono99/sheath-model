@@ -62,9 +62,7 @@ contains
     status = SHEATH_INVALID_ARGUMENT
     message = 'branch must be auto, A, B, or C.'
     select case (trim(self%branch))
-    case ('auto')
-    case ('a', 'b', 'c')
-      order = upper(self%branch(1:1))
+    case ('auto', 'a', 'b', 'c')
     case default
       return
     end select
@@ -73,6 +71,8 @@ contains
       if (len_trim(initial_order) /= 3 .or. index(order, 'A') == 0 .or. index(order, 'B') == 0 .or. &
           index(order, 'C') == 0) return
     end if
+    ! An explicit branch is the only one tried; initial_order applies to auto.
+    if (trim(self%branch) /= 'auto') order = upper(self%branch(1:1))
     self%input%plasma = plasma
     self%solver = solver
     call solve_in_order(self, order, no_guesses, self%root, self%matching, status, message)

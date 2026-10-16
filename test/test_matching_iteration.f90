@@ -76,6 +76,10 @@ program test_matching_iteration
   call check(status == SHEATH_INVALID_ARGUMENT, 'unknown branch')
   call other%initialize(plasma, solver, status, message, initial_order='AAB')
   call check(status == SHEATH_INVALID_ARGUMENT, 'order must be a permutation')
+  call other%initialize(plasma, solver, status, message, branch='A', initial_order='CAB')
+  call ok('explicit branch with an order')
+  after = other%conditions()
+  call check(after%branch == 'A', 'explicit branch ignores the auto order')
   low_sun%electron_drift_mps = 0.0_dp
   low_sun%ion_entry_speed_mps = 468e3_dp*sin(10.0_dp*pi/180.0_dp)
   low_sun%emission = maxwellian_emission(64e6_dp*sin(10.0_dp*pi/180.0_dp), temperature)
