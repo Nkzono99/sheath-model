@@ -12,7 +12,7 @@ module sheath_model_state
   use sheath_model_ions, only: ion_critical_potential, ion_density_ratio
   implicit none
   private
-  public :: plasma_input, sheath_state_result, evaluate_sheath_state, prepare_plasma_params
+  public :: plasma_input, sheath_state_result, evaluate_sheath_state, prepare_plasma_params, boundary_field
 
   !> Fixed upstream ion state, electron distribution and outward boundary photoelectron source.
   !! SI units except temperatures [eV]. Normal drifts are positive inward.
@@ -178,22 +178,12 @@ contains
     output%ambient_electron_density_m3 = density
     call evaluate_zhao_rho_hat(p, selected, 'upper', 0.0_dp, phi0, phim, density/p%density_scale_m3, rho)
     output%neutrality_residual_m3 = rho*p%density_scale_m3
-    factor = (p%potential_scale_v/p%length_scale_m)**2
+    call boundary_field(p, selected, phi0, phim, density/p%density_scale_m3, &
+        output%boundary_field_squared_v2_m2, output%electric_field_v_m)
     if (selected == 'A') then
-      output%boundary_field_squared_v2_m2 = -2.0_dp*factor*integrate_zhao_rho(p, selected, 'lower', &
-          phim, phi0, phi0, phim, density/p%density_scale_m3)
+      factor = (p%potential_scale_v/p%length_scale_m)**2
       output%connection_residual_normalized = type_a_connection_residual(p, phi0, phim, density/p%density_scale_m3)
       output%connection_residual_v2_m2 = output%connection_residual_normalized*(-phim)*sqrt(-phim)*factor
-    else
-      output%boundary_field_squared_v2_m2 = 2.0_dp*factor*integrate_zhao_rho(p, selected, 'monotonic', &
-          phi0, 0.0_dp, phi0, phim, density/p%density_scale_m3)
-    end if
-    output%electric_field_v_m = ieee_value(0.0_dp, ieee_quiet_nan)
-    if (output%boundary_field_squared_v2_m2 >= 0.0_dp) then
-      output%electric_field_v_m = sqrt(output%boundary_field_squared_v2_m2)
-      if (selected == 'C') then
-        output%electric_field_v_m = -output%electric_field_v_m
-      end if
     end if
     call evaluate_zhao_fluxes(p, boundary_potential_v, output%minimum_potential_v, density, &
         output%electron_inward_flux_m2_s, output%ion_inward_flux_m2_s, output%photoelectron_outward_flux_m2_s, &
@@ -216,5 +206,26 @@ contains
     output%admissible = output%physical_status == SHEATH_OK
     status = SHEATH_OK
     message = ''
+  end subroutine
+
+  !> Boundary E^2 [V^2/m^2] with its sign retained, and E=-dphi/dz [V/m], NaN when E^2 is negative.
+  !! Potentials and the electron normalization are in the internal units of p.
+  subroutine boundary_field(p, branch, phi0, phim, density, field_squared_v2_m2, field_v_m)
+    type(zhao_params_type), intent(in) :: p
+    character(len=1), intent(in) :: branch
+    real(dp), intent(in) :: phi0, phim, density
+    real(dp), intent(out) :: field_squared_v2_m2, field_v_m
+    real(dp) :: factor
+    factor = (p%potential_scale_v/p%length_scale_m)**2
+    if (branch == 'A') then
+      field_squared_v2_m2 = -2.0_dp*factor*integrate_zhao_rho(p, branch, 'lower', phim, phi0, phi0, phim, density)
+    else
+      field_squared_v2_m2 = 2.0_dp*factor*integrate_zhao_rho(p, branch, 'monotonic', phi0, 0.0_dp, phi0, phim, density)
+    end if
+    field_v_m = ieee_value(0.0_dp, ieee_quiet_nan)
+    if (field_squared_v2_m2 >= 0.0_dp) then
+      field_v_m = sqrt(field_squared_v2_m2)
+      if (branch == 'C') field_v_m = -field_v_m
+    end if
   end subroutine
 end module

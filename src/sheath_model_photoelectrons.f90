@@ -10,6 +10,7 @@ module sheath_model_photoelectrons
   public :: validate_photoelectrons, photoelectron_density, photoelectron_fluxes
   public :: photoelectron_density_integral, photoelectron_sqrt_coefficient
   public :: photoelectron_upper_delta_scaled
+  public :: log_energy_edges, energy_bin, observed_outflow_source
 
   !> Outward boundary distribution: analytic Maxwellian or piecewise constant dGamma/dK.
   !! Construct with maxwellian_photoelectrons or binned_photoelectrons; no history is stored.
@@ -85,6 +86,82 @@ contains
     source%edges_ev = energy_edges_ev
     source%flux_m2_s = bin_flux_m2_s
   end function
+
+  !> Normal-energy edges [eV]: [0, lowest) followed by bins_per_decade log bins per decade up to lowest*10**decades.
+  !! Defaults give 1 meV to 1 keV with 24 bins per decade (145 bins). Nonpositive arguments return no edges.
+  pure function log_energy_edges(lowest_edge_ev, decades, bins_per_decade) result(edges_ev)
+    real(dp), intent(in), optional :: lowest_edge_ev
+    integer, intent(in), optional :: decades, bins_per_decade
+    real(dp), allocatable :: edges_ev(:)
+    real(dp) :: lowest
+    integer :: n_decades, per_decade, j
+    lowest = 1.0e-3_dp
+    n_decades = 6
+    per_decade = 24
+    if (present(lowest_edge_ev)) lowest = lowest_edge_ev
+    if (present(decades)) n_decades = decades
+    if (present(bins_per_decade)) per_decade = bins_per_decade
+    allocate (edges_ev(0))
+    if (.not. ieee_is_finite(lowest) .or. lowest <= 0.0_dp .or. n_decades < 1 .or. per_decade < 1) return
+    deallocate (edges_ev)
+    allocate (edges_ev(n_decades*per_decade + 2))
+    edges_ev(1) = 0.0_dp
+    do j = 0, n_decades*per_decade
+      edges_ev(j + 2) = lowest*10.0_dp**(real(j, dp)/real(per_decade, dp))
+    end do
+  end function log_energy_edges
+
+  !> Bin of a normal kinetic energy [eV] on ascending edges; values outside the edges (and NaN) go to the end bins.
+  !! Returns 0 when there are no bins.
+  pure integer function energy_bin(edges_ev, energy_ev) result(bin)
+    real(dp), intent(in) :: edges_ev(:), energy_ev
+    integer :: n, low, high, middle
+    n = size(edges_ev) - 1
+    bin = 0
+    if (n < 1) return
+    bin = 1
+    if (n == 1 .or. .not. energy_ev >= edges_ev(2)) return
+    bin = n
+    if (energy_ev >= edges_ev(n)) return
+    ! Invariant: edges(low) <= energy < edges(high).
+    low = 2
+    high = n
+    do while (high - low > 1)
+      middle = (low + high)/2
+      if (energy_ev >= edges_ev(middle)) then
+        low = middle
+      else
+        high = middle
+      end if
+    end do
+    bin = low
+  end function energy_bin
+
+  !> Build a binned emitted source from the outward flux spectrum [m^-2 s^-1 per bin] observed on a plane.
+  !! Empty end bins are trimmed and interior empty bins kept. The total must be positive.
+  subroutine observed_outflow_source(edges_ev, flux_m2_s, source, status, message)
+    real(dp), intent(in) :: edges_ev(:), flux_m2_s(:)
+    type(photoelectron_source), intent(out) :: source
+    integer(i32), intent(out) :: status
+    character(len=*), intent(out) :: message
+    integer :: n, first, last
+    status = SHEATH_INVALID_ARGUMENT
+    message = 'Outflow spectrum needs N+1 edges and N finite, nonnegative fluxes with a positive total.'
+    n = size(flux_m2_s)
+    if (n < 1 .or. size(edges_ev) /= n + 1) return
+    if (.not. all(ieee_is_finite(flux_m2_s)) .or. any(flux_m2_s < 0.0_dp)) return
+    if (.not. sum(flux_m2_s) > 0.0_dp) return
+    first = 1
+    do while (flux_m2_s(first) <= 0.0_dp)
+      first = first + 1
+    end do
+    last = n
+    do while (flux_m2_s(last) <= 0.0_dp)
+      last = last - 1
+    end do
+    source = binned_photoelectrons(edges_ev(first:last + 1), flux_m2_s(first:last))
+    call validate_photoelectrons(source, status, message)
+  end subroutine observed_outflow_source
 
   !> True for a piecewise constant energy-flux source.
   pure logical function is_binned(self)

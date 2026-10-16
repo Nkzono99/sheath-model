@@ -26,6 +26,8 @@ module sheath_model_equilibrium
   public :: solve_equilibrium, evaluate_density, build_profile
   public :: sheath_profile_options, sheath_profile_result
   public :: build_equilibrium_atlas, add_equilibrium_to_atlas, solve_equilibrium_candidates
+  ! Package-internal: other modules derive the same parameters from an equilibrium input.
+  public :: prepare_params
 
   type, abstract :: sheath_equilibrium_input
     character(len=9) :: branch = 'auto'
