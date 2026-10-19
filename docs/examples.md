@@ -20,7 +20,7 @@
 `alpha` は太陽高度です。背景電子 Maxwell 分布の規格化は両モデルとも未知量で、
 実際の上流総電子密度とは異なります。
 電子ドリフトを正にすると A/C の半無限上流条件が成立しなくなるため、図の範囲をそのまま適用できません。
-仮定と制約は [運動論モデル](kinetic-model.md) を参照してください。
+仮定と制約は [物理モデル](model.md) を参照してください。
 
 <a id="profiles"></a>
 
@@ -126,74 +126,31 @@ python examples/plot_readme_figures.py
 KUDPC 等の共有環境では、ビルド・ソルバー・テスト・描画を計算ノード割当内で実行してください。
 上記の並列計算では、割り当てたコア数と `OMP_NUM_THREADS` を揃えます。
 
-## その他の実行例
+## 実行例の一覧
 
-### Fortran
+リポジトリ直下で実行します。KUDPC 等の共有環境では計算ノード割当内で実行してください。
 
-Fortran 2008 対応コンパイラと fpm を用意し、リポジトリ直下で実行します。
+### Fortran（`fpm run --example <名前>`）
 
-```bash
-fpm build
-fpm test
-fpm run --example compare_closures
-fpm run --example field_sweep
-fpm run --example potential_scan
-fpm run --example equilibrium_profile
-fpm install --prefix ./install
-```
+| 名前 | 内容 | 関連する文書 |
+| --- | --- | --- |
+| [fixed_entry](../example/fixed_entry.f90) | 固定入口・温かいイオンの J=0 を解き、静的評価で境界電場を得る | [J=0 の入力](fortran-api.md#j0-の入力) |
+| [compare_closures](../example/compare_closures.f90) | 同じ条件の J=0 と E_H 指定を比べる | [求解メソッド](fortran-api.md#求解メソッド) |
+| [equilibrium_profile](../example/equilibrium_profile.f90) | J=0 のプロファイル（高さ・電位・電場・電荷密度）を CSV で出力 | [プロファイル](fortran-api.md#プロファイル) |
+| [field_sweep](../example/field_sweep.f90) | E_H を掃引し、前の候補を初期値に加えて全候補と診断を出力 | [探索の診断](fortran-api.md#探索の診断) |
+| [potential_scan](../example/potential_scan.f90) | bin 放出源の Type B を電位で走査し、符号付き E²・電場・N_e・電流・判定を CSV で出力 | [静的評価](fortran-api.md#静的評価) |
+| [solution_atlas](../example/solution_atlas.f90) | J=0 の解マップを作り（引数のファイルへ保存・読込）、問い合わせと候補探索に使う | [解マップ](fortran-api.md#解マップと-continuation) |
+| [field_atlas](../example/field_atlas.f90) | E_H 指定の解マップと arclength continuation | 同上 |
+| [matching_plane](../example/matching_plane.f90) | 結合: 面上の条件、流出スペクトルからの放出源、外部解の更新と checkpoint の往復 | [シミュレータとの結合](coupling.md) |
+| [readme_data](../example/readme_data.f90) | README の図のデータを計算する（[図を再生成する](#図を再生成する)） | |
 
-[compare_closures.f90](../example/compare_closures.f90) は J=0 と E_H 指定の比較、
-[field_sweep.f90](../example/field_sweep.f90) は近隣解を初期値に加える電場掃引、
-[equilibrium_profile.f90](../example/equilibrium_profile.f90) は J=0 の高さ・電位・電場・電荷密度の CSV 出力です。
-[potential_scan.f90](../example/potential_scan.f90) は任意 bin 放出源の Type B を電位で走査し、
-符号付き E²・電場・N_e・電流・物理解判定を CSV で出力します。使い方は [静的評価 API](spectral-api.md) を参照してください。
 `equilibrium_profile` は標準のプロファイル設定を使うため、README の図とは遠方の打ち切りが異なります。
 
-E_H 指定の `solve_prescribed_field` は、検出した物理解が一つの場合に結果を返し、
-複数ある場合は `SHEATH_AMBIGUOUS_SOLUTION` を返します。安定性による選択は行いません。
-候補を比較したい場合は `solve_prescribed_field_candidates` を使ってください。
-ライブラリ自体はプロセス終了やファイル出力を行わず、ステータスと結果を返します。
+### Python（`python examples/<名前>.py`）
 
-別の fpm プロジェクトから使う場合は、`fpm.toml` に依存を追加します。
-
-```toml
-[dependencies]
-sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", branch = "main" }
-```
-
-掲載例は `main` の実装に対応します。公開済みの `v0.1.0` には軌道保存・物理解判定の修正が含まれません。
-計算の再現性が必要な場合は、`branch` を使用するコミットの `rev` に置き換えてください。
-ローカルのソースを使う場合は、Git 依存の代わりにパスを指定できます。
-
-```toml
-[dependencies]
-sheath-model = { path = "../sheath-model" }
-```
-
-### Python
-
-Python 3.10+ では NumPy / SciPy による独立した実装を利用できます。
-リポジトリ直下で `python -m pip install -e '.[plot]'` を実行してください。
-
-```python
-from sheath_model import ZhaoParams, SheathSolver, ProfileOptions
-
-inputs = ZhaoParams(sun_elevation_deg=60.0, electron_drift_mode="zero")
-solver = SheathSolver(profile=ProfileOptions(zmax_hat=120.0))
-profile = solver.solve_profile(inputs, branch="A")
-print(profile.equilibrium.surface_potential_v, profile.equilibrium.minimum_potential_v)
-```
-
-Fortran とのバインディングはなく、Python は Maxwell 源の J=0 モデルに対応します。
-入力・結果・マップの操作は [Python API](python-api.md) を参照してください。
-任意スペクトルと静的電位評価は [Fortran API](spectral-api.md) で利用できます。
-
-```bash
-python -m unittest discover -s tests -v
-python -m sheath_model --branch A --alpha 60 \
-  --electron-drift-mode zero --ion-drift-mode normal --zmax-hat 120
-python examples/plot_profiles.py
-```
-
-Python と Fortran はともに半無限領域の一次積分からプロファイルを構成します。
-局所流束・速度分布の診断の式と仮定は [Algorithm notes](algorithm.md) を参照してください。
+| 名前 | 内容 |
+| --- | --- |
+| [fixed_entry.py](../examples/fixed_entry.py) | Fortran の `fixed_entry` と同じ条件を解き、境界の流束を表示 |
+| [plot_profiles.py](../examples/plot_profiles.py) | Zhao 入力の A/B/C プロファイルを `profiles.png` に描く |
+| [solution_atlas.py](../examples/solution_atlas.py) | 解マップの構築・保存・読込と候補探索 |
+| [plot_readme_figures.py](../examples/plot_readme_figures.py) | README の図を CSV から描く |

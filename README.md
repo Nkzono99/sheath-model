@@ -1,10 +1,13 @@
 # sheath-model
 
-電子を放出する境界の上にできる平面・定常の一次元シース（Zhao の光電子シース）を解き、
-電位・電場・粒子流束を求める独立したライブラリです。
-Fortran / fpm は零電流条件 `J=0`、境界電場 `E_H` の指定、任意の放出電子スペクトルに対応し、
-粒子シミュレータの境界面を外部シースへ結合する API も提供します。
-Python は Maxwell 放出源の `J=0` モデルに対応します。
+電子を放出する平面境界の上にできる、一次元・定常・無衝突のシース（Zhao の Type A/B/C 光電子シース）を解く Fortran ライブラリです。
+表面電位、電位・電場のプロファイル、粒子流束を求めるほか、粒子シミュレータの計算領域の上端を外部シースへつなぐための条件を返します。
+同じモデルの Python 実装も含みます。
+
+- **閉じ方を選べる**: 零電流条件 J=0、境界電場 E_H の指定、電位を与えた静的評価
+- **任意の放出スペクトル**: 光電子・二次電子・領域内で反射した電子などを、半 Maxwell 分布か法線エネルギーの bin で与える
+- **物理解の判定**: 代数方程式の根のうち、上流につながる半無限プロファイルを持つものだけを返す
+- **シミュレータ結合**: matching plane 上の条件、流出スペクトルからの外部源、外部解の更新と checkpoint（BEACH で使用中）
 
 ## 計算例
 
@@ -25,31 +28,54 @@ Python は Maxwell 放出源の `J=0` モデルに対応します。
 複数 Type の表示は安定性による選択を意味しません。灰色領域も含め、解の不存在や全根の発見は保証しません。
 [計算条件・凡例・CSV データ](docs/examples.md#maps)（画像をクリックすると PDF）
 
+## 機能
+
+| 機能 | Fortran | Python |
+| --- | :---: | :---: |
+| J=0（固定入口・太陽高度入力） | ✓ | ✓ |
+| E_H 指定、静的評価 | ✓ | |
+| bin スペクトルの放出源 | ✓ | |
+| プロファイル・局所密度 | ✓ | ✓ |
+| 局所の速度分布・流束 | | ✓ |
+| 解マップ・continuation | ✓ | ✓（J=0） |
+| シミュレータ結合 | ✓ | |
+
+Python は Fortran のバインディングではなく、NumPy/SciPy による独立した実装です。
+
 ## 使い始める
 
-リポジトリ直下で実行します。
+fpm プロジェクトの `fpm.toml` に依存を追加し（`rev` は使う commit）、`use sheath_model` で呼びます。
 
-**Fortran 2008 対応コンパイラ + fpm**
-
-```bash
-fpm run --example compare_closures
+```toml
+[dependencies]
+sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", rev = "<commit>" }
 ```
 
-**Python 3.10+**
+```fortran
+type(sheath_solver) :: solver
+type(fixed_entry_equilibrium_input) :: input
+type(sheath_equilibrium_result) :: root
 
-```bash
-python -m pip install -e '.[plot]'
-python examples/plot_profiles.py
+input%plasma%emission = maxwellian_emission(55.42562584220407e6_dp, 2.2_dp)
+call solver%solve_equilibrium(input, root, status, message)
+if (status == SHEATH_OK) print *, root%branch, root%surface_potential_v
 ```
 
-依存の追加方法や呼び出し例は [図と計算例](docs/examples.md#その他の実行例) を参照してください。
+Python はリポジトリ直下で `python -m pip install -e '.[plot]'` を実行します。
+Make・CMake からの利用、最初の計算の全体は [導入と最初の計算](docs/getting-started.md) を参照してください。
 
 ## ドキュメント
 
-- [図の再生成・実行例](docs/examples.md)
-- [Fortran API](docs/fortran-api.md) / [Python API](docs/python-api.md) / [スペクトルと静的評価 API](docs/spectral-api.md)
-- [粒子シミュレータとの結合](docs/coupling-api.md)
-- [モデルの仮定](docs/kinetic-model.md) / [数値計算法](docs/algorithm.md)
+| 文書 | 内容 |
+| --- | --- |
+| [導入と最初の計算](docs/getting-started.md) | インストール、依存の追加、最初のプログラム |
+| [共通の規約](docs/conventions.md) | 単位、座標と符号、Type A/B/C、ステータスとエラー処理、状態と副作用 |
+| [物理モデル](docs/model.md) | 粒子集団、方程式、閉じ方、物理解の判定、適用範囲 |
+| [Fortran API](docs/fortran-api.md) | 入力・設定・求解・結果・静的評価・解マップの全項目 |
+| [シミュレータとの結合](docs/coupling.md) | matching plane の条件、流出からの外部源、外部解の更新、checkpoint、MPI、利用側の責務 |
+| [Python API](docs/python-api.md) | Python の入力・solver・結果・速度分布・解マップ |
+| [数値解法と検証](docs/numerics.md) | 規格化、根の探索、continuation、浮動小数点の扱い、テスト |
+| [図と計算例](docs/examples.md) | README の図の条件と再生成、実行例の一覧 |
 
 ## ライセンス
 
