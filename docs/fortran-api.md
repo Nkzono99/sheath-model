@@ -31,13 +31,13 @@
 | `ion_temperature_ev` | 0 | 非負。0 で冷たいイオン |
 | `ion_pressure_factor` | 1 | 正。イオン圧力項の係数 |
 | `electron_temperature_ev` | 12 | 正。背景電子温度 T_e |
-| `electron_drift_mps` | 405299.88897111727 | 背景電子の内向き法線ドリフト。**既定値は非ゼロ**（[ドリフトのある A/C](model.md#ドリフトのある-ac-と上流の帯)） |
+| `electron_drift_mps` | 0 | 背景電子の内向き法線ドリフト。正にすると A/C は既定では棄却される（[ドリフトのある A/C](model.md#ドリフトのある-ac-と上流の帯)） |
 | `ion_mass_kg`, `electron_mass_kg` | 陽子・電子質量 | 正 |
 | `emission` | 密度 0・温度 2.2 eV の Maxwell 源 | [放出源](#放出源) |
 
 すべて有限値が必要です。入口はイオン熱音速より速く、`m_i u_i∞²/e > ion_pressure_factor*T_i` を満たす必要があります。
 条件を満たさない入力は、求解・評価の呼び出し時に `SHEATH_INVALID_ARGUMENT` になります。
-既定値は太陽高度 60°・風速 468 km/s の法線成分です。
+イオン入口速度の既定値は、太陽高度 60°・風速 468 km/s の法線成分です。
 
 ### 放出源
 
@@ -74,7 +74,7 @@ bin 内は `g(K) = bin_flux/(K_high − K_low)` が一定、範囲外は 0 で�
 どちらも抽象型 `sheath_equilibrium_input` の派生型で、`branch`（既定 `'auto'`）を持ちます。
 
 **`fixed_entry_equilibrium_input`** は法線の入口状態を直接与えます。成分は `branch` と `plasma`（`plasma_input`）で、
-`plasma` の既定値は `electron_drift_mps = 0` です（他は `plasma_input` と同じ）。bin 源も使えます。
+`plasma` の既定値は `plasma_input` と同じです。bin 源も使えます。
 
 **`zhao_equilibrium_input`** は太陽高度と全風速から法線条件と光電子源を作ります（[変換規則](model.md#太陽風と照射角からの入力)）。放出源は Maxwell 源です。
 
@@ -94,7 +94,7 @@ bin 内は `g(K) = bin_flux/(K_high − K_low)` が一定、範囲外は 0 で�
 
 `prescribed_field_input` は `plasma_input` を継承し、`branch`（既定 `'auto'`）と `electric_field_v_m`（既定 0）を加えます。
 共通部分は `input%plasma_input = plasma` でまとめて設定するか、`input%electron_temperature_ev` のように直接設定します。
-**`electron_drift_mps` の既定値は `plasma_input` と同じく非ゼロ**なので、無ドリフトの条件では明示的に 0 にしてください。
+既定値は `plasma_input` と同じです。
 
 ## `sheath_solver`
 

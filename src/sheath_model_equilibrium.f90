@@ -36,7 +36,7 @@ module sheath_model_equilibrium
   !> Fixed normal plasma state and emitted source for the J=0 closure.
   !! No wind projection or Bohm-speed adjustment is applied. Plasma units are SI except temperatures [eV].
   type, extends(sheath_equilibrium_input) :: fixed_entry_equilibrium_input
-    type(plasma_input) :: plasma = plasma_input(electron_drift_mps=0.0_dp)
+    type(plasma_input) :: plasma
   end type fixed_entry_equilibrium_input
 
   !> Plasma and illumination inputs for the J=0 closure; units are given by the component suffixes.

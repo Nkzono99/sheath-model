@@ -21,7 +21,7 @@ module sheath_model_state
     real(dp) :: electron_temperature_ev = 12.0_dp
     real(dp) :: ion_temperature_ev = 0.0_dp
     real(dp) :: ion_pressure_factor = 1.0_dp
-    real(dp) :: electron_drift_mps = 4.0529988897111727e5_dp
+    real(dp) :: electron_drift_mps = 0.0_dp
     real(dp) :: ion_entry_speed_mps = 4.0529988897111727e5_dp
     real(dp) :: ion_mass_kg = proton_mass
     real(dp) :: electron_mass_kg = electron_mass

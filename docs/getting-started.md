@@ -100,7 +100,7 @@ end program first_sheath
 - 物理条件は入力型、数値設定は `sheath_solver`、結果は結果型に分かれています。solver は前回の解を持たないので、別の条件にも使い回せます。
 - `branch='auto'` にすると A→B→C の順に試し、最初に見つかった物理解を返します。複数の解を比べるには
   `solve_equilibrium_candidates` を使います（[求解メソッド](fortran-api.md#求解メソッド)）。
-- 背景電子のドリフトを 0 にしているのは、ドリフトのある A/C は既定では棄却されるためです（[物理モデル](model.md#ドリフトのある-ac-と上流の帯)）。
+- 背景電子のドリフト（既定値 0）を正にすると、ドリフトのある A/C は既定では棄却されます（[物理モデル](model.md#ドリフトのある-ac-と上流の帯)）。
 
 太陽高度と全風速から条件を作る場合は `zhao_equilibrium_input` を、境界電場を指定する場合は `prescribed_field_input` を使います。
 任意の放出電子スペクトルは `binned_emission` で与えます（[Fortran API](fortran-api.md#物理入力)）。
