@@ -10,6 +10,7 @@ program test_upstream_band
   type(fixed_entry_equilibrium_input) :: input
   type(sheath_equilibrium_result) :: root, reference
   type(sheath_profile_result) :: profile
+  type(sheath_matching_conditions) :: conditions
   integer(i32) :: status
   character(len=256) :: message
   real(dp) :: source_density
@@ -37,6 +38,13 @@ program test_upstream_band
   if (root%upstream_negative_band_v < 0.040_dp .or. root%upstream_negative_band_v > 0.065_dp) &
       error stop 'drifting A negative band width'
   if (abs(root%net_current_a_m2) > 1e-8_dp*qe*root%ion_inward_flux_m2_s) error stop 'drifting A zero current'
+  ! The plane flux helper carries the drift term: it reproduces the inward flux of a drifting root.
+  call evaluate_matching_conditions(input, root, conditions, status, message)
+  if (status /= SHEATH_OK) error stop 'drifting A matching conditions'
+  if (abs(plane_electron_inward_flux_m2_s(conditions, conditions%plane_potential_v, input%plasma%electron_mass_kg) - &
+      conditions%electron_inward_flux_m2_s) > 1e-12_dp*conditions%electron_inward_flux_m2_s) then
+    error stop 'drifting A plane inward flux identity'
+  end if
 
   call tolerant%build_profile(input, root, profile, status, message)
   if (status /= SHEATH_OK) error stop 'profile of an accepted drifting A root'

@@ -21,6 +21,10 @@
   面より内側で戻った電子は足し戻しません（[検証記録](../outputs/boundary_validation_20260923/REPORT.md)）。
 - **零電流**: J=0 の外部根では、面を通る正味電流が 0 です。面に入る上流電子は外部モデルでは吸収として数え、
   反射して面を出ていく電子は放出源に含めます（そのうち障壁を越える分が escape）。両者を合わせると、面を通る正味電流と整合します。
+- **放出電子の種への配分**: `emitted_escape_flux_m2_s` と `emitted_return_flux_m2_s` は、面を外向きに通過した電子全体
+  （光電子・二次電子・反射した上流電子の合算）に対する値です。外部モデルは由来を区別しないので、種ごとの脱出・帰還を
+  どう割り当てるかは利用側が決めます。放出量が追跡で決まる成分（二次電子、反射した上流電子）には観測した脱出・帰還を
+  充て、残りを外部モデルの値へ固定する成分（光電子）に割り当てると、面の電荷収支が窓の中でも閉じます。
 
 結合は弱連成です。シミュレータが一定期間（窓）に観測した流出から外部根を解き直し、その条件を次の窓に使います。
 外部解は各窓での定常解であり、時間発展するシースではありません。収束や安定性は保証しません。
@@ -107,10 +111,22 @@ call evaluate_matching_conditions(input, root, plane, status, message)
 | 面を外へ出た電子が上流へ抜ける | K ≥ φ_loc − min(φ_loc, `electron_path_minimum_v`) | 満たさなければ同じ K で面へ戻る |
 | 面を外へ出たイオンが上流へ抜ける | K ≥ max(φ_loc, `ion_path_maximum_v`) − φ_loc | 満たさなければ面へ戻る |
 
+表の判定は次の純関数で得られます。いずれも `sheath_matching_conditions` と面の局所電位 φ_loc [V] を取り、
+エネルギーは eV で返します。
+
+| 関数 | 返す値 |
+| --- | --- |
+| `plane_electron_access_energy_ev(conditions, phi_loc_v)` | 上流電子が面に届く K∞ の下限 −min(φ_loc, `electron_path_minimum_v`, 0) |
+| `plane_ion_access_energy_ev(conditions, phi_loc_v)` | 上流イオンが面に届く K∞ の下限 max(φ_loc, `ion_path_maximum_v`, 0) |
+| `plane_electron_escape_threshold_ev(conditions, phi_loc_v)` | 面を外へ出た電子が上流へ抜ける K の下限 φ_loc − min(φ_loc, `electron_path_minimum_v`) |
+| `plane_ion_escape_threshold_ev(conditions, phi_loc_v)` | 面を外へ出たイオンが上流へ抜ける K の下限 max(φ_loc, `ion_path_maximum_v`) − φ_loc |
+| `plane_electron_inward_flux_m2_s(conditions, phi_loc_v, electron_mass_kg)` | 到達条件で制限した上流電子の数流束 [m⁻² s⁻¹]。温度か質量が 0 以下なら NaN |
+
 上流電子の注入には、内向き drift Maxwell 分布 $g(a)\propto e^{-(a-u)^2}$（$a=v_\infty/v_{th}$、$u=v_d/v_{th}$）を、
-上の到達条件を満たす速度に限り、流束で重み付けして標本化します。その数流束は
-`N_e v_th/(2√π)·[exp(−(b−u)²) + √π u erfc(b−u)]`（b は到達条件の下限速度/v_th）で、φ_loc = φ_H なら `electron_inward_flux_m2_s` に一致します。
-外部モデルは法線方向だけを定めるので、接線方向の速度分布は利用側で与えます。
+到達条件を満たす速度に限り、流束で重み付けして標本化します。その数流束
+`N_e v_th/(2√π)·[exp(−(b−u)²) + √π u erfc(b−u)]`（b は到達条件の下限速度/v_th）が `plane_electron_inward_flux_m2_s` で、
+φ_loc = φ_H なら `electron_inward_flux_m2_s` に一致します。注入量をこの値に合わせると、面の局所電位が φ_H からずれても
+外部モデルと整合した流束になります。外部モデルは法線方向だけを定めるので、接線方向の速度分布は利用側で与えます。
 温かいイオンは流体モデルで、速度分布を定めません（[イオン](model.md#イオン)）。冷たいイオンでは入口速度のビームです。
 
 外部モデルには外向きに出ていくイオンがありません。面を外向きに通過するイオンが無視できない場合、このモデルの前提から外れます。
@@ -125,7 +141,10 @@ call evaluate_matching_conditions(input, root, plane, status, message)
 | 手続き | 意味 |
 | --- | --- |
 | `log_energy_edges([lowest_edge_ev, decades, bins_per_decade])` | 先頭 bin [0, lowest) と対数 bin の境界 [eV]。既定は 1 meV〜1 keV の 24 bin/decade（計 145 bin）。不正な引数では空配列 |
+| `log_energy_bin_count([decades, bins_per_decade])` | 同じ引数で `log_energy_edges` が作る bin 数（decades·bins_per_decade + 1）。作れなければ 0 |
+| `LOG_ENERGY_DEFAULT_LOWEST_EV`, `LOG_ENERGY_DEFAULT_DECADES`, `LOG_ENERGY_DEFAULT_BINS_PER_DECADE`, `LOG_ENERGY_DEFAULT_BINS` | 既定の下端 1 meV、6 decade、24 bin/decade、bin 数 145。固定長配列を既定 bin 数で宣言するときに使う |
 | `energy_bin(edges_ev, energy_ev)` | エネルギーが属する bin の番号。範囲外と NaN は端の bin、bin がなければ 0 |
+| `log_energy_bin(energy_ev[, lowest_edge_ev, decades, bins_per_decade])` | `log_energy_edges` と同じ引数の対数格子で、境界配列を作らずに求める bin 番号。`energy_bin(log_energy_edges(...), energy_ev)` と一致する。通過ごとの集計向き |
 | `observed_outflow_source(edges_ev, flux_m2_s, source, status, message)` | bin ごとの外向き数流束 [m⁻² s⁻¹] から bin 放出源を作る。空の端 bin は除き、内部の空 bin は残す |
 
 流束は有限・非負で、合計が正でなければなりません。満たさない場合は `SHEATH_INVALID_ARGUMENT` です。
