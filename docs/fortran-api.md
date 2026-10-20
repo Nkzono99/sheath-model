@@ -146,6 +146,7 @@ N_em v_th/(2√π)）。
 | `points_per_segment` | 4000 | 単調区間あたりの電位点数。32 以上。A は 2 区間 |
 | `max_distance_m` | 100 | 返す高さの上限 [m] |
 | `potential_cutoff_v` | 2.2e-3 | 上流側の打ち切り電位 \|φ\| [V]。境界電位・極小の深さの半分を上限とする |
+| `upstream_band_margin` | 0.05 | 受理した上流の帯（E²<0）がある根で、帯の手前に残す余白。帯の端から極小（B/C は境界電位）までの深さに対する割合。0 より大きく 1 未満 |
 
 ## 求解メソッド
 
@@ -229,7 +230,8 @@ call solver%solve_equilibrium(input, root, status, message, diagnostics, initial
 | `turning_height_m` | A の極小の高さ [m]。B/C は −1 |
 
 プロファイルは半無限の Poisson 一次積分から作ります。`potential_cutoff_v` または `max_distance_m` で止め、
-その先に人工的な 0 V の区間は加えません。受理した上流の帯がある場合は帯の手前で止めます。
+その先に人工的な 0 V の区間は加えません。受理した上流の帯がある場合は、帯の端から `upstream_band_margin` の割合だけ手前で止めます。
+帯が狭い根（例: 斜めの太陽風）では、既定の 5% で上流側がかなり手前で切れます。遠方の電位が必要なら余白を小さくします。
 
 ### 局所密度
 

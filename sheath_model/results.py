@@ -15,8 +15,11 @@ class ProfileOptions:
     n_type_a_grid: int = 8000
     profile_phi_tol_hat: float = 1e-3
     type_a_phi_m_eps_hat: float = 1e-5
+    upstream_band_margin: float = .05
 
     def __post_init__(self):
+        if not math.isfinite(self.upstream_band_margin) or not 0 < self.upstream_band_margin < 1:
+            raise ValueError('upstream_band_margin must be finite and in (0, 1)')
         for name in ('zmax_hat', 'profile_phi_tol_hat', 'type_a_phi_m_eps_hat'):
             value = getattr(self, name)
             if not math.isfinite(value) or value <= 0:

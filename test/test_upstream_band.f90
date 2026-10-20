@@ -53,6 +53,22 @@ program test_upstream_band
   if (status /= SHEATH_OK) error stop 'profile of an accepted drifting A root'
   if (profile%potential_v(size(profile%potential_v)) > -root%upstream_negative_band_v) &
       error stop 'profile must stop before the negative band'
+  block
+    type(sheath_solver) :: closer_solver
+    type(sheath_profile_result) :: closer
+    closer_solver = tolerant
+    closer_solver%profile%upstream_band_margin = 0.005_dp
+    closer_solver%profile%max_distance_m = 1.0e4_dp
+    call closer_solver%build_profile(input, root, closer, status, message)
+    if (status /= SHEATH_OK) error stop 'profile with a small band margin'
+    if (closer%potential_v(size(closer%potential_v)) <= profile%potential_v(size(profile%potential_v))) &
+        error stop 'a smaller band margin must reach closer to the band'
+    if (closer%potential_v(size(closer%potential_v)) > -root%upstream_negative_band_v) &
+        error stop 'a small band margin must still stop before the band'
+    closer_solver%profile%upstream_band_margin = 1.0_dp
+    call closer_solver%build_profile(input, root, closer, status, message)
+    if (status /= SHEATH_INVALID_ARGUMENT) error stop 'band margin of 1 must be rejected'
+  end block
 
   call narrow%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_NO_PHYSICAL_SOLUTION) error stop 'band wider than the tolerance must be rejected'

@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 import unittest
 
-from sheath_model import FixedEntryParams, SearchFailure, SearchOptions, SheathSolver
+from sheath_model import FixedEntryParams, ProfileOptions, SearchFailure, SearchOptions, SheathSolver
 
 QE, ME = 1.602176634e-19, 9.1093837139e-31
 # Regolith test conditions: n=5 cm^-3, Te=10 eV, 400 km/s normal wind, 4.5 uA/m^2 photoelectrons at 2.2 eV.
@@ -40,6 +40,14 @@ class UpstreamBandTests(unittest.TestCase):
 
         profile = self.tolerant.build_profile(root)
         self.assertLess(float(profile.potential_v[-1]), -root.upstream_negative_band_v)
+        # A smaller margin follows the upstream branch closer to the band edge.
+        closer = SheathSolver(search=SearchOptions(upstream_band_tolerance=0.15),
+                              profile=ProfileOptions(zmax_hat=600., upstream_band_margin=0.005)).build_profile(root)
+        self.assertGreater(float(closer.potential_v[-1]), float(profile.potential_v[-1]))
+        self.assertLess(float(closer.potential_v[-1]), -root.upstream_negative_band_v)
+        self.assertGreater(float(closer.z_m[-1]), float(profile.z_m[-1]))
+        with self.assertRaises(ValueError):
+            ProfileOptions(upstream_band_margin=1.0)
 
     def test_field_floor_accepts_small_deficit(self) -> None:
         root = self.floor.solve_equilibrium(params(4.0e5), branch="A")

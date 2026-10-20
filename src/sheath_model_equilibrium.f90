@@ -92,6 +92,8 @@ module sheath_model_equilibrium
     integer :: points_per_segment = 4000
     real(dp) :: max_distance_m = 100.0_dp
     real(dp) :: potential_cutoff_v = 2.2e-3_dp
+    !> With an accepted upstream E^2<0 band, stop this fraction of the remaining depth before the band.
+    real(dp) :: upstream_band_margin = 0.05_dp
   end type sheath_profile_options
 
   !> J=0 equilibrium and sampled height [m], potential [V], field [V/m], and local densities.
@@ -686,6 +688,9 @@ contains
     if (options%points_per_segment < 32) return
     if (.not. all(ieee_is_finite([options%max_distance_m, options%potential_cutoff_v]))) return
     if (min(options%max_distance_m, options%potential_cutoff_v) <= 0.0_dp) return
+    message = 'Profile upstream band margin must be finite, positive and below 1.'
+    if (.not. ieee_is_finite(options%upstream_band_margin)) return
+    if (options%upstream_band_margin <= 0.0_dp .or. options%upstream_band_margin >= 1.0_dp) return
 
     status = SHEATH_INVALID_ARGUMENT
     message = 'Profile requires a converged root for the supplied physical conditions.'
@@ -708,7 +713,7 @@ contains
     phim = root%minimum_potential_v/p%potential_scale_v
     cutoff = min(options%potential_cutoff_v/p%potential_scale_v, 0.5_dp*abs(phim))
     ! Stop the upstream end before an accepted band of negative E^2.
-    if (band > 0.0_dp) cutoff = max(cutoff, band + 0.05_dp*(abs(phim) - band))
+    if (band > 0.0_dp) cutoff = max(cutoff, band + options%upstream_band_margin*(abs(phim) - band))
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Profile first integral is non-finite or does not support a real electric field.'
     total = 0
@@ -759,7 +764,7 @@ contains
     else
       ! Integrate from the exact upstream potential, then omit that infinite endpoint.
       cutoff = min(options%potential_cutoff_v/p%potential_scale_v, 0.5_dp*abs(phi0))
-      if (band > 0.0_dp) cutoff = max(cutoff, band + 0.05_dp*(abs(phi0) - band))
+      if (band > 0.0_dp) cutoff = max(cutoff, band + options%upstream_band_margin*(abs(phi0) - band))
       do i = 1, n
         t = real(i - 1, dp)/real(n - 1, dp)
         phi(i) = phi0*(1.0_dp - t)**2

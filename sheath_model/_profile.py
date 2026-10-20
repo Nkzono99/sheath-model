@@ -93,7 +93,7 @@ class ProfilePhysics(SheathPhysics):
         if phi_end_hat <= phi_m_hat:
             phi_end_hat = 0.5 * phi_m_hat
         if band_hat > 0:
-            phi_end_hat = min(phi_end_hat, -(band_hat + .05 * (abs(phi_m_hat) - band_hat)))
+            phi_end_hat = min(phi_end_hat, -(band_hat + self.options.upstream_band_margin * (abs(phi_m_hat) - band_hat)))
 
         ngrid = max(2000, self.options.n_type_a_grid)
         ngrid_upper = ngrid
@@ -196,7 +196,7 @@ class ProfilePhysics(SheathPhysics):
         e2 = -2*cumulative_trapezoid(rho[::-1], phi_hat[::-1], initial=0.)[::-1]
         cutoff = min(abs(self.options.profile_phi_tol_hat), .5*abs(phi0_hat))
         if band_hat > 0:
-            cutoff = max(cutoff, band_hat + .05*(abs(phi0_hat) - band_hat))
+            cutoff = max(cutoff, band_hat + self.options.upstream_band_margin*(abs(phi0_hat) - band_hat))
         keep = np.abs(phi_hat) >= cutoff
         keep[-1] = False
         phi_hat, e2 = phi_hat[keep], e2[keep]

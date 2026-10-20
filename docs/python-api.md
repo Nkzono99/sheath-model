@@ -78,6 +78,7 @@ Fortran の `sheath_search_options` と同じ意味です（`scalar_max_depth` �
 | `n_type_a_grid` | 8000 | A の上流側の電位点数。32 以上で、実際には 2000 点以上を使う |
 | `profile_phi_tol_hat` | 1e-3 | 上流側の打ち切り電位 \|φ\|。B/C は \|φ_H\| の半分を上限とする |
 | `type_a_phi_m_eps_hat` | 1e-5 | A の格子を極小からずらして始める幅。\|φ_m\| の 5% を上限とする |
+| `upstream_band_margin` | 0.05 | 受理した上流の帯（E²<0）がある根で、帯の手前に残す余白。帯の端から極小（B/C は境界電位）までの深さに対する割合。0 より大きく 1 未満 |
 
 ### `ContinuationOptions`
 
