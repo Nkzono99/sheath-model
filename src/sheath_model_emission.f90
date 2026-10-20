@@ -11,7 +11,7 @@ module sheath_model_emission
   public :: validate_emission, emitted_density, emitted_fluxes
   public :: emitted_density_integral, emitted_sqrt_coefficient
   public :: emitted_upper_delta_scaled
-  public :: log_energy_edges, energy_bin, observed_outflow_source
+  public :: log_energy_edges, energy_bin, observed_outflow_source, log_energy_bin_count, log_energy_bin
   public :: write_emission_source, read_emission_source
 
   !> Outward boundary distribution: analytic Maxwellian or piecewise constant dGamma/dK.
@@ -34,6 +34,13 @@ module sheath_model_emission
   !> Immutable zero-emission default for opaque sources nested in physical inputs.
   !! Explicit component initialization keeps enclosing constructors portable across compilers.
   type(emission_source), parameter, public :: DEFAULT_EMISSION = emission_source()
+
+  !> Defaults of log_energy_edges: [0, 1 meV) followed by 24 log bins per decade over 6 decades to 1 keV.
+  real(dp), parameter, public :: LOG_ENERGY_DEFAULT_LOWEST_EV = 1.0e-3_dp
+  integer, parameter, public :: LOG_ENERGY_DEFAULT_DECADES = 6
+  integer, parameter, public :: LOG_ENERGY_DEFAULT_BINS_PER_DECADE = 24
+  !> Bin count of the default grid (145), usable for fixed-size arrays on the simulator side.
+  integer, parameter, public :: LOG_ENERGY_DEFAULT_BINS = 1 + LOG_ENERGY_DEFAULT_DECADES*LOG_ENERGY_DEFAULT_BINS_PER_DECADE
 
 contains
 
@@ -105,16 +112,17 @@ contains
   end function
 
   !> Normal-energy edges [eV]: [0, lowest) followed by bins_per_decade log bins per decade up to lowest*10**decades.
-  !! Defaults give 1 meV to 1 keV with 24 bins per decade (145 bins). Nonpositive arguments return no edges.
+  !! Defaults are the LOG_ENERGY_DEFAULT_* constants (1 meV to 1 keV, 24 bins per decade, 145 bins).
+  !! Nonpositive arguments return no edges.
   pure function log_energy_edges(lowest_edge_ev, decades, bins_per_decade) result(edges_ev)
     real(dp), intent(in), optional :: lowest_edge_ev
     integer, intent(in), optional :: decades, bins_per_decade
     real(dp), allocatable :: edges_ev(:)
     real(dp) :: lowest
     integer :: n_decades, per_decade, j
-    lowest = 1.0e-3_dp
-    n_decades = 6
-    per_decade = 24
+    lowest = LOG_ENERGY_DEFAULT_LOWEST_EV
+    n_decades = LOG_ENERGY_DEFAULT_DECADES
+    per_decade = LOG_ENERGY_DEFAULT_BINS_PER_DECADE
     if (present(lowest_edge_ev)) lowest = lowest_edge_ev
     if (present(decades)) n_decades = decades
     if (present(bins_per_decade)) per_decade = bins_per_decade
@@ -127,6 +135,54 @@ contains
       edges_ev(j + 2) = lowest*10.0_dp**(real(j, dp)/real(per_decade, dp))
     end do
   end function log_energy_edges
+
+  !> Number of bins log_energy_edges makes for these arguments (decades*bins_per_decade + 1); 0 when it makes none.
+  pure integer function log_energy_bin_count(decades, bins_per_decade) result(bins)
+    integer, intent(in), optional :: decades, bins_per_decade
+    integer :: n_decades, per_decade
+    n_decades = LOG_ENERGY_DEFAULT_DECADES
+    per_decade = LOG_ENERGY_DEFAULT_BINS_PER_DECADE
+    if (present(decades)) n_decades = decades
+    if (present(bins_per_decade)) per_decade = bins_per_decade
+    bins = 0
+    if (n_decades < 1 .or. per_decade < 1) return
+    bins = n_decades*per_decade + 1
+  end function log_energy_bin_count
+
+  !> Bin of a normal kinetic energy [eV] on the log grid of log_energy_edges with the same arguments, without building
+  !! the edges: identical to energy_bin(log_energy_edges(...), energy_ev), so a simulator can bin each crossing in O(1).
+  !! Returns 0 when the grid has no bins.
+  pure integer function log_energy_bin(energy_ev, lowest_edge_ev, decades, bins_per_decade) result(bin)
+    real(dp), intent(in) :: energy_ev
+    real(dp), intent(in), optional :: lowest_edge_ev
+    integer, intent(in), optional :: decades, bins_per_decade
+    real(dp) :: lowest
+    integer :: n_decades, per_decade, n_log, j
+    lowest = LOG_ENERGY_DEFAULT_LOWEST_EV
+    n_decades = LOG_ENERGY_DEFAULT_DECADES
+    per_decade = LOG_ENERGY_DEFAULT_BINS_PER_DECADE
+    if (present(lowest_edge_ev)) lowest = lowest_edge_ev
+    if (present(decades)) n_decades = decades
+    if (present(bins_per_decade)) per_decade = bins_per_decade
+    bin = 0
+    if (.not. ieee_is_finite(lowest) .or. lowest <= 0.0_dp .or. n_decades < 1 .or. per_decade < 1) return
+    n_log = n_decades*per_decade
+    bin = 1
+    if (.not. energy_ev >= lowest) return
+    if (energy_ev >= lowest*10.0_dp**(real(n_log, dp)/real(per_decade, dp))) then
+      bin = n_log + 1
+      return
+    end if
+    j = int(floor(log10(energy_ev/lowest)*real(per_decade, dp)))
+    j = max(0, min(j, n_log - 1))
+    ! Settle the rounding of log10 against the edge expressions energy_bin compares with.
+    if (energy_ev >= lowest*10.0_dp**(real(j + 1, dp)/real(per_decade, dp))) then
+      j = j + 1
+    else if (energy_ev < lowest*10.0_dp**(real(j, dp)/real(per_decade, dp))) then
+      j = j - 1
+    end if
+    bin = min(max(j + 2, 2), n_log + 1)
+  end function log_energy_bin
 
   !> Bin of a normal kinetic energy [eV] on ascending edges; values outside the edges (and NaN) go to the end bins.
   !! Returns 0 when there are no bins.

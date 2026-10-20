@@ -15,7 +15,8 @@
 | 静的評価 | [`evaluate_sheath_state`](#静的評価)、`sheath_state_result` |
 | 局所密度 | [`evaluate_density`](#局所密度) |
 | 解マップ | [`sheath_equilibrium_atlas`](#解マップと-continuation)、`sheath_field_atlas`、`sheath_atlas_options`、`sheath_atlas_point` |
-| シミュレータ結合 | `sheath_matching_conditions`、`evaluate_matching_conditions`、`sheath_matching_iteration`、`log_energy_edges`、`energy_bin`、`observed_outflow_source`（[結合](coupling.md)） |
+| シミュレータ結合 | `sheath_matching_conditions`、`evaluate_matching_conditions`、`sheath_matching_iteration`、`plane_electron_access_energy_ev`、`plane_ion_access_energy_ev`、`plane_electron_escape_threshold_ev`、`plane_ion_escape_threshold_ev`、`plane_electron_inward_flux_m2_s`、`log_energy_edges`、`log_energy_bin_count`、`log_energy_bin`、`LOG_ENERGY_DEFAULT_*`、`energy_bin`、`observed_outflow_source`（[結合](coupling.md)） |
+| 放出源の評価 | `emitted_fluxes`、`source%with_outward_flux`（[放出源](#放出源)） |
 | 補助 | [`ion_density_ratio`、`ion_critical_potential`](#補助関数と定数)、`dp`、`i32`、`SHEATH_*` |
 
 ## 物理入力
@@ -68,6 +69,11 @@ bin 内は `g(K) = bin_flux/(K_high − K_low)` が一定、範囲外は 0 で�
 | `source%is_binned()` | bin 源なら `.true.` |
 | `source%mean_normal_energy()` | 流束で重み付けした平均法線運動エネルギー [eV]。Maxwell 源は温度、bin 源は bin 中点の加重平均、空の bin 源は 0 |
 | `source%potential_scale(T_e)` | 内部の電位尺度 V_s [V]。Maxwell 源は温度、bin 源は T_e 以下で最大の 2 の冪。[接続残差の換算](#静的評価)に使う |
+| `source%with_outward_flux(total_flux_m2_s, mass_kg)` | 分布の形を保って外向き数流束の合計を `total_flux_m2_s` にした源。Maxwell 源は規格化密度 N_em = 2√π Γ/v_th、bin 源は各 bin を比例配分 |
+
+源の流束は `emitted_fluxes(source, mass_kg, barrier_v, outward, escape, returning)` で評価します。`outward` は境界を出る
+数流束の合計、`escape` と `returning` は面から上流まで `barrier_v` [V] を登る分と戻る分です（Maxwell 源の外向き流束は
+N_em v_th/(2√π)）。
 
 ### J=0 の入力
 
@@ -358,5 +364,7 @@ J=0 の表の形式は Python の `EquilibriumAtlas` と共通です。スペク
 | --- | --- |
 | `ion_density_ratio(potential_v, entry_energy_ev, pressure_energy_ev)` | イオン密度比 n_i/n_i∞。`entry_energy_ev = m_i u_i∞²/(2e)`、`pressure_energy_ev = ion_pressure_factor*T_i`。越えられない電位では NaN |
 | `ion_critical_potential(entry_energy_ev, pressure_energy_ev)` | イオンが越えられる最大電位 [V]。入口が熱音速以下なら NaN |
+| `plane_electron_access_energy_ev`, `plane_ion_access_energy_ev`, `plane_electron_escape_threshold_ev`, `plane_ion_escape_threshold_ev`, `plane_electron_inward_flux_m2_s` | matching plane での注入・反射・除去の判定と、到達条件で制限した上流電子の数流束（[結合](coupling.md#粒子の注入反射除去)） |
+| `log_energy_edges`, `log_energy_bin_count`, `log_energy_bin`, `energy_bin`, `LOG_ENERGY_DEFAULT_LOWEST_EV`, `LOG_ENERGY_DEFAULT_DECADES`, `LOG_ENERGY_DEFAULT_BINS_PER_DECADE`, `LOG_ENERGY_DEFAULT_BINS` | 流出スペクトルの法線エネルギー bin（[結合](coupling.md#流出スペクトルから放出源を作る)） |
 | `dp`, `i32` | `real64`、`int32` の kind |
 | `SHEATH_OK` ほか | [ステータス](conventions.md#ステータスとエラー処理) |

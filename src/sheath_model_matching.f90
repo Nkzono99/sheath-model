@@ -4,8 +4,8 @@
 !! Electrons crossing the plane outward, of any origin, form the outer model's emitted source.
 !! Potentials are relative to upstream 0 V; number fluxes are positive in their named direction.
 module sheath_model_matching
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use sheath_model_constants, only: dp, i32, qe
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_quiet_nan
+  use sheath_model_constants, only: dp, i32, qe, pi
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NUMERICAL_FAILURE
   use sheath_model_core, only: zhao_params_type, evaluate_zhao_fluxes
   use sheath_model_state, only: prepare_plasma_params, boundary_field
@@ -15,6 +15,9 @@ module sheath_model_matching
   implicit none
   private
   public :: sheath_matching_conditions, evaluate_matching_conditions
+  public :: plane_electron_access_energy_ev, plane_ion_access_energy_ev
+  public :: plane_electron_escape_threshold_ev, plane_ion_escape_threshold_ev
+  public :: plane_electron_inward_flux_m2_s
 
   !> Plane potential/field, path extrema, upstream reservoirs and fluxes on the matching plane.
   !! A simulator combines the path extrema with its local plane potential: electrons need
@@ -137,5 +140,57 @@ contains
     status = SHEATH_OK
     message = ''
   end subroutine fill_conditions
+
+
+  !> Normal energy [eV] an upstream electron needs at infinity to reach a plane at local potential plane_potential_v:
+  !! -min(plane_potential_v, electron_path_minimum_v, 0). Zero when no potential repels it.
+  pure real(dp) function plane_electron_access_energy_ev(conditions, plane_potential_v) result(energy_ev)
+    type(sheath_matching_conditions), intent(in) :: conditions
+    real(dp), intent(in) :: plane_potential_v
+    energy_ev = -min(plane_potential_v, conditions%electron_path_minimum_v, 0.0_dp)
+  end function plane_electron_access_energy_ev
+
+  !> Normal energy [eV] an upstream ion needs at infinity to reach a plane at local potential plane_potential_v:
+  !! max(plane_potential_v, ion_path_maximum_v, 0).
+  pure real(dp) function plane_ion_access_energy_ev(conditions, plane_potential_v) result(energy_ev)
+    type(sheath_matching_conditions), intent(in) :: conditions
+    real(dp), intent(in) :: plane_potential_v
+    energy_ev = max(plane_potential_v, conditions%ion_path_maximum_v, 0.0_dp)
+  end function plane_ion_access_energy_ev
+
+  !> Normal energy [eV] at the plane above which an electron leaving outward passes the outer sheath:
+  !! plane_potential_v - min(plane_potential_v, electron_path_minimum_v). Below it the electron returns with the same
+  !! normal energy.
+  pure real(dp) function plane_electron_escape_threshold_ev(conditions, plane_potential_v) result(energy_ev)
+    type(sheath_matching_conditions), intent(in) :: conditions
+    real(dp), intent(in) :: plane_potential_v
+    energy_ev = plane_potential_v - min(plane_potential_v, conditions%electron_path_minimum_v)
+  end function plane_electron_escape_threshold_ev
+
+  !> Normal energy [eV] at the plane above which an ion leaving outward passes the outer sheath:
+  !! max(plane_potential_v, ion_path_maximum_v) - plane_potential_v.
+  pure real(dp) function plane_ion_escape_threshold_ev(conditions, plane_potential_v) result(energy_ev)
+    type(sheath_matching_conditions), intent(in) :: conditions
+    real(dp), intent(in) :: plane_potential_v
+    energy_ev = max(plane_potential_v, conditions%ion_path_maximum_v) - plane_potential_v
+  end function plane_ion_escape_threshold_ev
+
+  !> Number flux [1/(m^2 s)] of upstream electrons reaching a plane at local potential plane_potential_v: the
+  !! inward-drifting Maxwellian of the conditions restricted to the access energy,
+  !! N_e v_th/(2 sqrt(pi)) [exp(-(b-u)^2) + sqrt(pi) u erfc(b-u)] with v_th = sqrt(2 e T_e/m_e),
+  !! b = sqrt(K_access/T_e) and u = v_d/v_th. At the plane potential of the conditions it equals
+  !! electron_inward_flux_m2_s. NaN for a nonpositive temperature or mass.
+  pure real(dp) function plane_electron_inward_flux_m2_s(conditions, plane_potential_v, electron_mass_kg) result(flux)
+    type(sheath_matching_conditions), intent(in) :: conditions
+    real(dp), intent(in) :: plane_potential_v, electron_mass_kg
+    real(dp) :: thermal_speed, b, u
+    flux = ieee_value(0.0_dp, ieee_quiet_nan)
+    if (.not. (conditions%electron_temperature_ev > 0.0_dp .and. electron_mass_kg > 0.0_dp)) return
+    thermal_speed = sqrt(2.0_dp*qe*conditions%electron_temperature_ev/electron_mass_kg)
+    b = sqrt(plane_electron_access_energy_ev(conditions, plane_potential_v)/conditions%electron_temperature_ev)
+    u = conditions%electron_drift_mps/thermal_speed
+    flux = conditions%electron_reservoir_density_m3*thermal_speed/(2.0_dp*sqrt(pi))* &
+        (exp(-(b - u)**2) + sqrt(pi)*u*erfc(b - u))
+  end function plane_electron_inward_flux_m2_s
 
 end module sheath_model_matching
