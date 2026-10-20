@@ -129,12 +129,13 @@ contains
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
 
-    real(dp) :: boundary_e2
+    real(dp) :: boundary_e2, band
 
     call validate_zhao_profile(params, root%branch, root%phi0_v/params%potential_scale_v, &
         root%phi_m_v/params%potential_scale_v, root%ambient_electron_density_m3/params%density_scale_m3, &
-        root%minimum_field_squared_hat, boundary_e2, status, message)
+        root%minimum_field_squared_hat, boundary_e2, status, message, band, root%upstream_field_deficit_v_m)
     if (status /= SHEATH_OK) return
+    root%upstream_negative_band_v = band*params%potential_scale_v
 
     if (abs(boundary_e2 - target_field_hat**2) > 1e-7_dp*max(1.0_dp, target_field_hat**2)) then
       status = SHEATH_NUMERICAL_FAILURE

@@ -97,7 +97,7 @@ call evaluate_matching_conditions(input, root, plane, status, message)
 | `electron_inward_flux_m2_s`, `ion_inward_flux_m2_s` | 外部モデルで面に入る電子・イオンの数流束 |
 | `emitted_outward_flux_m2_s`, `emitted_escape_flux_m2_s`, `emitted_return_flux_m2_s` | 放出源の外向き数流束と、そのうち上流へ抜ける分・面へ戻る分 |
 | `net_current_a_m2` | +z 向きの通常電流 `e(Γ_e,in − Γ_i,in − Γ_em,escape)` [A/m²]。J=0 の根ではほぼ 0 |
-| `upstream_negative_band_v`, `upstream_field_deficit_v_m` | ドリフトのある A/C の J=0 根を受理した上流の帯 [V] と場の不足 [V/m]。それ以外は 0 |
+| `upstream_negative_band_v`, `upstream_field_deficit_v_m` | ドリフトのある A/C の根（J=0・E_H 指定）を受理した上流の帯 [V] と場の不足 [V/m]。それ以外は 0 |
 
 ### 粒子の注入・反射・除去
 

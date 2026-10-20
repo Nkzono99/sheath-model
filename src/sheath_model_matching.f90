@@ -94,6 +94,9 @@ contains
     if (status /= SHEATH_OK) return
     call fill_conditions(p, root%branch, root%boundary_potential_v, root%minimum_potential_v, &
         root%ambient_electron_density_m3, conditions, status, message)
+    if (status /= SHEATH_OK) return
+    conditions%upstream_negative_band_v = root%upstream_negative_band_v
+    conditions%upstream_field_deficit_v_m = root%upstream_field_deficit_v_m
   end subroutine matching_from_field
 
   !> Evaluate fields and fluxes with the same internal expressions as the closures.

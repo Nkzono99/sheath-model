@@ -50,6 +50,10 @@ module sheath_model_field
     real(dp) :: residual_norm = huge(1.0_dp)
     real(dp) :: minimum_field_squared_hat = huge(1.0_dp)
     integer(i32) :: nonlinear_iterations = 0_i32
+    !> Potential width next to upstream where E^2<0 [V] and the field deficit sqrt(-min E^2) inside it [V/m];
+    !! nonzero only for drifting A/C roots accepted by upstream_band_tolerance or upstream_field_floor_v_m.
+    real(dp) :: upstream_negative_band_v = 0.0_dp
+    real(dp) :: upstream_field_deficit_v_m = 0.0_dp
   end type prescribed_field_result
 
   type :: zhao_field_root
@@ -60,6 +64,8 @@ module sheath_model_field
     real(dp) :: residual_norm = huge(1.0_dp)
     real(dp) :: minimum_field_squared_hat = huge(1.0_dp)
     integer(i32) :: nonlinear_iterations = 0_i32
+    real(dp) :: upstream_negative_band_v = 0.0_dp
+    real(dp) :: upstream_field_deficit_v_m = 0.0_dp
   end type zhao_field_root
 
   interface
@@ -353,6 +359,8 @@ contains
     trial%residual_norm = root%residual_norm
     trial%minimum_field_squared_hat = root%minimum_field_squared_hat
     trial%nonlinear_iterations = root%nonlinear_iterations
+    trial%upstream_negative_band_v = root%upstream_negative_band_v
+    trial%upstream_field_deficit_v_m = root%upstream_field_deficit_v_m
     trial%valid = .true.
     output = trial
   end subroutine compose_result

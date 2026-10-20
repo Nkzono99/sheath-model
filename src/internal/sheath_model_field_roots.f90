@@ -210,7 +210,8 @@ contains
     diagnostics%searched(k) = .true.
     compatible = (branch == 'C' .and. target_field_hat <= 0.0_dp) .or. &
         ((branch == 'A' .or. branch == 'B') .and. target_field_hat >= 0.0_dp)
-    if (.not. compatible .or. ((branch == 'A' .or. branch == 'C') .and. params%u > 0.0_dp)) then
+    if (.not. compatible .or. ((branch == 'A' .or. branch == 'C') .and. params%u > 0.0_dp .and. &
+        params%search%upstream_band_tolerance <= 0.0_dp .and. params%search%upstream_field_floor_v_m <= 0.0_dp)) then
       diagnostics%excluded(k) = .true.
       return
     end if

@@ -127,7 +127,7 @@ N_em v_th/(2√π)）。
 | `upstream_band_tolerance` | 0 | ドリフトのある A/C の上流の帯の許容幅（割合）。0 以上 1 未満 |
 | `upstream_field_floor_v_m` | 0 | 同じく場の不足の許容値 [V/m]。非負 |
 
-上流の帯の二つの設定は J=0 の探索と `build_profile` に使います（[物理モデル](model.md#ドリフトのある-ac-と上流の帯)）。
+上流の帯の二つの設定は J=0 と E_H 指定の探索、`build_profile` に使います（[物理モデル](model.md#ドリフトのある-ac-と上流の帯)）。
 探索法の詳細は [数値解法](numerics.md#根の探索) を参照してください。
 
 ### continuation の設定 `continuation`
@@ -215,6 +215,7 @@ call solver%solve_equilibrium(input, root, status, message, diagnostics, initial
 | `net_current_a_m2` | +z 向きの通常電流 [A/m²]。閉じ方として課していない応答 |
 | `residual_norm`, `minimum_field_squared_hat` | 規格化残差、経路上の E² の最小値（無次元） |
 | `nonlinear_iterations` | 非線形反復の回数 |
+| `upstream_negative_band_v`, `upstream_field_deficit_v_m` | 受理した上流の帯の幅 [V] と場の不足 [V/m]。ドリフトのある A/C を受理したときだけ正 |
 
 ### プロファイル
 
