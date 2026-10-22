@@ -249,7 +249,9 @@ contains
       end if
       valid = valid .and. ((branch == 'C' .and. field <= 0.0_dp) .or. &
           (branch /= 'C' .and. field >= 0.0_dp))
-      if ((branch == 'A' .or. branch == 'C') .and. current%u > 0.0_dp) valid = .false.
+      if ((branch == 'A' .or. branch == 'C') .and. current%u > 0.0_dp .and. &
+          params%search%upstream_band_tolerance <= 0.0_dp .and. params%search%upstream_field_floor_v_m <= 0.0_dp) &
+          valid = .false.
     end subroutine
     subroutine residual(value, t, f, valid)
       real(dp), intent(in) :: value(:), t

@@ -127,7 +127,7 @@ N_em v_th/(2√π)）。
 | `upstream_band_tolerance` | 0 | ドリフトのある A/C の上流の帯の許容幅（割合）。0 以上 1 未満 |
 | `upstream_field_floor_v_m` | 0 | 同じく場の不足の許容値 [V/m]。非負 |
 
-上流の帯の二つの設定は J=0 の探索と `build_profile` に使います（[物理モデル](model.md#ドリフトのある-ac-と上流の帯)）。
+上流の帯の二つの設定は J=0 と E_H 指定の探索、`build_profile` に使います（[物理モデル](model.md#ドリフトのある-ac-と上流の帯)）。
 探索法の詳細は [数値解法](numerics.md#根の探索) を参照してください。
 
 ### continuation の設定 `continuation`
@@ -146,6 +146,7 @@ N_em v_th/(2√π)）。
 | `points_per_segment` | 4000 | 単調区間あたりの電位点数。32 以上。A は 2 区間 |
 | `max_distance_m` | 100 | 返す高さの上限 [m] |
 | `potential_cutoff_v` | 2.2e-3 | 上流側の打ち切り電位 \|φ\| [V]。境界電位・極小の深さの半分を上限とする |
+| `upstream_band_margin` | 0.05 | 受理した上流の帯（E²<0）がある根で、帯の手前に残す余白。帯の端から極小（B/C は境界電位）までの深さに対する割合。0 より大きく 1 未満 |
 
 ## 求解メソッド
 
@@ -215,6 +216,7 @@ call solver%solve_equilibrium(input, root, status, message, diagnostics, initial
 | `net_current_a_m2` | +z 向きの通常電流 [A/m²]。閉じ方として課していない応答 |
 | `residual_norm`, `minimum_field_squared_hat` | 規格化残差、経路上の E² の最小値（無次元） |
 | `nonlinear_iterations` | 非線形反復の回数 |
+| `upstream_negative_band_v`, `upstream_field_deficit_v_m` | 受理した上流の帯の幅 [V] と場の不足 [V/m]。ドリフトのある A/C を受理したときだけ正 |
 
 ### プロファイル
 
@@ -228,7 +230,8 @@ call solver%solve_equilibrium(input, root, status, message, diagnostics, initial
 | `turning_height_m` | A の極小の高さ [m]。B/C は −1 |
 
 プロファイルは半無限の Poisson 一次積分から作ります。`potential_cutoff_v` または `max_distance_m` で止め、
-その先に人工的な 0 V の区間は加えません。受理した上流の帯がある場合は帯の手前で止めます。
+その先に人工的な 0 V の区間は加えません。受理した上流の帯がある場合は、帯の端から `upstream_band_margin` の割合だけ手前で止めます。
+帯が狭い根（例: 斜めの太陽風）では、既定の 5% で上流側がかなり手前で切れます。遠方の電位が必要なら余白を小さくします。
 
 ### 局所密度
 

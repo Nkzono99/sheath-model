@@ -97,7 +97,7 @@ call evaluate_matching_conditions(input, root, plane, status, message)
 | `electron_inward_flux_m2_s`, `ion_inward_flux_m2_s` | 外部モデルで面に入る電子・イオンの数流束 |
 | `emitted_outward_flux_m2_s`, `emitted_escape_flux_m2_s`, `emitted_return_flux_m2_s` | 放出源の外向き数流束と、そのうち上流へ抜ける分・面へ戻る分 |
 | `net_current_a_m2` | +z 向きの通常電流 `e(Γ_e,in − Γ_i,in − Γ_em,escape)` [A/m²]。J=0 の根ではほぼ 0 |
-| `upstream_negative_band_v`, `upstream_field_deficit_v_m` | ドリフトのある A/C の J=0 根を受理した上流の帯 [V] と場の不足 [V/m]。それ以外は 0 |
+| `upstream_negative_band_v`, `upstream_field_deficit_v_m` | ドリフトのある A/C の根（J=0・E_H 指定）を受理した上流の帯 [V] と場の不足 [V/m]。それ以外は 0 |
 
 ### 粒子の注入・反射・除去
 
@@ -214,9 +214,26 @@ plasma と solver は書きません。unit は stream・sequential のどちら
 新しいシミュレータへ組み込むときは、次を確認してください。
 
 - 面を外向きに通過する電子を、由来によらずすべて集計しているか（計算領域内で反射した上流電子を含む）。
+  面で外部障壁に反射して計算領域へ戻す電子も、反射する前の外向き通過として数える。これを除くと、面が極小より下（Type A）の
+  状態で、面の上で折り返す遅い光電子が放出源から抜け、外部根が歪む。
 - 注入の数流束と `electron_inward_flux_m2_s`・`ion_inward_flux_m2_s`、観測した流出と `emitted_*_flux_m2_s` が整合しているか。
 - 面の電位・電場と `plane_potential_v`・`plane_field_v_m` の符号と基準が揃っているか。
 - checkpoint から再開した直後の条件が、保存前と一致するか（[matching_plane.f90](../example/matching_plane.f90) の最後を参照）。
+
+## 面がシースの内側にあるとき: 場の連続性を使う閉包
+
+J=0 だけで外部根を選ぶと、面がシースの内側にある場合に、電流は合うが面で場が不連続な状態（例えば遅い上流電子を
+入れない Type C）に固定されることがあります。面の上下で場が連続（面に仮想的な電荷がない）ことを条件に加えると避けられます。
+EMSES の研究用実装（`feat/outer-sheath-coupling` の `src/physics/sheath/m_outer_sheath.F90`, `closure = "combined"`）は次の手順です。
+
+1. 前回の φ_H の周りで φ_H を走査し、各 φ_H で取りうる状態を `evaluate_sheath_state` で求める。B/C はそのまま、
+   Type A は `minimum_potential_v` を動かして `connection_residual_normalized` の符号変化を二分法で詰める。
+2. 各状態を ((E(H⁺) − E(H⁻))/σ_E)² + ((J/eΓ_i)/σ_J)² で評価する。E(H⁻) は面の直下の電位から窓平均で求め、
+   σ_E・σ_J はその雑音（下限付き）。
+3. φ_H を最良の状態へ一部だけ動かし（緩和と 1 窓あたりの上限）、現在の状態の電流が大きい間（計算領域の表面がまだ帯電中）は据え置く。
+
+準 1 次元の柱（4×4 セル）では、面を極小の 2.5 m 下（4.5 m）からシースの外（約 10 λ_D）まで同じ設定で、φ_H は単体解と
+0.01〜0.05 V で一致しました。シースの外では E(H⁺) が小さく、精度は E(H⁻) の窓平均の雑音で決まります。
 
 BEACH の実装は、BEACH リポジトリの `src/runtime/sheath/bem_surface_current_model.f90`（条件の写像）と
 `src/runtime/sheath/bem_zhao_outflow_refresh.f90`（窓集計・更新・checkpoint）にあります。

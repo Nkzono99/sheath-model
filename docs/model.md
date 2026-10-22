@@ -189,7 +189,7 @@ n_e(-h)-n_e(0)=\frac{N_e\,u\,e^{-u^2}}{\sqrt\pi}\,h\ln\frac1h+O(h)
 ドリフトを 0 にした無ドリフトの条件は、J=0 の Zhao 入力では `electron_drift_mode='zero'`、
 それ以外では `electron_drift_mps=0` として明示的に指定します。ライブラリが自動でドリフトを変えることはありません。
 
-J=0 の探索では、上流に接する E²<0 の帯を条件付きで受理できます（Fortran・Python の `search` 設定）。
+J=0 と E_H 指定の探索では、上流に接する E²<0 の帯を条件付きで受理できます（`search` の設定。Python は J=0 のみ）。
 
 | 設定 | 受理する根 |
 | --- | --- |

@@ -11,6 +11,9 @@ program test_upstream_band
   type(sheath_equilibrium_result) :: root, reference
   type(sheath_profile_result) :: profile
   type(sheath_matching_conditions) :: conditions
+  type(prescribed_field_input) :: field_input
+  type(prescribed_field_result) :: field_root
+  type(sheath_matching_conditions) :: plane
   integer(i32) :: status
   character(len=256) :: message
   real(dp) :: source_density
@@ -50,6 +53,22 @@ program test_upstream_band
   if (status /= SHEATH_OK) error stop 'profile of an accepted drifting A root'
   if (profile%potential_v(size(profile%potential_v)) > -root%upstream_negative_band_v) &
       error stop 'profile must stop before the negative band'
+  block
+    type(sheath_solver) :: closer_solver
+    type(sheath_profile_result) :: closer
+    closer_solver = tolerant
+    closer_solver%profile%upstream_band_margin = 0.005_dp
+    closer_solver%profile%max_distance_m = 1.0e4_dp
+    call closer_solver%build_profile(input, root, closer, status, message)
+    if (status /= SHEATH_OK) error stop 'profile with a small band margin'
+    if (closer%potential_v(size(closer%potential_v)) <= profile%potential_v(size(profile%potential_v))) &
+        error stop 'a smaller band margin must reach closer to the band'
+    if (closer%potential_v(size(closer%potential_v)) > -root%upstream_negative_band_v) &
+        error stop 'a small band margin must still stop before the band'
+    closer_solver%profile%upstream_band_margin = 1.0_dp
+    call closer_solver%build_profile(input, root, closer, status, message)
+    if (status /= SHEATH_INVALID_ARGUMENT) error stop 'band margin of 1 must be rejected'
+  end block
 
   call narrow%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_NO_PHYSICAL_SOLUTION) error stop 'band wider than the tolerance must be rejected'
@@ -64,6 +83,26 @@ program test_upstream_band
       error stop 'field-floor A must still report the band width'
   call tight%solve_equilibrium(input, root, status, message)
   if (status /= SHEATH_NO_PHYSICAL_SOLUTION) error stop 'a deficit above the field floor must be rejected'
+
+  ! The prescribed-field closure applies the same band criteria: imposing the boundary field of the
+  ! accepted J=0 root recovers that root, and the strict search still rejects it.
+  call floor%solve_equilibrium(input, root, status, message)
+  call evaluate_matching_conditions(input, root, plane, status, message)
+  if (status /= SHEATH_OK) error stop 'plane conditions of the drifting A root'
+  field_input%plasma_input = input%plasma
+  field_input%branch = 'A'
+  field_input%electric_field_v_m = plane%plane_field_v_m
+  call floor%solve_prescribed_field(field_input, field_root, status, message)
+  if (status /= SHEATH_OK .or. field_root%branch /= 'A') error stop 'field floor must accept drifting A in the field closure'
+  if (abs(field_root%boundary_potential_v - root%surface_potential_v) > 1e-6_dp) &
+      error stop 'field closure must recover the J=0 surface potential'
+  if (abs(field_root%net_current_a_m2) > 1e-6_dp*qe*root%ion_inward_flux_m2_s) &
+      error stop 'field closure at the J=0 field must give zero current'
+  if (abs(field_root%upstream_field_deficit_v_m - root%upstream_field_deficit_v_m) > 1e-6_dp .or. &
+      abs(field_root%upstream_negative_band_v - root%upstream_negative_band_v) > 1e-6_dp) &
+      error stop 'field closure must report the same upstream band'
+  call strict%solve_prescribed_field(field_input, field_root, status, message)
+  if (status == SHEATH_OK) error stop 'strict field closure must reject drifting A'
 
   input%branch = 'auto'
   call tolerant%solve_equilibrium(input, root, status, message)
