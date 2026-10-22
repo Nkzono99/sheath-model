@@ -17,11 +17,11 @@ GNU Fortran 8.5 で `fpm test` の全件が通ることを確認しています�
 
 ### fpm の依存として追加する
 
-`fpm.toml` に依存を追加します。再現性のため、`rev` で commit を固定してください。
+`fpm.toml` に依存を追加します。再現性のため、リリースのタグ（`tag`）か commit（`rev`）で固定してください。
 
 ```toml
 [dependencies]
-sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", rev = "<commit>" }
+sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", tag = "v0.2.0" }
 ```
 
 ローカルのソースを使う場合は相対パスで指定します（fpm は絶対パスを正しく扱わないことがあります）。
@@ -31,7 +31,7 @@ sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", rev = "<c
 sheath-model = { path = "../sheath-model" }
 ```
 
-公開済みのタグ `v0.1.0` は、軌道保存・物理解の判定・スペクトル源・結合 API を含まない初期版です。`main` の commit を使ってください。
+`v0.1.0` は、軌道保存・物理解の判定・スペクトル源・結合 API を含まない初期版です。`v0.2.0` 以降を使ってください。
 
 ### fpm 以外のビルドから使う
 

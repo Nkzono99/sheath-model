@@ -49,11 +49,11 @@ Python は Fortran のバインディングではなく、NumPy/SciPy による�
 
 ## 使い始める
 
-fpm プロジェクトの `fpm.toml` に依存を追加し（`rev` は使う commit）、`use sheath_model` で呼びます。
+fpm プロジェクトの `fpm.toml` に依存を追加し（リリースのタグか commit で固定）、`use sheath_model` で呼びます。
 
 ```toml
 [dependencies]
-sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", rev = "<commit>" }
+sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", tag = "v0.2.0" }
 ```
 
 ```fortran
