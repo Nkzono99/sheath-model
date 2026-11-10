@@ -315,25 +315,36 @@ contains
     character(len=*), intent(in) :: side
     real(dp), intent(in) :: lo, hi, phi0, phim, density
 
-    real(dp) :: t, phi, rho, ni, ne, nr, pe_integral
+    real(dp) :: t, phi, rho(64), ni, ne, nr, pe_integral
     logical :: lower_side
-    integer :: panel, j
+    integer :: node, panel, j
     value = 0.0_dp
 
     if (lo == hi) return
 
-    do panel = 0, 3
-      do j = 1, 16
-        t = (real(panel, dp) + 0.5_dp*(1.0_dp + gauss_x(j)))/4.0_dp
-        phi = lo + (hi - lo)*sin(0.5_dp*pi*t)**2
-        if (p%emission%is_binned()) then
-          call evaluate_background_hat(p, branch, side, phi, phim, density, ni, ne, nr)
-          rho = ni - ne - nr
-        else
-          call evaluate_zhao_rho_hat(p, branch, side, phi, phi0, phim, density, rho)
-        end if
-        value = value + gauss_w(j)*rho*(hi - lo)*0.5_dp*pi*sin(pi*t)
-      end do
+    ! Each density costs a few hundred exponentials (ion bisection, electron orbit integrals), and profile
+    ! checks call this integral hundreds of times. The nodes are evaluated in parallel and summed in their
+    ! fixed order below, so the value does not depend on the thread count.
+    !$omp parallel do default(none) schedule(static) private(node, panel, j, t, phi, ni, ne, nr) &
+    !$omp shared(p, branch, side, lo, hi, phi0, phim, density, rho)
+    do node = 1, 64
+      panel = (node - 1)/16
+      j = node - 16*panel
+      t = (real(panel, dp) + 0.5_dp*(1.0_dp + gauss_x(j)))/4.0_dp
+      phi = lo + (hi - lo)*sin(0.5_dp*pi*t)**2
+      if (p%emission%is_binned()) then
+        call evaluate_background_hat(p, branch, side, phi, phim, density, ni, ne, nr)
+        rho(node) = ni - ne - nr
+      else
+        call evaluate_zhao_rho_hat(p, branch, side, phi, phi0, phim, density, rho(node))
+      end if
+    end do
+    !$omp end parallel do
+    do node = 1, 64
+      panel = (node - 1)/16
+      j = node - 16*panel
+      t = (real(panel, dp) + 0.5_dp*(1.0_dp + gauss_x(j)))/4.0_dp
+      value = value + gauss_w(j)*rho(node)*(hi - lo)*0.5_dp*pi*sin(pi*t)
     end do
     value = value/8.0_dp
     if (p%emission%is_binned()) then
