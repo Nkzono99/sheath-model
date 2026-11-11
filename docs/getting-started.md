@@ -21,7 +21,7 @@ GNU Fortran 8.5 で `fpm test` の全件が通ることを確認しています�
 
 ```toml
 [dependencies]
-sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", tag = "v0.2.0" }
+sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", tag = "v0.2.1" }
 ```
 
 ローカルのソースを使う場合は相対パスで指定します（fpm は絶対パスを正しく扱わないことがあります）。

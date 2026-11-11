@@ -53,7 +53,7 @@ fpm プロジェクトの `fpm.toml` に依存を追加し（リリースのタ�
 
 ```toml
 [dependencies]
-sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", tag = "v0.2.0" }
+sheath-model = { git = "https://github.com/Nkzono99/sheath-model.git", tag = "v0.2.1" }
 ```
 
 ```fortran
