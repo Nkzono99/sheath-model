@@ -13,13 +13,15 @@ program test_matching
   type(sheath_profile_result) :: profile
   type(sheath_equilibrium_result) :: root
   type(sheath_matching_conditions) :: conditions
+  type(sheath_matching_conditions), allocatable :: candidates(:), nearby(:)
+  type(sheath_matching_conditions) :: trial_grid(4)
   type(sheath_state_result) :: state
   type(prescribed_field_input) :: field_input
   type(prescribed_field_result) :: field_root
   type(prescribed_field_result), allocatable :: field_roots(:)
   type(emission_source) :: source
   integer(i32) :: status
-  integer :: i
+  integer :: i, selected, target
   real(dp), allocatable :: edges(:), breakpoints(:)
   real(dp) :: flux(145), tolerance_v, current_scale
   character(len=512) :: message
@@ -117,6 +119,45 @@ program test_matching
   call near(conditions%emitted_return_flux_m2_s, field_root%emitted_return_flux_m2_s, 1e-13_dp, 'field return')
   call near(conditions%net_current_a_m2, field_root%net_current_a_m2, 1e-10_dp, 'field current')
 
+  call matching_states_at(field_input, root%surface_potential_v, candidates, status, message)
+  call ok('connected B matching candidate')
+  i = first_branch(candidates, 'B')
+  call check(i > 0, 'candidate contains B')
+  call near(candidates(i)%plane_field_v_m, state%electric_field_v_m, 1e-12_dp, 'candidate field equals static evaluation')
+  call near(candidates(i)%electron_inward_flux_m2_s, state%electron_inward_flux_m2_s, 1e-12_dp, 'candidate electron flux')
+  call matching_states_at(field_input, root%surface_potential_v + 0.1_dp, nearby, status, message)
+  call ok('nearby B matching candidate')
+  selected = first_branch(nearby, 'B')
+  call check(selected > 0, 'nearby candidate contains B')
+  trial_grid(1) = nearby(selected)
+  trial_grid(2) = candidates(i)
+  trial_grid(3) = trial_grid(1)
+  trial_grid(3)%plane_potential_v = trial_grid(1)%plane_potential_v - 0.03_dp
+  trial_grid(3)%plane_field_v_m = ieee_value(0.0_dp, ieee_quiet_nan)
+  call select_combined_matching_conditions(trial_grid, trial_grid(1), trial_grid(2)%plane_field_v_m, &
+      0.01_dp, 0.01_dp, 1.0_dp, 0.03_dp, selected, target, status, message)
+  call ok('combined matching')
+  call check(target == 2 .and. selected == 1, 'combined mismatch target and capped update')
+  call select_combined_matching_conditions(trial_grid, trial_grid(1), trial_grid(2)%plane_field_v_m, &
+      0.01_dp, 0.01_dp, 1.0_dp, 0.0_dp, selected, target, status, message)
+  call ok('uncapped combined matching')
+  call check(target == 2 .and. selected == 2, 'uncapped update follows mismatch minimizer')
+  call matching_states_at(field_input, root%surface_potential_v, candidates, status, message, [0.2_dp, 0.1_dp])
+  call check(status == SHEATH_INVALID_ARGUMENT .and. size(candidates) == 0, 'invalid minimum gap grid')
+
+  input = zhao_equilibrium_input(branch='A', sun_elevation_deg=60.0_dp, electron_drift_mode='zero')
+  call solver%solve_equilibrium(input, root, status, message)
+  call ok('A reference')
+  field_input%ion_entry_speed_mps = input%solar_wind_speed_mps*sin(60.0_dp*acos(-1.0_dp)/180.0_dp)
+  field_input%emission = maxwellian_emission( &
+      input%photoelectron_reference_density_m3*sin(60.0_dp*acos(-1.0_dp)/180.0_dp), 2.2_dp)
+  call matching_states_at(field_input, root%surface_potential_v, candidates, status, message)
+  call ok('connected A matching candidate')
+  i = first_branch(candidates, 'A')
+  call check(i > 0, 'candidate contains A')
+  call near(candidates(i)%electron_path_minimum_v, root%minimum_potential_v, 2e-8_dp, 'connected A minimum')
+  call check(abs(candidates(i)%net_current_a_m2) < 1e-12_dp, 'connected A zero current at the reference potential')
+
   root%valid = .false.
   call evaluate_matching_conditions(input, root, conditions, status, message)
   call check(status == SHEATH_INVALID_ARGUMENT .and. .not. conditions%valid, 'invalid root rejected')
@@ -183,6 +224,17 @@ program test_matching
 
   print *, 'Matching-plane conditions and outflow sources passed.'
 contains
+  integer function first_branch(grid, branch) result(index)
+    type(sheath_matching_conditions), intent(in) :: grid(:)
+    character(len=1), intent(in) :: branch
+    integer :: j
+    index = 0
+    do j = 1, size(grid)
+      if (grid(j)%branch /= branch) cycle
+      index = j
+      return
+    end do
+  end function
   subroutine ok(label)
     character(len=*), intent(in) :: label
     call check(status == SHEATH_OK, label)

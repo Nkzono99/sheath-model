@@ -22,6 +22,7 @@ module sheath_model
   use sheath_model_field, only: prescribed_field_input, prescribed_field_result
   use sheath_model_solver, only: sheath_solver
   use sheath_model_matching, only: sheath_matching_conditions, evaluate_matching_conditions, &
+      matching_states_at, select_combined_matching_conditions, &
       plane_electron_access_energy_ev, plane_ion_access_energy_ev, &
       plane_electron_escape_threshold_ev, plane_ion_escape_threshold_ev, plane_electron_inward_flux_m2_s
   use sheath_model_matching_iteration, only: sheath_matching_iteration
@@ -37,6 +38,7 @@ module sheath_model
   public :: LOG_ENERGY_DEFAULT_LOWEST_EV, LOG_ENERGY_DEFAULT_DECADES, LOG_ENERGY_DEFAULT_BINS_PER_DECADE
   public :: LOG_ENERGY_DEFAULT_BINS
   public :: sheath_matching_conditions, evaluate_matching_conditions, sheath_matching_iteration
+  public :: matching_states_at, select_combined_matching_conditions
   public :: plane_electron_access_energy_ev, plane_ion_access_energy_ev
   public :: plane_electron_escape_threshold_ev, plane_ion_escape_threshold_ev, plane_electron_inward_flux_m2_s
   public :: ion_density_ratio, ion_critical_potential

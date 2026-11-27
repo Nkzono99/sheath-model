@@ -6,9 +6,13 @@
 module sheath_model_matching
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_quiet_nan
   use sheath_model_constants, only: dp, i32, qe, pi
-  use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NUMERICAL_FAILURE
-  use sheath_model_core, only: zhao_params_type, evaluate_zhao_fluxes
-  use sheath_model_state, only: prepare_plasma_params, boundary_field
+  use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NUMERICAL_FAILURE, SHEATH_NO_PHYSICAL_SOLUTION
+  use sheath_model_core, only: zhao_params_type, evaluate_zhao_fluxes, &
+      neutral_electron_density, type_a_connection_residual
+  use sheath_model_admissibility, only: validate_zhao_profile
+  use sheath_model_state, only: plasma_input, prepare_plasma_params, boundary_field
+  use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, valid_search_options
+  use sheath_model_scalar_search, only: find_scalar_roots
   use sheath_model_equilibrium, only: sheath_equilibrium_input, sheath_equilibrium_result, &
       prepare_equilibrium_params => prepare_params
   use sheath_model_field, only: prescribed_field_input, prescribed_field_result
@@ -18,6 +22,7 @@ module sheath_model_matching
   public :: plane_electron_access_energy_ev, plane_ion_access_energy_ev
   public :: plane_electron_escape_threshold_ev, plane_ion_escape_threshold_ev
   public :: plane_electron_inward_flux_m2_s
+  public :: matching_states_at, select_combined_matching_conditions
 
   !> Plane potential/field, path extrema, upstream reservoirs and fluxes on the matching plane.
   !! A simulator combines the path extrema with its local plane potential: electrons need
@@ -60,6 +65,156 @@ module sheath_model_matching
   end interface evaluate_matching_conditions
 
 contains
+
+  !> Connected exterior candidates at a prescribed matching-plane potential [V].
+  !! Tests B or C and brackets Type A connections on the supplied increasing gap grid [V]
+  !! below min(phi_H,0). Its default is 33 logarithmic points from 0.1 mV to sqrt(10) V.
+  !! A finite scan can miss roots. search governs acceptance of an upstream negative-E^2 band.
+  subroutine matching_states_at(input, plane_potential_v, candidates, status, message, minimum_gaps_v, search)
+    class(plasma_input), intent(in) :: input
+    real(dp), intent(in) :: plane_potential_v
+    type(sheath_matching_conditions), allocatable, intent(out) :: candidates(:)
+    integer(i32), intent(out) :: status
+    character(len=*), intent(out) :: message
+    real(dp), intent(in), optional :: minimum_gaps_v(:)
+    type(sheath_search_options), intent(in), optional :: search
+    type(zhao_params_type) :: p
+    type(sheath_search_diagnostics) :: diagnostics
+    real(dp), allocatable :: gaps(:), roots(:)
+    real(dp) :: phi0, top
+    integer :: i
+
+    allocate (candidates(0))
+    call prepare_plasma_params(input, p, status, message)
+    if (status /= SHEATH_OK) return
+    status = SHEATH_INVALID_ARGUMENT
+    message = 'Matching states require a finite plane potential and a positive, increasing minimum gap grid.'
+    if (.not. ieee_is_finite(plane_potential_v)) return
+    if (present(minimum_gaps_v)) then
+      gaps = minimum_gaps_v
+    else
+      gaps = [(1e-4_dp*10.0_dp**(4.5_dp*i/32.0_dp), i=0, 32)]
+    end if
+    if (size(gaps) < 2) return
+    if (.not. all(ieee_is_finite(gaps)) .or. any(gaps <= 0.0_dp)) return
+    if (any(gaps(2:) <= gaps(:size(gaps) - 1))) return
+    if (present(search)) then
+      message = 'Invalid matching-state search options.'
+      if (.not. valid_search_options(search)) return
+      p%search = search
+    end if
+    phi0 = plane_potential_v/p%potential_scale_v
+    top = min(0.0_dp, phi0)
+    if (.not. ieee_is_finite(phi0)) return
+    call append_candidate(merge('B', 'C', phi0 >= 0.0_dp), top)
+    call find_scalar_roots(connection, gaps/p%potential_scale_v, p%search, roots, diagnostics, 1, size(gaps))
+    do i = 1, size(roots)
+      call append_candidate('A', top - roots(i))
+    end do
+
+    status = SHEATH_NO_PHYSICAL_SOLUTION
+    message = 'No connected matching-plane candidate was found on the supplied grid.'
+    if (size(candidates) == 0) return
+    status = SHEATH_OK
+    message = ''
+  contains
+    subroutine connection(gap, residual, valid)
+      real(dp), intent(in) :: gap
+      real(dp), intent(out) :: residual
+      logical, intent(out) :: valid
+      real(dp) :: phim, density
+      phim = top - gap
+      valid = .false.
+      residual = 0.0_dp
+      if (.not. ieee_is_finite(phim) .or. phim >= top) return
+      density = neutral_electron_density(p, 'A', plane_potential_v, phim*p%potential_scale_v)/p%density_scale_m3
+      if (ieee_is_finite(density) .and. density > 0.0_dp) then
+        residual = type_a_connection_residual(p, phi0, phim, density)
+        valid = ieee_is_finite(residual)
+      end if
+    end subroutine
+
+    subroutine append_candidate(branch, phim)
+      character(len=1), intent(in) :: branch
+      real(dp), intent(in) :: phim
+      type(sheath_matching_conditions) :: trial
+      integer(i32) :: st
+      real(dp) :: density, min_e2, boundary_e2, band, deficit
+      character(len=256) :: attempt
+      density = neutral_electron_density(p, branch, plane_potential_v, phim*p%potential_scale_v)
+      if (.not. ieee_is_finite(density)) return
+      call validate_zhao_profile(p, branch, phi0, phim, density/p%density_scale_m3, min_e2, boundary_e2, &
+          st, attempt, band, deficit)
+      if (st /= SHEATH_OK) return
+      call fill_conditions(p, branch, plane_potential_v, phim*p%potential_scale_v, density, trial, st, attempt)
+      if (st /= SHEATH_OK) return
+      trial%upstream_negative_band_v = band*p%potential_scale_v
+      trial%upstream_field_deficit_v_m = deficit
+      candidates = [candidates, trial]
+    end subroutine
+  end subroutine matching_states_at
+
+  !> Select a connected exterior candidate by the weighted mismatch in inner field and current.
+  !! sigma_current is the uncertainty in J/(e Gamma_i). The caller can assemble the candidate grid
+  !! in parallel. On success target_index locates the minimum and selected_index locates the updated
+  !! state of that type nearest the relaxed potential. max_step_v=0 disables the step cap.
+  subroutine select_combined_matching_conditions(candidates, previous, inner_field_v_m, sigma_field_v_m, &
+      sigma_current, relaxation, max_step_v, selected_index, target_index, status, message)
+    type(sheath_matching_conditions), intent(in) :: candidates(:), previous
+    real(dp), intent(in) :: inner_field_v_m, sigma_field_v_m, sigma_current, relaxation, max_step_v
+    integer, intent(out) :: selected_index, target_index
+    integer(i32), intent(out) :: status
+    character(len=*), intent(out) :: message
+    real(dp) :: score, best, ion_current, step, proposed, distance, closest
+    integer :: i
+    logical :: usable(size(candidates))
+
+    selected_index = 0
+    target_index = 0
+    status = SHEATH_INVALID_ARGUMENT
+    message = 'Combined matching requires a valid previous state and finite field/current scales and update controls.'
+    if (.not. previous%valid) return
+    if (.not. all(ieee_is_finite([inner_field_v_m, sigma_field_v_m, sigma_current, relaxation, max_step_v, &
+        previous%plane_potential_v]))) return
+    if (min(sigma_field_v_m, sigma_current) <= 0.0_dp .or. max_step_v < 0.0_dp) return
+    if (relaxation <= 0.0_dp .or. relaxation > 1.0_dp) return
+
+    best = huge(1.0_dp)
+    usable = .false.
+    do i = 1, size(candidates)
+      if (.not. candidates(i)%valid) cycle
+      ion_current = qe*candidates(i)%ion_inward_flux_m2_s
+      if (ion_current <= 0.0_dp) cycle
+      if (.not. all(ieee_is_finite([ion_current, candidates(i)%plane_field_v_m, candidates(i)%net_current_a_m2, &
+          candidates(i)%plane_potential_v, candidates(i)%electron_path_minimum_v]))) cycle
+      score = hypot((candidates(i)%plane_field_v_m - inner_field_v_m)/sigma_field_v_m, &
+          (candidates(i)%net_current_a_m2/ion_current)/sigma_current)
+      if (.not. ieee_is_finite(score)) cycle
+      usable(i) = .true.
+      if (score >= best) cycle
+      best = score
+      target_index = i
+    end do
+    status = SHEATH_NO_PHYSICAL_SOLUTION
+    message = 'No finite, valid exterior candidate for combined matching.'
+    if (target_index == 0) return
+
+    step = relaxation*(candidates(target_index)%plane_potential_v - previous%plane_potential_v)
+    if (max_step_v > 0.0_dp) step = sign(min(abs(step), max_step_v), step)
+    proposed = previous%plane_potential_v + step
+    closest = huge(1.0_dp)
+    do i = 1, size(candidates)
+      if (.not. usable(i) .or. candidates(i)%branch /= candidates(target_index)%branch) cycle
+      distance = abs(candidates(i)%plane_potential_v - proposed) &
+          + 1e-3_dp*abs(candidates(i)%electron_path_minimum_v - candidates(target_index)%electron_path_minimum_v)
+      if (distance >= closest) cycle
+      closest = distance
+      selected_index = i
+    end do
+    if (selected_index == 0) return
+    status = SHEATH_OK
+    message = ''
+  end subroutine select_combined_matching_conditions
 
   subroutine matching_from_equilibrium(input, root, conditions, status, message)
     class(sheath_equilibrium_input), intent(in) :: input
@@ -143,7 +298,6 @@ contains
     status = SHEATH_OK
     message = ''
   end subroutine fill_conditions
-
 
   !> Normal energy [eV] an upstream electron needs at infinity to reach a plane at local potential plane_potential_v:
   !! -min(plane_potential_v, electron_path_minimum_v, 0). Zero when no potential repels it.
