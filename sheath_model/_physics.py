@@ -67,15 +67,9 @@ class SheathPhysics:
         )
 
 
-    def _type_a_e2_sum_at_infinity(
-        self, phi0_V: float, phi_m_V: float, n_swe_inf_m3: float
-    ) -> float:
-        """First integral of the orbit-mapped charge density; regular at u=0."""
-        p = self.p
-        return -2 * self._integrate_rho("A", "upper", phi_m_V / p.emission_temperature_ev, 0.0,
-                                      phi0_V / p.emission_temperature_ev, phi_m_V / p.emission_temperature_ev,
-                                      n_swe_inf_m3 / p.density_scale_m3)
-
+    def _type_a_upper_e2(self, phi0, phim, density):
+        """Normalized E² at upstream, integrated from the Type A minimum."""
+        return -2*self._integrate_rho("A", "upper", phim, 0., phi0, phim, density)
 
     def _integrate_rho(self, branch, side, lo, hi, phi0, phim, density):
         t = POTENTIAL_NODES
@@ -127,101 +121,41 @@ class SheathPhysics:
             rho0 = (neutral-density)*coefficient/root_depth
             integral = float(np.sum(POTENTIAL_WEIGHTS*(ions-electrons-photos)*.5*np.pi*np.sin(np.pi*POTENTIAL_NODES)))
             return -2*(integral+rho0)*p.density_scale_m3/p.ion_density_m3
-        return (-2*self._integrate_rho("A", "upper", phim, 0., phi0, phim, density)/(-phim))*\
-               (self.p.density_scale_m3/self.p.ion_density_m3)/math.sqrt(-phim)
+        return (self._type_a_upper_e2(phi0, phim, density)/depth)*\
+               (p.density_scale_m3/p.ion_density_m3)/math.sqrt(depth)
 
 
-    def _residuals_type_a(self, x: np.ndarray) -> np.ndarray:
+    def _ion_current_term(self):
         p = self.p
-        phi0_V, phi_m_V, n_swe_inf_m3 = x
-        if phi_m_V >= 0.0 or phi_m_V >= phi0_V or n_swe_inf_m3 <= 0.0:
-            return np.array([1e6, 1e6, 1e6], dtype=float)
-        if phi0_V > ion_critical_potential(0.5*p.electron_temperature_ev*p.mach**2,
-                                          p.ion_pressure_factor*p.ion_temperature_ev):
-            return np.array([1e6, 1e6, 1e6], dtype=float)
+        return p.ion_density_m3 * math.sqrt(
+            2.0*math.pi*p.electron_temperature_ev/p.emission_temperature_ev*p.electron_mass_kg/p.ion_mass_kg
+        ) * p.mach
 
-        a_swe = math.sqrt(max(0.0, -phi_m_V / p.electron_temperature_ev)) - p.u
-        a_phe = math.sqrt(max(0.0, -phi_m_V / p.emission_temperature_ev))
-        ion_term = (
-            p.ion_density_m3
-            * math.sqrt(2.0 * math.pi * p.electron_temperature_ev / p.emission_temperature_ev * p.electron_mass_kg / p.ion_mass_kg)
-            * p.mach
-        )
-
-        # Eq. (14) Charge Neutrality at Infinity
-        r1 = (
-            0.5 * n_swe_inf_m3 * (1.0 + 2.0 * erf(p.u) + erf(a_swe))
-            + 0.5 * p.emission_density_m3 * math.exp(-phi0_V / p.emission_temperature_ev) * (1.0 - erf(a_phe))
-            - p.ion_density_m3
-        )
-
-        # Eq. (16) Zero Net Current Density at Infinity (equivalent: at Z = 0)
-        r2 = (
-            p.emission_density_m3 * math.exp((phi_m_V - phi0_V) / p.emission_temperature_ev)
-            - self._swe_free_current_term(n_swe_inf_m3, a_swe)
-            + ion_term
-        )
-
-        # Eq. (24) for Type A, evaluated at phi(infty)=0.
-        r3 = self._type_a_e2_sum_at_infinity(phi0_V, phi_m_V, n_swe_inf_m3)
-
-        return np.array([r1, r2, r3], dtype=float)
-
-
-    def _residuals_type_b(self, x: np.ndarray) -> np.ndarray:
+    def _balance_residuals(self, branch, phi0, phim, density):
+        """Neutrality and current residuals in density units at a trial state."""
         p = self.p
-        phi0_V, n_swe_inf_m3 = x
-        if phi0_V <= 0.0 or n_swe_inf_m3 <= 0.0:
-            return np.array([1e6, 1e6], dtype=float)
+        if density <= 0 or (branch == "A" and phim >= min(phi0, 0.)) or (
+                branch == "B" and phi0 <= 0.) or (branch == "C" and phi0 >= 0.):
+            return np.array([1e6, 1e6])
+        if branch == "A" and phi0 > ion_critical_potential(
+                0.5*p.electron_temperature_ev*p.mach**2, p.ion_pressure_factor*p.ion_temperature_ev):
+            return np.array([1e6, 1e6])
 
-        ion_term = (
-            p.ion_density_m3
-            * math.sqrt(2.0 * math.pi * p.electron_temperature_ev / p.emission_temperature_ev * p.electron_mass_kg / p.ion_mass_kg)
-            * p.mach
-        )
-
-        # Eq. (14) Charge Neutrality at Infinity
-        r1 = (
-            0.5 * n_swe_inf_m3 * (1.0 + erf(p.u))
-            + 0.5 * p.emission_density_m3 * math.exp(-phi0_V / p.emission_temperature_ev)
-            - p.ion_density_m3
-        )
-
-        # Eq. (16) Zero Net Current Density at Infinity (equivalent: at Z = 0)
-        r2 = (
-            p.emission_density_m3 * math.exp(-phi0_V / p.emission_temperature_ev)
-            - self._swe_free_current_term(n_swe_inf_m3, -p.u)
-            + ion_term
-        )
-        return np.array([r1, r2], dtype=float)
-
-
-    def _residuals_type_c(self, x: np.ndarray) -> np.ndarray:
-        p = self.p
-        phi0_V, n_swe_inf_m3 = x
-        if phi0_V >= 0.0 or n_swe_inf_m3 <= 0.0:
-            return np.array([1e6, 1e6], dtype=float)
-
-        a_swe = math.sqrt(max(0.0, -phi0_V / p.electron_temperature_ev)) - p.u
-        a_phe = math.sqrt(max(0.0, -phi0_V / p.emission_temperature_ev))
-        ion_term = (
-            p.ion_density_m3
-            * math.sqrt(2.0 * math.pi * p.electron_temperature_ev / p.emission_temperature_ev * p.electron_mass_kg / p.ion_mass_kg)
-            * p.mach
-        )
-
-        # Eq. (14) Charge Neutrality at Infinity
-        r1 = (
-            0.5 * n_swe_inf_m3 * (1.0 + 2.0 * erf(p.u) + erf(a_swe))
-            + 0.5 * p.emission_density_m3 * math.exp(-phi0_V / p.emission_temperature_ev) * erfc(a_phe)
-            - p.ion_density_m3
-        )
-
-        # Eq. (16) Zero Net Current Density at Infinity (equivalent: at Z = 0)
-        r2 = p.emission_density_m3 - self._swe_free_current_term(n_swe_inf_m3, a_swe) + ion_term
-
-        return np.array([r1, r2], dtype=float)
-
+        if branch == "B":
+            cutoff = -p.u
+            electron_weight = 1.0 + erf(p.u)
+            photo_weight = 1.0
+        else:
+            cutoff = math.sqrt(max(0.0, -phim/p.electron_temperature_ev)) - p.u
+            electron_weight = 1.0 + 2.0*erf(p.u) + erf(cutoff)
+            photo_cutoff = math.sqrt(max(0.0, -phim/p.emission_temperature_ev))
+            photo_weight = 1.0 - erf(photo_cutoff) if branch == "A" else erfc(photo_cutoff)
+        neutrality = (0.5*density*electron_weight
+                      + 0.5*p.emission_density_m3*math.exp(-phi0/p.emission_temperature_ev)*photo_weight
+                      - p.ion_density_m3)
+        source = p.emission_density_m3*math.exp((phim-phi0)/p.emission_temperature_ev)
+        current = source - self._swe_free_current_term(density, cutoff) + self._ion_current_term()
+        return np.array([neutrality, current])
 
     def _validate_profile_root(self, branch, phi0, phim, density, tolerance=0., field_floor_v_m=0.):
         """Raise unless the root has a real connecting profile; return (band, field deficit).

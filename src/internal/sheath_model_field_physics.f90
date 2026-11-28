@@ -5,8 +5,7 @@
 !! 根の探索順・選択方針を持たず、与えられた状態の物理量と成立条件を評価する。
 submodule(sheath_model_field) sheath_model_field_physics
   use sheath_model_admissibility, only: validate_zhao_profile
-  use sheath_model_core, only: integrate_zhao_rho, type_a_connection_residual, &
-      zhao_residuals_type_a, zhao_residuals_type_b, zhao_residuals_type_c
+  use sheath_model_core, only: integrate_zhao_rho, type_a_connection_residual, zhao_balance_residuals
   use sheath_model_ions, only: ion_density_ratio
   implicit none
 
@@ -39,9 +38,7 @@ contains
     real(dp), intent(out) :: residual(3)
     logical, intent(out) :: valid
     real(dp) :: phi0_hat, phi_m_hat, density_hat
-    real(dp) :: raw(3), integral, field_squared, field_residual_scale
-    real(dp) :: x3(3), x2(2)
-    logical :: integral_ok
+    real(dp) :: neutrality, field_squared
 
     residual = 0.0_dp
     valid = all(ieee_is_finite([phi0_v, phi_m_v, density_m3])) .and. density_m3 > 0.0_dp
@@ -55,69 +52,24 @@ contains
       return
     end if
 
+    call zhao_balance_residuals(params, branch, phi0_v, phi_m_v, density_m3, neutrality)
     select case (branch)
     case ('A')
-      x3 = [phi0_v, phi_m_v, density_m3]
-      call zhao_residuals_type_a(params, x3, raw)
-      call integrate_field_rho_hat( &
-          params, branch, 'lower', phi_m_hat, phi0_hat, phi0_hat, phi_m_hat, &
-          density_hat, integral, integral_ok &
-          )
-      if (.not. integral_ok) then
-        valid = .false.
-        return
-      end if
-      field_squared = -2.0_dp*integral
-      field_residual_scale = max(1.0_dp, target_field_hat*target_field_hat)
-      residual(1) = raw(1)/params%density_scale_m3
-      residual(2) = (field_squared - target_field_hat*target_field_hat)/field_residual_scale
-      ! A shrinking upper segment makes the unscaled integral vanish even
-      ! without a connection. Scale every source by its leading depth^(3/2).
+      field_squared = -2.0_dp*integrate_zhao_rho(params, branch, 'lower', phi_m_hat, phi0_hat, &
+          phi0_hat, phi_m_hat, density_hat)
+      ! Scale by the leading depth^(3/2) so a collapsed upper segment is not a root.
       residual(3) = type_a_connection_residual(params, phi0_hat, phi_m_hat, density_hat)
     case ('B', 'C')
-      x2 = [phi0_v, density_m3]
-      if (branch == 'B') then
-        call zhao_residuals_type_b(params, x2, raw(1:2))
-      else
-        call zhao_residuals_type_c(params, x2, raw(1:2))
-      end if
-      call integrate_field_rho_hat( &
-          params, branch, 'monotonic', phi0_hat, 0.0_dp, phi0_hat, phi_m_hat, &
-          density_hat, integral, integral_ok &
-          )
-      if (.not. integral_ok) then
-        valid = .false.
-        return
-      end if
-      field_squared = 2.0_dp*integral
-      field_residual_scale = max(1.0_dp, target_field_hat*target_field_hat)
-      residual(1) = raw(1)/params%density_scale_m3
-      residual(2) = (field_squared - target_field_hat*target_field_hat)/field_residual_scale
+      field_squared = 2.0_dp*integrate_zhao_rho(params, branch, 'monotonic', phi0_hat, 0.0_dp, &
+          phi0_hat, phi_m_hat, density_hat)
     case default
       valid = .false.
       return
     end select
-
+    residual(1) = neutrality/params%density_scale_m3
+    residual(2) = (field_squared - target_field_hat*target_field_hat)/max(1.0_dp, target_field_hat*target_field_hat)
     valid = all(ieee_is_finite(residual))
   end subroutine evaluate_physical_field_residual
-
-  subroutine integrate_field_rho_hat( &
-      params, branch, side, &
-      lower_phi_hat, upper_phi_hat, &
-      phi0_hat, phi_m_hat, density_hat, &
-      integral, success &
-      )
-    type(zhao_params_type), intent(in) :: params
-    character(len=1), intent(in) :: branch
-    character(len=*), intent(in) :: side
-    real(dp), intent(in) :: lower_phi_hat, upper_phi_hat, phi0_hat, phi_m_hat, density_hat
-    real(dp), intent(out) :: integral
-    logical, intent(out) :: success
-
-    integral = integrate_zhao_rho(params, branch, side, lower_phi_hat, upper_phi_hat, &
-        phi0_hat, phi_m_hat, density_hat)
-    success = ieee_is_finite(integral)
-  end subroutine integrate_field_rho_hat
 
   module subroutine validate_field_root_profile( &
       params, root, target_field_hat, &

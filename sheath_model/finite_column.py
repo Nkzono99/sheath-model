@@ -10,7 +10,7 @@ from scipy.optimize import brentq
 
 from ._constants import EPS0, QE
 from .branch import FixedReservoir, MaxwellianEmission
-from .presheath import _FixedReservoirOrbits
+from ._fixed_orbits import FixedReservoirOrbits
 
 
 @dataclass(frozen=True)
@@ -131,7 +131,7 @@ def solve_finite_column(reservoir: FixedReservoir, emission: MaxwellianEmission,
         raise ValueError("use a positive finite height and branch A, B, C, or None")
     if points < 129 or order < 24 or not isinstance(emission, MaxwellianEmission) or emission.flux_m2_s <= 0:
         raise ValueError("use positive half-Maxwellian emission, at least 129 points and quadrature order >= 24")
-    model = _FixedReservoirOrbits(reservoir, emission, order)
+    model = FixedReservoirOrbits(reservoir, emission, order)
     t = model.temperature
     factor = 2*QE*model.density/EPS0
     scale = model.speed * model.density

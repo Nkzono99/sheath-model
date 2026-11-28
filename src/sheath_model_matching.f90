@@ -262,14 +262,14 @@ contains
     type(sheath_matching_conditions), intent(inout) :: conditions
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
-    real(dp) :: field_squared, field, electron, ion, outward, escape, returning
+    real(dp) :: field_squared, field, electron, ion, outward, escape, returning, current
     status = SHEATH_INVALID_ARGUMENT
     message = 'Matching conditions need branch A, B, or C with finite potentials and positive density.'
     if (branch /= 'A' .and. branch /= 'B' .and. branch /= 'C') return
     if (.not. all(ieee_is_finite([phi0_v, phim_v, density_m3])) .or. density_m3 <= 0.0_dp) return
     call boundary_field(p, branch, phi0_v/p%potential_scale_v, phim_v/p%potential_scale_v, &
         density_m3/p%density_scale_m3, field_squared, field)
-    call evaluate_zhao_fluxes(p, phi0_v, phim_v, density_m3, electron, ion, outward, escape, returning)
+    call evaluate_zhao_fluxes(p, phi0_v, phim_v, density_m3, electron, ion, outward, escape, returning, current)
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Matching plane field or fluxes are non-finite.'
     if (.not. all(ieee_is_finite([field, electron, ion, outward, escape, returning]))) return
@@ -293,7 +293,7 @@ contains
     conditions%emitted_outward_flux_m2_s = outward
     conditions%emitted_escape_flux_m2_s = escape
     conditions%emitted_return_flux_m2_s = returning
-    conditions%net_current_a_m2 = qe*(electron - ion - escape)
+    conditions%net_current_a_m2 = current
     conditions%valid = .true.
     status = SHEATH_OK
     message = ''

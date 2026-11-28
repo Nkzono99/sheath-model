@@ -2,14 +2,30 @@
 # Zero-drift evaluation adapted from BEACH; see NOTICE.
 """Velocity moments of the upstream electron distribution transported along orbits."""
 
+from functools import lru_cache
+
 import numpy as np
-from scipy.special import erf, erfcx
+from scipy.special import erf, erfcx, roots_legendre
 
 _x, _w = np.polynomial.legendre.leggauss(16)
 VELOCITY_NODES = ((np.arange(8)[:, None] + (_x + 1) / 2) / 8).ravel()
 VELOCITY_WEIGHTS = np.tile(_w / 16, 8)
 POTENTIAL_NODES = ((np.arange(4)[:, None] + (_x + 1) / 2) / 4).ravel()
 POTENTIAL_WEIGHTS = np.tile(_w / 8, 4)
+
+
+@lru_cache(maxsize=12)
+def unit_gauss(order):
+    x, w = roots_legendre(order)
+    return (x + 1) / 2, w / 2
+
+
+def integrate_panels(function, edges, order=24):
+    x, w = unit_gauss(order)
+    edges = np.asarray(edges)
+    widths = np.diff(edges, axis=-1)[..., None]
+    points = edges[..., :-1, None] + widths * x
+    return np.sum(function(points) * widths * w, axis=(-1, -2))
 
 
 def electron_density(psi, barrier, drift):

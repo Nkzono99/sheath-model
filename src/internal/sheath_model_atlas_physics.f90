@@ -46,8 +46,7 @@ contains
     p%ion_pressure_factor = 1.0_dp
     flux = p%n_swi_inf_m3*p%velocity_scale_mps*(exp(key(6)) - 1.0_dp)/(2.0_dp*sqrt(pi))
     p%emission = reference%emission%with_outward_flux(flux, p%m_e_kg)
-    p%cs_mps = sqrt(qe*p%t_swe_ev/p%m_i_kg)
-    p%mach = p%v_d_ion_mps/p%cs_mps
+    p%mach = p%v_d_ion_mps/sqrt(qe*p%t_swe_ev/p%m_i_kg)
     p%u = p%v_d_electron_mps/p%v_swe_th_mps
     p%tau = exp(key(1))
     valid = ieee_is_finite(ion_critical_potential(0.5_dp*p%t_swe_ev*p%mach**2, p%t_swi_ev))

@@ -1,17 +1,17 @@
 """Local branch criterion with a prescribed far-upstream electron reservoir."""
 
 from dataclasses import dataclass
-from functools import lru_cache
 import math
 from typing import Literal, Protocol
 
 import numpy as np
 from scipy.integrate import quad
 from scipy.optimize import brentq
-from scipy.special import beta, erfc, roots_legendre
+from scipy.special import beta, erfc
 
 from ._constants import EPS0, ME, MP, QE
 from ._ions import ion_critical_potential, ion_density_ratio
+from ._orbits import integrate_panels
 
 
 def _positive(*values):
@@ -51,7 +51,7 @@ class MaxwellianElectrons:
         cuts = np.sqrt(np.maximum(speeds**2 - depth, 0.0))
         if cuts[-1] == 0:
             return 0.0
-        return float(_integrate_panels(
+        return float(integrate_panels(
             lambda v: self.phase(np.sqrt(v*v + depth), speed_unit), cuts
         ))
 
@@ -83,20 +83,6 @@ class KappaElectrons:
 
     def passing_density(self, depth, speed_unit):
         return 0.5 * self.density_m3 * math.exp((0.5 - self.kappa) * math.log1p(depth / self.scale))
-
-
-@lru_cache(maxsize=12)
-def _unit_gauss(order):
-    x, w = roots_legendre(order)
-    return (x + 1) / 2, w / 2
-
-
-def _integrate_panels(function, edges, order=24):
-    x, w = _unit_gauss(order)
-    edges = np.asarray(edges)
-    widths = np.diff(edges, axis=-1)[..., None]
-    points = edges[..., :-1, None] + widths * x
-    return np.sum(function(points) * widths * w, axis=(-1, -2))
 
 
 @dataclass(frozen=True)
@@ -322,4 +308,4 @@ def turning_field_difference(reservoir: FixedReservoir, emission: EmissionSpectr
         wind = reservoir.phase(np.sqrt(depth_v - energy_deficit))
         return 2 * x*x * (photo - wind)
 
-    return float(4 * QE / EPS0 * _integrate_panels(integrand, edges, order=64))
+    return float(4 * QE / EPS0 * integrate_panels(integrand, edges, order=64))

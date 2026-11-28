@@ -3,8 +3,7 @@
 module sheath_model_equilibrium_search
   use sheath_model_constants, only: dp, i32
   use sheath_model_search, only: sheath_search_diagnostics
-  use sheath_model_core, only: zhao_params_type, zhao_residuals_type_a, zhao_residuals_type_b, &
-      zhao_residuals_type_c, evaluate_monotonic_stationary_phi
+  use sheath_model_core, only: zhao_params_type, evaluate_monotonic_stationary_phi
   use sheath_model_coordinates, only: encode_unknowns, decode_unknowns, make_branch_guesses
   use sheath_model_numerics, only: solve_guarded_system
   use sheath_model_equilibrium_physics, only: equilibrium_residual, encoded_equilibrium_residual

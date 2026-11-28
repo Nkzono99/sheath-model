@@ -25,7 +25,7 @@ module sheath_model_matching_iteration
     private
     logical :: initialized = .false.
     character(len=4) :: branch = 'auto'
-    type(fixed_entry_equilibrium_input) :: input
+    type(plasma_input) :: plasma
     type(sheath_solver) :: solver
     type(sheath_equilibrium_result) :: root
     type(sheath_matching_conditions) :: matching
@@ -73,9 +73,9 @@ contains
     end if
     ! An explicit branch is the only one tried; initial_order applies to auto.
     if (trim(self%branch) /= 'auto') order = upper(self%branch(1:1))
-    self%input%plasma = plasma
+    self%plasma = plasma
     self%solver = solver
-    call solve_in_order(self, order, no_guesses, self%root, self%matching, status, message)
+    call solve_in_order(self%solver, self%plasma, order, no_guesses, self%root, self%matching, status, message)
     if (status /= SHEATH_OK) return
     self%solves = 1_i32
     self%change = 0.0_dp
@@ -89,7 +89,7 @@ contains
     type(emission_source), intent(in) :: source
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
-    type(fixed_entry_equilibrium_input) :: previous_input
+    type(plasma_input) :: trial_plasma
     type(sheath_equilibrium_result) :: root
     type(sheath_matching_conditions) :: matching
     character(len=3) :: order
@@ -107,15 +107,13 @@ contains
         if (index(order, branches(i:i)) == 0) order = trim(order)//branches(i:i)
       end do
     end if
-    previous_input = self%input
-    self%input%plasma%emission = source
-    call solve_in_order(self, order, [self%root], root, matching, status, message)
-    if (status /= SHEATH_OK) then
-      self%input = previous_input
-      return
-    end if
+    trial_plasma = self%plasma
+    trial_plasma%emission = source
+    call solve_in_order(self%solver, trial_plasma, order, [self%root], root, matching, status, message)
+    if (status /= SHEATH_OK) return
     self%change = max(relative_difference(matching%emitted_outward_flux_m2_s, self%matching%emitted_outward_flux_m2_s), &
-        relative_difference(source%mean_normal_energy(), previous_input%plasma%emission%mean_normal_energy()))
+        relative_difference(source%mean_normal_energy(), self%plasma%emission%mean_normal_energy()))
+    self%plasma = trial_plasma
     self%root = root
     self%matching = matching
     self%solves = self%solves + 1_i32
@@ -130,7 +128,7 @@ contains
   !> Emitted source of the accepted root.
   type(emission_source) function iteration_source(self) result(source)
     class(sheath_matching_iteration), intent(in) :: self
-    source = self%input%plasma%emission
+    source = self%plasma%emission
   end function iteration_source
 
   !> Accepted solves including the initial one; restored by read_state.
@@ -160,7 +158,7 @@ contains
     write (unit, iostat=iostat) state_version, self%branch, self%root%branch, self%root%surface_potential_v, &
         self%root%minimum_potential_v, self%root%ambient_electron_density_m3, self%solves, self%change
     if (iostat /= 0) return
-    call write_emission_source(self%input%plasma%emission, unit, iostat)
+    call write_emission_source(self%plasma%emission, unit, iostat)
     if (iostat /= 0) return
     status = SHEATH_OK
     message = ''
@@ -199,10 +197,10 @@ contains
     case default
       return
     end select
-    self%input%plasma = plasma
-    self%input%plasma%emission = saved_source
+    self%plasma = plasma
+    self%plasma%emission = saved_source
     self%solver = solver
-    call solve_in_order(self, saved(1)%branch, saved, self%root, self%matching, status, message)
+    call solve_in_order(self%solver, self%plasma, saved(1)%branch, saved, self%root, self%matching, status, message)
     if (status /= SHEATH_OK) then
       message = 'Saved matching state does not reproduce a root for this plasma: '//trim(message)
       return
@@ -213,8 +211,9 @@ contains
   end subroutine read_state
 
   !> Try branches in order and return the first root with valid matching conditions.
-  subroutine solve_in_order(self, order, guesses, root, matching, status, message)
-    type(sheath_matching_iteration), intent(inout) :: self
+  subroutine solve_in_order(solver, plasma, order, guesses, root, matching, status, message)
+    type(sheath_solver), intent(in) :: solver
+    type(plasma_input), intent(in) :: plasma
     character(len=*), intent(in) :: order
     type(sheath_equilibrium_result), intent(in) :: guesses(:)
     type(sheath_equilibrium_result), intent(out) :: root
@@ -223,13 +222,15 @@ contains
     character(len=*), intent(out) :: message
     character(len=256) :: attempt
     integer :: i
+    type(fixed_entry_equilibrium_input) :: input
 
     message = ''
     status = SHEATH_NUMERICAL_FAILURE
+    input%plasma = plasma
     do i = 1, len_trim(order)
-      self%input%branch = order(i:i)
-      call self%solver%solve_equilibrium(self%input, root, status, attempt, initial_guesses=guesses)
-      if (status == SHEATH_OK) call evaluate_matching_conditions(self%input, root, matching, status, attempt)
+      input%branch = order(i:i)
+      call solver%solve_equilibrium(input, root, status, attempt, initial_guesses=guesses)
+      if (status == SHEATH_OK) call evaluate_matching_conditions(input, root, matching, status, attempt)
       if (status == SHEATH_OK) then
         message = ''
         return

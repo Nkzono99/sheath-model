@@ -8,9 +8,8 @@ module sheath_model_core
       emitted_density_integral, emitted_upper_delta_scaled
   use sheath_model_orbits, only: electron_density, gauss_x, gauss_w
   use sheath_model_ions, only: ion_density_ratio
-  use sheath_model_constants, only: dp
+  use sheath_model_constants, only: dp, pi, eps0, qe
   use sheath_model_search, only: sheath_search_options, sheath_continuation_options
-  use sheath_model_constants, only: pi, eps0, qe
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, ieee_quiet_nan
   implicit none
   private
@@ -21,7 +20,6 @@ module sheath_model_core
     type(sheath_search_options) :: search
     type(sheath_continuation_options) :: continuation
     type(emission_source) :: emission = DEFAULT_EMISSION
-    real(dp) :: alpha_rad = 0.0d0
     real(dp) :: n_swi_inf_m3 = 0.0d0
     real(dp) :: density_scale_m3 = 0.0d0
     real(dp) :: emission_density_scale_m3 = 0.0d0
@@ -35,7 +33,6 @@ module sheath_model_core
     real(dp) :: m_e_kg = 0.0d0
     real(dp) :: v_swe_th_mps = 0.0d0
     real(dp) :: velocity_scale_mps = 0.0d0
-    real(dp) :: cs_mps = 0.0d0
     real(dp) :: mach = 0.0d0
     real(dp) :: u = 0.0d0
     real(dp) :: tau = 0.0d0
@@ -47,11 +44,9 @@ module sheath_model_core
   public :: evaluate_monotonic_stationary_phi
   public :: evaluate_zhao_density_hat
   public :: evaluate_zhao_rho_hat
-  public :: zhao_residuals_type_a
-  public :: zhao_residuals_type_b
-  public :: zhao_residuals_type_c
+  public :: zhao_balance_residuals
   public :: swe_free_current_term
-  public :: type_a_e2_sum_at_infinity, type_a_connection_residual, integrate_zhao_rho
+  public :: type_a_upper_e2, type_a_connection_residual, integrate_zhao_rho
 
 contains
 
@@ -139,11 +134,7 @@ contains
 
     if (.not. ieee_is_finite(density_m3) .or. density_m3 <= 0.0_dp) return
 
-    if (branch == 'B') then
-      call zhao_residuals_type_b(p, [phi_v, density_m3], residual)
-    else
-      call zhao_residuals_type_c(p, [phi_v, density_m3], residual)
-    end if
+    call zhao_balance_residuals(p, branch, phi_v, min(phi_v, 0.0_dp), density_m3, residual(1), residual(2))
 
     if (.not. all(ieee_is_finite(residual))) return
 
@@ -151,70 +142,41 @@ contains
     success = .true.
   end subroutine evaluate_monotonic_stationary_phi
 
-  !> Evaluate Type-A neutrality, zero-current, and upstream field-squared residuals.
-  !! x = [surface potential (V), minimum potential (V), electron normalization (m^-3)].
-  !! f(1:2) have density units [m^-3]; f(3) is normalized E^2. Invalid trial states receive a penalty.
-  subroutine zhao_residuals_type_a(p, x, f)
+  !> Upstream neutrality and optional zero-current residual in density units [m^-3].
+  !! The potential pair is in V, and density is the physical Maxwellian normalization.
+  subroutine zhao_balance_residuals(p, branch, phi0, phim, density, neutrality, current)
     type(zhao_params_type), intent(in) :: p
-    real(dp), intent(in) :: x(:)
-    real(dp), intent(out) :: f(:)
-    real(dp) :: phi0, phim, density, rho, electron, ion, outward, escape, returning
-    phi0 = x(1)
-    phim = x(2)
-    density = x(3)
-    if (phim >= min(phi0, 0.0_dp) .or. density <= 0.0_dp) then
-      f = 1.0e6_dp
-      return
-    end if
-    call evaluate_zhao_rho_hat(p, 'A', 'upper', 0.0_dp, phi0/p%potential_scale_v, &
-        phim/p%potential_scale_v, density/p%density_scale_m3, rho)
-    call evaluate_zhao_fluxes(p, phi0, phim, density, electron, ion, outward, escape, returning)
-    f(1) = -rho*p%density_scale_m3
-    f(2) = (escape - electron + ion)/(p%velocity_scale_mps/(2.0_dp*sqrt(pi)))
-    f(3) = type_a_e2_sum_at_infinity(p, phi0, phim, density)
-  end subroutine zhao_residuals_type_a
+    character(len=1), intent(in) :: branch
+    real(dp), intent(in) :: phi0, phim, density
+    real(dp), intent(out) :: neutrality
+    real(dp), intent(out), optional :: current
+    real(dp) :: minimum_v, rho, electron, ion, outward, escape, returning
 
-  !> Evaluate Type-B neutrality and zero-current residuals f(1:2) in density units [m^-3].
-  !! x = [positive surface potential (V), electron normalization (m^-3)]; invalid trials receive a penalty.
-  subroutine zhao_residuals_type_b(p, x, f)
-    type(zhao_params_type), intent(in) :: p
-    real(dp), intent(in) :: x(:)
-    real(dp), intent(out) :: f(:)
-    real(dp) :: phi0, phim, density, rho, electron, ion, outward, escape, returning
-    phi0 = x(1)
-    phim = 0.0_dp
-    density = x(2)
-    if (phi0 <= 0.0_dp .or. density <= 0.0_dp) then
-      f = 1.0e6_dp
+    neutrality = 1.0e6_dp
+    if (present(current)) current = 1.0e6_dp
+    if (density <= 0.0_dp) return
+    select case (branch)
+    case ('A')
+      if (phim >= min(phi0, 0.0_dp)) return
+      minimum_v = phim
+    case ('B')
+      if (phi0 <= 0.0_dp) return
+      minimum_v = 0.0_dp
+    case ('C')
+      if (phi0 >= 0.0_dp) return
+      minimum_v = phi0
+    case default
       return
-    end if
-    call evaluate_zhao_rho_hat(p, 'B', 'upper', 0.0_dp, phi0/p%potential_scale_v, &
-        phim/p%potential_scale_v, density/p%density_scale_m3, rho)
-    call evaluate_zhao_fluxes(p, phi0, phim, density, electron, ion, outward, escape, returning)
-    f(1) = -rho*p%density_scale_m3
-    f(2) = (escape - electron + ion)/(p%velocity_scale_mps/(2.0_dp*sqrt(pi)))
-  end subroutine zhao_residuals_type_b
+    end select
 
-  !> Evaluate Type-C neutrality and zero-current residuals f(1:2) in density units [m^-3].
-  !! x = [negative surface potential (V), electron normalization (m^-3)]; invalid trials receive a penalty.
-  subroutine zhao_residuals_type_c(p, x, f)
-    type(zhao_params_type), intent(in) :: p
-    real(dp), intent(in) :: x(:)
-    real(dp), intent(out) :: f(:)
-    real(dp) :: phi0, phim, density, rho, electron, ion, outward, escape, returning
-    phi0 = x(1)
-    phim = x(1)
-    density = x(2)
-    if (phi0 >= 0.0_dp .or. density <= 0.0_dp) then
-      f = 1.0e6_dp
-      return
+    call evaluate_zhao_rho_hat(p, branch, 'upper', 0.0_dp, phi0/p%potential_scale_v, &
+        minimum_v/p%potential_scale_v, density/p%density_scale_m3, rho)
+    neutrality = -rho*p%density_scale_m3
+    if (present(current)) then
+      call evaluate_zhao_fluxes(p, phi0, minimum_v, density, electron, ion, outward, escape, returning)
+      current = (escape - electron + ion)/(p%velocity_scale_mps/(2.0_dp*sqrt(pi)))
     end if
-    call evaluate_zhao_rho_hat(p, 'C', 'upper', 0.0_dp, phi0/p%potential_scale_v, &
-        phim/p%potential_scale_v, density/p%density_scale_m3, rho)
-    call evaluate_zhao_fluxes(p, phi0, phim, density, electron, ion, outward, escape, returning)
-    f(1) = -rho*p%density_scale_m3
-    f(2) = (escape - electron + ion)/(p%velocity_scale_mps/(2.0_dp*sqrt(pi)))
-  end subroutine zhao_residuals_type_c
+  end subroutine zhao_balance_residuals
 
   !> Return the incoming-electron flux term in density units [m^-3] for normalization n_swe_inf_m3.
   !! a_swe is the thermal-speed cutoff minus p%u; multiply term by p%velocity_scale_mps/(2*sqrt(pi)) for flux.
@@ -226,16 +188,12 @@ contains
         sqrt(pi)*(p%v_d_electron_mps/p%velocity_scale_mps)*erfc(a_swe))
   end function swe_free_current_term
 
-  !> Return normalized upstream E^2 from the Type-A upper segment; a connecting root requires zero.
-  !! Inputs are boundary/minimum potentials [V] and upstream electron normalization [m^-3].
-  real(dp) function type_a_e2_sum_at_infinity(p, phi0_v, phi_m_v, n_swe_inf_m3) result(e2_sum)
+  !> Normalized E^2 at upstream, integrated from the Type-A minimum.
+  real(dp) function type_a_upper_e2(p, phi0, phim, density) result(e2)
     type(zhao_params_type), intent(in) :: p
-    real(dp), intent(in) :: phi0_v, phi_m_v, n_swe_inf_m3
-
-    ! Integrate the same orbit densities used in Poisson's equation. No 1/u term.
-    e2_sum = -2.0_dp*integrate_zhao_rho(p, 'A', 'upper', phi_m_v/p%potential_scale_v, 0.0_dp, &
-        phi0_v/p%potential_scale_v, phi_m_v/p%potential_scale_v, n_swe_inf_m3/p%density_scale_m3)
-  end function type_a_e2_sum_at_infinity
+    real(dp), intent(in) :: phi0, phim, density
+    e2 = -2.0_dp*integrate_zhao_rho(p, 'A', 'upper', phim, 0.0_dp, phi0, phim, density)
+  end function type_a_upper_e2
 
   !> Upper-connection residual normalized to ion density and the leading depth^(3/2).
   !! Shared by equation solvers, trial-state evaluation and final profile acceptance.
@@ -257,7 +215,7 @@ contains
         return
       end if
     end if
-    value = (-2.0_dp*integrate_zhao_rho(p, 'A', 'upper', phim, 0.0_dp, phi0, phim, density)/(-phim))* &
+    value = (type_a_upper_e2(p, phi0, phim, density)/(-phim))* &
         (p%density_scale_m3/p%n_swi_inf_m3)/sqrt(-phim)
   end function
 
@@ -374,15 +332,17 @@ contains
   end function
 
   !> Common boundary number fluxes [m^-2 s^-1] for potentials [V] and electron normalization [m^-3].
-  subroutine evaluate_zhao_fluxes(p, phi0, phim, density, electron, ion, outward, escape, returning)
+  subroutine evaluate_zhao_fluxes(p, phi0, phim, density, electron, ion, outward, escape, returning, current)
     type(zhao_params_type), intent(in) :: p
     real(dp), intent(in) :: phi0, phim, density
     real(dp), intent(out) :: electron, ion, outward, escape, returning
+    real(dp), intent(out), optional :: current
     real(dp) :: cutoff
     cutoff = sqrt(max(0.0_dp, -phim/p%t_swe_ev)) - p%u
     electron = p%velocity_scale_mps/(2.0_dp*sqrt(pi))*swe_free_current_term(p, density, cutoff)
     ion = p%n_swi_inf_m3*p%v_d_ion_mps
     call emitted_fluxes(p%emission, p%m_e_kg, phi0 - phim, outward, escape, returning)
+    if (present(current)) current = qe*(electron - ion - escape)
   end subroutine
 
   subroutine evaluate_background_hat(p, branch, side, phi, phim, density, ni, ne, nr)

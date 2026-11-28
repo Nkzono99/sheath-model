@@ -1,7 +1,7 @@
 program test_orbits
   use sheath_model
   use sheath_model_orbits, only: electron_density
-  use sheath_model_core, only: zhao_params_type, type_a_e2_sum_at_infinity
+  use sheath_model_core, only: zhao_params_type, type_a_upper_e2
   implicit none
   type(sheath_solver) :: solver
   type(zhao_equilibrium_input) :: input
@@ -33,10 +33,12 @@ program test_orbits
   p%tau = p%t_swe_ev/p%potential_scale_v
   p%mach = 5.0_dp
   p%u = 0.0_dp
-  integral_zero = type_a_e2_sum_at_infinity(p, 3.0_dp, -1.0_dp, 8.0e6_dp)
+  integral_zero = type_a_upper_e2(p, 3.0_dp/p%potential_scale_v, -1.0_dp/p%potential_scale_v, &
+      8.0e6_dp/p%density_scale_m3)
   do i = -1, 1, 2
     p%u = i*1e-10_dp
-    integral_small = type_a_e2_sum_at_infinity(p, 3.0_dp, -1.0_dp, 8.0e6_dp)
+    integral_small = type_a_upper_e2(p, 3.0_dp/p%potential_scale_v, -1.0_dp/p%potential_scale_v, &
+        8.0e6_dp/p%density_scale_m3)
     if (abs(integral_small - integral_zero) > 1e-9_dp) error stop 'u=0 integral continuity'
   end do
   ! Independent composite Simpson integral in upstream velocity (different measure and quadrature).

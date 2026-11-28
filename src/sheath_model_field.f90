@@ -3,7 +3,7 @@
 ! Modified: standalone physical input/result; removed application coupling interfaces.
 module sheath_model_field
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use sheath_model_constants, only: dp, i32, qe, lower_ascii
+  use sheath_model_constants, only: dp, i32, lower_ascii
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NO_PHYSICAL_SOLUTION, SHEATH_NUMERICAL_FAILURE, &
       SHEATH_AMBIGUOUS_SOLUTION
   use sheath_model_core, only: zhao_params_type, neutral_electron_density, evaluate_zhao_fluxes
@@ -345,9 +345,7 @@ contains
 
     call evaluate_zhao_fluxes(params, root%phi0_v, trial%minimum_potential_v, root%ambient_electron_density_m3, &
         trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, trial%emitted_outward_flux_m2_s, &
-        trial%emitted_escape_flux_m2_s, trial%emitted_return_flux_m2_s)
-    trial%net_current_a_m2 = qe*(trial%electron_inward_flux_m2_s - trial%ion_inward_flux_m2_s - &
-        trial%emitted_escape_flux_m2_s)
+        trial%emitted_escape_flux_m2_s, trial%emitted_return_flux_m2_s, trial%net_current_a_m2)
     if (.not. all(ieee_is_finite([trial%electron_inward_flux_m2_s, trial%ion_inward_flux_m2_s, &
         trial%emitted_outward_flux_m2_s, trial%emitted_return_flux_m2_s, &
         trial%emitted_escape_flux_m2_s, trial%net_current_a_m2]))) then

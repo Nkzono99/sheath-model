@@ -54,12 +54,13 @@ contains
 
   !> Prepare internal scales and validate the fixed plasma/source input.
   !! Spectra use a binary numerical scale near T_e to preserve energy-bin edges; no Maxwellian fit is made.
-  subroutine prepare_plasma_params(input, params, status, message)
+  subroutine prepare_plasma_params(input, params, status, message, density_scale_m3)
     class(plasma_input), intent(in) :: input
     type(zhao_params_type), intent(out) :: params
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
-    real(dp) :: pe, captured
+    real(dp), intent(in), optional :: density_scale_m3
+    real(dp) :: pe, captured, ion_reference_speed
     ! intent(out) applies component defaults and deallocates previous sources.
     status = SHEATH_INVALID_ARGUMENT
     message = 'Plasma inputs must be finite, with positive ion density, temperature, ion speed and masses.'
@@ -75,6 +76,7 @@ contains
     params%emission = input%emission
     params%n_swi_inf_m3 = input%ion_density_m3
     params%density_scale_m3 = input%ion_density_m3
+    if (present(density_scale_m3)) params%density_scale_m3 = density_scale_m3
     params%t_swe_ev = input%electron_temperature_ev
     params%t_swi_ev = input%ion_temperature_ev
     params%ion_pressure_factor = input%ion_pressure_factor
@@ -85,8 +87,8 @@ contains
     params%m_e_kg = input%electron_mass_kg
     params%v_swe_th_mps = sqrt(2.0_dp*qe*params%t_swe_ev/params%m_e_kg)
     params%velocity_scale_mps = sqrt(2.0_dp*qe*params%potential_scale_v/params%m_e_kg)
-    params%cs_mps = sqrt(qe*params%t_swe_ev/params%m_i_kg)
-    params%mach = params%v_d_ion_mps/params%cs_mps
+    ion_reference_speed = sqrt(qe*params%t_swe_ev/params%m_i_kg)
+    params%mach = params%v_d_ion_mps/ion_reference_speed
     status = SHEATH_INVALID_ARGUMENT
     message = 'Ion entry speed must exceed the ion thermal sound speed; no presheath acceleration is applied.'
     if (.not. ieee_is_finite(ion_critical_potential(0.5_dp*params%t_swe_ev*params%mach**2, &
@@ -98,9 +100,9 @@ contains
     params%emission_density_scale_m3 = 2.0_dp*pe
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Plasma/source normalization is non-finite or underflowed.'
-    if (.not. all(ieee_is_finite([params%v_swe_th_mps, params%velocity_scale_mps, params%cs_mps, &
+    if (.not. all(ieee_is_finite([params%v_swe_th_mps, params%velocity_scale_mps, ion_reference_speed, &
         params%mach, params%u, params%tau, params%length_scale_m, params%emission_density_scale_m3]))) return
-    if (min(params%v_swe_th_mps, params%velocity_scale_mps, params%cs_mps, params%mach, &
+    if (min(params%v_swe_th_mps, params%velocity_scale_mps, ion_reference_speed, params%mach, &
         params%tau, params%length_scale_m) <= 0.0_dp) return
     status = SHEATH_OK
     message = ''
@@ -187,9 +189,7 @@ contains
     end if
     call evaluate_zhao_fluxes(p, boundary_potential_v, output%minimum_potential_v, density, &
         output%electron_inward_flux_m2_s, output%ion_inward_flux_m2_s, output%emitted_outward_flux_m2_s, &
-        output%emitted_escape_flux_m2_s, output%emitted_return_flux_m2_s)
-    output%net_current_a_m2 = qe*(output%electron_inward_flux_m2_s - output%ion_inward_flux_m2_s &
-        - output%emitted_escape_flux_m2_s)
+        output%emitted_escape_flux_m2_s, output%emitted_return_flux_m2_s, output%net_current_a_m2)
     status = SHEATH_NUMERICAL_FAILURE
     message = 'Trial state has non-finite integrals, density, or fluxes.'
     if (.not. all(ieee_is_finite([density, output%neutrality_residual_m3, &

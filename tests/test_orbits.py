@@ -88,7 +88,9 @@ class OrbitTests(unittest.TestCase):
         values = []
         for alpha in (0.0, 1e-12, 1e-8, 1e-4):
             solver = EquilibriumProblem(ZhaoParams(sun_elevation_deg=alpha, ion_drift_mode='full'))
-            value = solver._type_a_e2_sum_at_infinity(3.0, -1.0, 8e6)
+            value = solver._type_a_upper_e2(3.0/solver.p.emission_temperature_ev,
+                                            -1.0/solver.p.emission_temperature_ev,
+                                            8e6/solver.p.density_scale_m3)
             self.assertTrue(math.isfinite(value))
             values.append(value)
         np.testing.assert_allclose(values[:3], values[0], atol=1e-9)

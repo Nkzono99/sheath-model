@@ -6,24 +6,13 @@ from typing import Literal
 
 import numpy as np
 from scipy.integrate import cumulative_trapezoid
-from scipy.interpolate import CubicSpline
-from scipy.optimize import brentq, root
-from scipy.special import erf, erfcx
+from scipy.optimize import brentq
+from scipy.special import erf
 
 from ._constants import EPS0, QE
-from ._ions import ion_critical_potential
-from .branch import FixedReservoir, MaxwellianEmission, _unit_gauss, classify_branch
-
-
-@dataclass(frozen=True)
-class OuterWellSeed:
-    """Continuation seed for the surface side of an outer minimum."""
-
-    minimum_depth_v: float
-    band_above_minimum_v: float
-    minimum_tau: float
-    escaping_flux_m2_s: float
-    turning_path: tuple[tuple[float, float], ...] = ()
+from ._fixed_orbits import FixedReservoirOrbits
+from ._outer_well import OuterWellSeed, replacement_targets as replacement_targets, returning, solve_turning_region
+from .branch import FixedReservoir, MaxwellianEmission, classify_branch
 
 
 @dataclass(frozen=True)
@@ -44,90 +33,7 @@ class PresheathSolution:
     outer_well_seed: OuterWellSeed | None = None
 
 
-def replacement_targets(reservoir, energy_ev, outer_depth_v=0.0):
-    """Outward and inward replacement targets for surface-side turning orbits.
-
-    Outputs are reduced distributions per velocity measured in sqrt(eV).
-    Negative energy uses the far-wind zero-speed value.
-    """
-    if not math.isfinite(outer_depth_v) or outer_depth_v < 0:
-        raise ValueError("outer minimum depth must be finite and nonnegative")
-    energy = np.maximum(np.asarray(energy_ev), 0.0)
-    speed = np.sqrt(energy)
-    outward = reservoir.phase(-speed)
-    inward = reservoir.phase(speed)
-    if outer_depth_v > 0:
-        exchange = 0.5 * np.clip(1 - energy / outer_depth_v, 0, 1) * (inward - outward)
-        return outward + exchange, inward - exchange
-    return outward, inward
-
-
-def _relax(initial, target, distance):
-    return initial + (target - initial) * -np.expm1(-distance)
-
-
-def _returning(initial, out_target, in_target, turning_tau, tau):
-    at_turn = _relax(initial, out_target, turning_tau)
-    return _relax(at_turn, in_target, turning_tau - tau)
-
-
-class _FixedReservoirOrbits:
-    def __init__(self, reservoir, emission, order):
-        self.reservoir = reservoir
-        self.temperature = emission.temperature_ev
-        self.speed = reservoir.speed_unit
-        self.density = reservoir.ion_density_m3
-        self.source = emission.flux_m2_s / (self.speed * self.density)
-        self.ion_flux = reservoir.ion_flux_m2_s / (self.speed * self.density)
-        self.ion_limit = ion_critical_potential(reservoir.ion_energy_ev, reservoir.ion_pressure_ev)
-        self.x, self.w = _unit_gauss(order)
-        q, weights = _unit_gauss(max(160, 2 * order))
-        scale = math.sqrt(max(component.temperature_ev if hasattr(component, "temperature_ev")
-                              else component.core_temperature_ev for component in reservoir.electrons))
-        self.q, self.weights = scale*q/(1-q), scale*weights/(1-q)**2
-
-    def wind(self, energy, direction):
-        return self.reservoir.phase(direction * np.sqrt(np.maximum(energy, 0.0))) / self.density
-
-    def ions(self, potential):
-        return self.reservoir.ion_density(potential) / self.density
-
-    def influx(self, depth):
-        return self.reservoir.inward_flux(depth) / (self.speed * self.density)
-
-    def passing(self, depth, cutoff, direction):
-        low = np.sqrt(np.maximum(cutoff - depth, 0.0))[..., None]
-        energy = depth[..., None] + low**2 + self.q*(2*low + self.q)
-        return self.wind(energy, direction) @ self.weights
-
-    def panel(self, function, low, high):
-        # The sine map removes the square-root cusp at the cutoff.
-        a = np.pi * self.x / 2
-        widths = (np.asarray(high) - low)[..., None]
-        points = np.asarray(low)[..., None] + widths * np.sin(a)**2
-        return np.sum(function(points) * widths * np.pi * np.sin(a) * np.cos(a) * self.w, axis=-1)
-
-    def photo(self, energy, depth, amplitude):
-        return amplitude * np.exp((depth - energy) / self.temperature)
-
-    def photo_density(self, potential, amplitude, cutoff):
-        return amplitude * math.sqrt(math.pi * self.temperature) / 2 * erfcx(
-            np.sqrt(np.maximum(cutoff + potential, 0.0) / self.temperature)
-        )
-
-    def upstream_edge_excess(self, h, depth, amplitude):
-        psi = depth - h
-        reflected = self.panel(lambda v: self.wind(psi[..., None] + v*v, 1), 0.0, np.sqrt(h))
-        return self.passing(psi, 0.0, 1) + reflected + self.photo_density(-psi, amplitude, depth) - self.ions(-psi)
-
-    def surface_excess(self, h, depth, amplitude):
-        t = self.temperature
-        return (self.passing(depth-h, depth, 1)
-                + amplitude * math.sqrt(math.pi*t)/2 * np.exp(h/t) * (1 + erf(np.sqrt(h/t)))
-                - self.ions(h-depth))
-
-
-class _Presheath(_FixedReservoirOrbits):
+class _Presheath(FixedReservoirOrbits):
     def upward(self, depth, amplitude, tau_start, psi_start, extent):
         """March from the band or valley toward the fixed far reservoir."""
         taus, depths = [tau_start], [psi_start]
@@ -209,127 +115,19 @@ class _Presheath(_FixedReservoirOrbits):
         return self.result("A", wall, band, -d, tau, outer_phi, (z, phi, field), 0, err)
 
     def outer_well(self, seed, nodes, extent):
-        t = self.temperature
-        mesh = (1 - np.cos(np.linspace(0, np.pi, nodes))) / 2
-        left_intervals = 2*nodes//3
-        left_mesh = (1 - np.cos(np.linspace(0, np.pi, left_intervals+1))) / 2
-        right_mesh = (1 - np.cos(np.linspace(0, np.pi, nodes-left_intervals))) / 2
-        split = seed.band_above_minimum_v > seed.minimum_depth_v
-
-        def make_grid(depth, gap):
-            if not split:
-                return mesh
-            cross = math.sqrt(depth / gap)
-            return np.r_[cross*left_mesh, cross + (1-cross)*right_mesh[1:]**2]
-
-        def make_path(depth, gap, tau, inspect):
-            if not split:
-                path = CubicSpline(mesh, tau)
-                extrema = path.derivative().roots(extrapolate=False) if inspect else ()
-                return path, path(1.0, 1), extrema
-            cross = math.sqrt(depth / gap)
-            left = CubicSpline(left_mesh, tau[:left_intervals+1])
-            right = CubicSpline(right_mesh, tau[left_intervals:])
-
-            def path(s):
-                s = np.asarray(s)
-                left_s = np.minimum(s/cross, 1)
-                right_s = np.sqrt(np.maximum((s-cross)/(1-cross), 0))
-                return np.where(s <= cross, left(left_s), right(right_s))
-
-            extrema = ()
-            if inspect:
-                left_roots = left.derivative().roots(extrapolate=False)
-                right_roots = right.derivative().roots(extrapolate=False)
-                extrema = np.r_[cross*left_roots, cross, cross + (1-cross)*right_roots**2]
-            return path, right(1.0, 1)/(2*(1-cross)), extrema
-
-        def targets(energy, depth):
-            out, inward = replacement_targets(self.reservoir, energy, depth)
-            return out / self.density, inward / self.density
-
-        def evaluate(pars, points=None, inspect=False):
-            d, gap, pd = np.exp(pars[-3:])
-            path, fold, extrema = make_path(d, gap, np.r_[pars[:-3], 0.0], inspect)
-            if inspect:
-                return path, extrema
-            s = make_grid(d, gap) if points is None else points
-            tau, psi = path(s), d - gap*s*s
-            a = math.sqrt(gap)*s
-            photo_pass = self.photo_density(-psi, pd, d)
-            passing = self.passing(psi, d, 1) + _relax(photo_pass, self.passing(psi, d, -1), tau)
-            cut = np.arcsin(np.clip(np.sqrt(np.maximum(-psi, 0)) / np.maximum(a, 1e-100), 0, 1))
-            turning_density = np.zeros_like(s)
-            back_flux = np.zeros_like(s)
-            for lo, hi in ((np.zeros_like(s), cut), (cut, np.full_like(s, np.pi/2))):
-                angle = lo[:, None] + (hi-lo)[:, None]*self.x
-                v = a[:, None]*np.sin(angle)
-                energy = psi[:, None] + v*v
-                weight = a[:, None]*np.cos(angle)*(hi-lo)[:, None]*self.w
-                turn = path(s[:, None]*np.cos(angle))
-                go, gi = targets(energy, d)
-                photo = self.photo(energy, d, pd)
-                outward = _relax(photo, go, tau[:, None])
-                incoming = _returning(photo, go, gi, turn, tau[:, None])
-                turning_density += np.sum(weight*(outward + incoming), axis=-1)
-                back_flux += np.sum(weight*v*incoming, axis=-1)
-            current = self.influx(d) + back_flux[-1] - pd*t/2*np.exp(gap/t) - self.ion_flux
-            return passing + turning_density - self.ions(-psi), fold, current
-
-        def residual(pars):
-            if (not np.all(np.isfinite(pars)) or np.max(np.abs(pars[:-3])) > 40
-                    or np.any(np.abs(pars[-3:]) > 27)):
-                return np.full(pars.shape, 1e3)
-            d, gap, _ = np.exp(pars[-3:])
-            if gap-d >= self.ion_limit or gap / t > 80 or (split and gap <= d):
-                return np.full(pars.shape, 1e3)
-            excess, fold, current = evaluate(pars)
-            return np.r_[excess, fold, current]
-
-        d0, gap0 = seed.minimum_depth_v, seed.band_above_minimum_v
-        p0 = seed.escaping_flux_m2_s / (self.speed*self.density) * 2/t
-        s0 = make_grid(d0, gap0)
-        tau0 = seed.minimum_tau*(1-s0[:-1])**2
-        if seed.turning_path:
-            path_seed = np.asarray(seed.turning_path)
-            tau0 = np.interp(s0[:-1], path_seed[:, 0], path_seed[:, 1])
-        start = np.r_[tau0, np.log([d0, gap0, p0])]
-
-        def jacobian(pars):
-            base = residual(pars)
-            increments = 1e-7 * np.maximum(1.0, np.abs(pars))
-            return np.column_stack([(residual(pars + step) - base) / dv
-                                    for step, dv in zip(np.diag(increments), increments)])
-
-        sol = root(residual, start, jac=jacobian, options={"xtol": 3e-10})
-        if np.max(np.abs(residual(sol.x))) > 3e-9:
-            raise ArithmeticError(f"outer minimum collocation did not converge: {sol.message}")
-        d, gap, pd = np.exp(sol.x[-3:])
-        _, _, current = evaluate(sol.x)
-        path, critical = evaluate(sol.x, inspect=True)
-        sample = np.unique(np.r_[np.linspace(0, 1, 4*nodes), make_grid(d, gap), critical[np.isfinite(critical)]])
-        tau = path(sample)
-        new_seed = OuterWellSeed(d, gap, tau[0], pd*t/2*self.speed*self.density, tuple(zip(sample, tau)))
-        if not split and gap > d:
-            return self.outer_well(new_seed, nodes, extent)
-        max_reversal = np.max(np.maximum.accumulate(tau[::-1])[::-1] - tau)
-        if tau[0] <= 0 or max_reversal > 1e-8:
-            raise ArithmeticError(f"outer minimum path reverses by {max_reversal:g} in tau")
-        band = gap - d
-        wall = t * math.log(self.source / (pd*t/2)) - d
+        region = solve_turning_region(self, seed, nodes)
+        depth = region.seed.minimum_depth_v
+        amplitude = region.amplitude
+        band = region.seed.band_above_minimum_v - depth
+        wall = self.temperature * math.log(self.source / (amplitude*self.temperature/2)) - depth
         self.check_wall(wall, band)
-        far_tau, far_phi, err = self.upward(d, pd, tau[0], d, tau[0]+extent)
-        excess, _, _ = evaluate(sol.x, sample)
-        err = max(err, np.max(np.abs(excess)))
-
-        def back(energy):
-            turn = path(np.sqrt(np.clip((d-energy)/gap, 0, 1)))
-            go, gi = targets(energy, d)
-            return _returning(self.photo(energy, d, pd), go, gi, turn, 0.0)
-
-        inner = self.monotone_wall(band, wall, d, pd, back)
-        return self.result("B_out", wall, band, -d, np.r_[tau[::-1], far_tau[1:]],
-                           np.r_[gap*sample[::-1]**2-d, far_phi[1:]], inner, current, err, new_seed)
+        tau_min = region.seed.minimum_tau
+        far_tau, far_phi, err = self.upward(depth, amplitude, tau_min, depth, tau_min+extent)
+        inner = self.monotone_wall(band, wall, depth, amplitude,
+                                   lambda energy: region.returning_phase(self, energy))
+        return self.result("B_out", wall, band, -depth, np.r_[region.tau[::-1], far_tau[1:]],
+                           np.r_[region.potential_v[::-1], far_phi[1:]], inner, region.current,
+                           max(err, region.neutrality_error), region.seed)
 
     def no_well(self, extent):
         t = self.temperature
@@ -346,7 +144,7 @@ class _Presheath(_FixedReservoirOrbits):
 
                 def back(energy, psi):
                     turn = np.interp(energy, np.r_[psi, past_psi], np.r_[tau, past_tau])
-                    return _returning(self.photo(energy, 0, pd), g0, g0, turn, tau)
+                    return returning(self.photo(energy, 0, pd), g0, g0, turn, tau)
 
                 def excess(psi):
                     cuts = np.sqrt(np.maximum(np.r_[psi, past_psi] - psi, 0))
@@ -393,7 +191,7 @@ class _Presheath(_FixedReservoirOrbits):
 
         def back(energy):
             turn = np.interp(energy, psi, tau)
-            return _returning(self.photo(energy, 0, pd), g0, g0, turn, 0)
+            return returning(self.photo(energy, 0, pd), g0, g0, turn, 0)
 
         inner = self.monotone_wall(band, wall, 0, pd, back)
         return self.result("B_nw", wall, band, None, tau[:-1], -psi[:-1], inner, residual, err)

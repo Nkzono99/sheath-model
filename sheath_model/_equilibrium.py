@@ -3,21 +3,14 @@
 from __future__ import annotations
 
 import math
-from typing import Literal
 
 import numpy as np
+
 from ._ions import ion_critical_potential
-
-from .params import FixedEntryParams, ZhaoParams
-from .search import SearchOptions, SearchDiagnostics, SearchFailure, solve_guarded_system
-from .continuation import continue_guarded_system, find_guarded_roots
-
-Branch = Literal["A", "B", "C"]
-
-
-from ._physics import SheathPhysics
-from .continuation import ContinuationOptions
+from ._physics import Branch, SheathPhysics
+from .continuation import ContinuationOptions, continue_guarded_system, find_guarded_roots
 from .results import CandidateSet, EquilibriumResult
+from .search import SearchOptions, SearchDiagnostics, SearchFailure, solve_guarded_system
 
 
 class EquilibriumProblem(SheathPhysics):
@@ -92,10 +85,8 @@ class EquilibriumProblem(SheathPhysics):
                 minimum = 0.
             phi0, phim = np.array([surface, minimum])*p.emission_temperature_ev
             # The neutrality equation is affine in electron normalization.
-            func = getattr(self, "_residuals_type_"+branch.lower())
-            x0 = [phi0, phim, p.ion_density_m3] if branch == "A" else [phi0, p.ion_density_m3]
-            x1 = [phi0, phim, 2*p.ion_density_m3] if branch == "A" else [phi0, 2*p.ion_density_m3]
-            f0, f1 = func(np.array(x0))[0], func(np.array(x1))[0]
+            f0 = self._balance_residuals(branch, phi0, phim, p.ion_density_m3)[0]
+            f1 = self._balance_residuals(branch, phi0, phim, 2*p.ion_density_m3)[0]
             if not math.isfinite(f1-f0) or f1 == f0:
                 continue
             density = p.ion_density_m3*(1-f0/(f1-f0))
@@ -110,11 +101,14 @@ class EquilibriumProblem(SheathPhysics):
         physical = self._decode_unknowns(branch, y, options)
         if physical is None:
             return None
-        raw = getattr(self, "_residuals_type_"+branch.lower())(physical if branch == "A" else physical[[0, 2]])
-        raw[:2] /= self.p.ion_density_m3
+        p = self.p
+        phi0, phim, density = physical
+        raw = self._balance_residuals(branch, phi0, phim, density) / p.ion_density_m3
         if branch == "A":
-            raw[2] = self._type_a_connection_residual(physical[0]/self.p.emission_temperature_ev,
-                       physical[1]/self.p.emission_temperature_ev, physical[2]/self.p.density_scale_m3)
+            connection = self._type_a_connection_residual(
+                phi0/p.emission_temperature_ev, phim/p.emission_temperature_ev, density/p.density_scale_m3
+            )
+            raw = np.r_[raw, connection]
         return raw if np.all(np.isfinite(raw)) else None
 
 
@@ -346,9 +340,7 @@ class EquilibriumProblem(SheathPhysics):
                                         limit*np.arange(1, options.bracket_points+1)/options.bracket_points)))
         if branch == "C":
             grid = -grid
-        func = self._residuals_type_b if branch == "B" else self._residuals_type_c
-        ion_term = p.ion_density_m3*math.sqrt(2*math.pi*p.electron_temperature_ev/
-                   p.emission_temperature_ev*p.electron_mass_kg/p.ion_mass_kg)*p.mach
+        ion_term = self._ion_current_term()
 
         def evaluate(phi):
             diagnostics.evaluations[k] += 1
@@ -358,7 +350,7 @@ class EquilibriumProblem(SheathPhysics):
             if coefficient <= 0 or not math.isfinite(coefficient):
                 return None
             density = (source+ion_term)/coefficient
-            raw = func(np.array([phi, density]))/p.ion_density_m3
+            raw = self._balance_residuals(branch, phi, min(phi, 0.), density)/p.ion_density_m3
             if not np.all(np.isfinite(raw)) or density <= 0 or abs(raw[1]) > options.residual_tolerance:
                 return None
             diagnostics.best_residual[k] = min(diagnostics.best_residual[k], float(np.max(np.abs(raw))))
