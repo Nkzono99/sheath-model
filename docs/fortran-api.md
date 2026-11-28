@@ -16,6 +16,7 @@
 | 局所密度 | [`evaluate_density`](#局所密度) |
 | 解マップ | [`sheath_equilibrium_atlas`](#解マップと-continuation)、`sheath_field_atlas`、`sheath_atlas_options`、`sheath_atlas_point` |
 | シミュレータ結合 | `sheath_matching_conditions`、`evaluate_matching_conditions`、`sheath_matching_iteration`、`plane_electron_access_energy_ev`、`plane_ion_access_energy_ev`、`plane_electron_escape_threshold_ev`、`plane_ion_escape_threshold_ev`、`plane_electron_inward_flux_m2_s`、`log_energy_edges`、`log_energy_bin_count`、`log_energy_bin`、`LOG_ENERGY_DEFAULT_*`、`energy_bin`、`observed_outflow_source`（[結合](coupling.md)） |
+| 電場・電流を合わせる候補選択 | `matching_states_at`、`select_combined_matching_conditions`（[結合](coupling.md#combined-matching)） |
 | 放出源の評価 | `emitted_fluxes`、`source%with_outward_flux`（[放出源](#放出源)） |
 | 補助 | [`ion_density_ratio`、`ion_critical_potential`](#補助関数と定数)、`dp`、`i32`、`SHEATH_*` |
 

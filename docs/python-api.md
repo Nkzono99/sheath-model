@@ -1,8 +1,9 @@
 # Python API リファレンス
 
-Python パッケージ `sheath_model` は、Maxwell 放出源の J=0 モデルを NumPy/SciPy で実装した独立版です。
-Fortran のバインディングではありません。E_H 指定、静的評価、bin スペクトル、シミュレータ結合は [Fortran API](fortran-api.md) にあります。
-分布関数・単位・判定条件は Fortran と揃えており、プロファイルに加えて局所の速度分布と流束を評価できます。
+Python パッケージ `sheath_model` は NumPy/SciPy で実装した二つの閉じ方を提供します。
+`SheathSolver` は Zhao の J=0 モデルを解き、プロファイルと局所の速度分布を返します。
+[遠方の電子分布を固定するモデル](#fixed-reservoir) は、谷の診断と有限箱・外側領域付きのプロファイルを提供します。
+Zhao モデルの E_H 指定・静的評価・bin 放出源とシミュレータ結合は [Fortran API](fortran-api.md) にあります。
 単位と符号は [共通の規約](conventions.md) に従います。
 
 ```python
@@ -150,6 +151,83 @@ print(len(found.candidates), found.diagnostics.atlas_hits)
 
 表は初期値と continuation に使い、問い合わせでは毎回元の方程式を解き直します。空白の領域は解の不存在を意味しません。
 Fortran が書いた bin スペクトルの記録も読めますが、Maxwell 源の問い合わせには使いません。
+
+<a id="fixed-reservoir"></a>
+
+## 遠方の電子分布を固定するモデル
+
+`FixedReservoir` では、0 V のリザーバーにおける法線電子分布の全密度を入力します。
+有限箱では 0 V の上端からの入射分を使い、外側領域付きのモデルでは遠方の電子・イオンの全密度を等しくします。
+入射速度は壁向きを正とし、温度は eV、放出は外向きの数流束で与えます。
+[方程式と枝の意味](model.md#fixed-reservoir) を参照してください。
+
+### 入力
+
+| 型 | 属性と単位 |
+| --- | --- |
+| `MaxwellianElectrons(density_m3, temperature_ev, drift_mps=0.0)` | 全速度域の密度、温度、内向きの法線ドリフト。複数の成分を足し合わせられる |
+| `KappaElectrons(density_m3, core_temperature_ev, kappa)` | 全速度域の密度とコアの温度。中心は静止、有限の数流束には `kappa > 1` |
+| `FixedReservoir(electrons, ion_density_m3, ion_speed_mps, ion_temperature_ev=0.0, ion_pressure_factor=1.0, ion_mass_kg=..., electron_mass_kg=...)` | 電子成分の列、イオンの密度と正の法線速度。質量の既定は陽子と電子。温イオンの入口は超音速 |
+| `MaxwellianEmission(flux_m2_s, temperature_ev)` | 半 Maxwell 放出の総数流束と温度 |
+| `BinnedEmission(energy_edges_ev, bin_flux_m2_s)` | 増加する非負のエネルギー境界と各 bin の積分数流束。bin 内で微分数流束が一定 |
+| `EmissionSpectrum` | `flux_above(barrier_ev)` は障壁以上の数流束。 `differential_flux(energy_ev)` はスカラーまたは配列の法線エネルギーに対する微分数流束 [m⁻² s⁻¹ eV⁻¹] |
+
+電子密度・電子温度と粒子質量は正、放出源の流束は非負です。両プロファイルソルバーは正の `MaxwellianEmission` を使います。
+規格化された速度 $u=v/\sqrt{2e/m_e}$ での電子分布は `reservoir.phase(u)` で評価します。数密度はこの分布を $u$ で積分した値です。
+深さ `depth` [V] に届く電子の流束と、その電位での通過電子密度は `reservoir.inward_flux(depth)` と `reservoir.passing_density(depth)` で評価できます。
+
+### 診断とプロファイル
+
+| 呼び出し | 意味 |
+| --- | --- |
+| `classify_branch(reservoir, emission, *, ratio_tolerance=1e-7, scan_points=96)` | 中性の仮の谷を探索して `BranchCriterion` を返す。比の許容幅は正、基本の走査点数は 8 以上 |
+| `turning_field_difference(reservoir, emission, depth_v, barrier_ev, offset_v)` | 谷から `offset_v` [V] だけ高い両側の点で、壁側から上流側を引いた電場二乗差 [V²/m²]。オフセットは 0 から `min(depth_v, barrier_ev)` まで |
+| `solve_finite_column(reservoir, emission, height_m, *, branch=None, points=2049, order=80)` | 上端 0 V、上端電場を自由にした高さ `height_m > 0` の零電流解。枝は `"A"`、`"B"`、`"C"` または単調解を先に試す `None`。電位側の点数は 129 以上、求積次数は 24 以上 |
+| `solve_presheath(reservoir, emission, branch, *, seed=None, nodes=65, order=96, far_tau=16.0)` | `"A"`、`"B_out"`、`"B_nw"`、`"C"` の外側領域付きの零電流解。節点数は 9 以上の奇数、求積次数は 24 以上、外端までの光学距離は 1〜50 |
+| `replacement_targets(reservoir, energy_ev, outer_depth_v=0.0)` | 置換先の（外向き、内向き）分布。単位は `reservoir.phase` と共通。負エネルギーにはゼロ速度の値を使い、正の外側谷の深さを与えるとその谷の手前の反射軌道に一次混合を使う |
+
+`BranchCriterion` は `outcome`（`A`、`B`、`marginal`、`no_current`、`no_minimum`、`unresolved`）と、解決した中性谷の
+`neutral_depth_v`、`emission_barrier_ev`、`ratio`、`effective_emission_temperature_ev` を返します。
+有効温度は障壁以上の数流束を障壁での微分数流束で割った値です。
+`no_current` は放出がゼロの場合か、障壁なしの入射電子流束がイオン流束以下の場合です。
+`no_minimum` は走査点で電子の過剰がすべて負だった場合、`unresolved` は探索で候補を一意に絞れなかった場合です。
+
+`FiniteColumnSolution` は `branch`、配列 `z_m`・`potential_v`・`field_v_m`、`escaping_flux_m2_s`、`minimum_height_m`、`monotone_max_height_m` を返します。
+位置は壁の 0 m から上端 H へ増加します。有限の上限が見つからない単調解では上限が無限大になることがあります。
+
+`PresheathSolution` は `branch`、`wall_potential_v`、`band_potential_v`、`minimum_potential_v`（谷のない B_nw では `None`）、
+外側の配列 `outer_tau`・`outer_potential_v`、無衝突シースの配列 `sheath_z_m`・`sheath_potential_v`・`sheath_field_v_m`、
+`current_residual_a_m2`、評価点の `outer_neutrality_residual_m3` と継続用の `outer_well_seed` を返します。
+シースの配列は壁から準中性域へ向かい、漸近端の手前で止まります。外側の配列は準中性域を `tau=0` とします。
+
+B_out では近隣解の `outer_well_seed` を次の `seed` に渡せます。初期値を直接与える場合は
+`OuterWellSeed(minimum_depth_v, band_above_minimum_v, minimum_tau, escaping_flux_m2_s, turning_path=())` を使います。
+任意の `turning_path` は谷を 0、準中性域を 1 とする増加座標と光学距離の組です。
+極浅い谷には近隣解からの継続が有効です。両プロファイルソルバーは入力の不正を `ValueError`、数値的な探索の失敗を `ArithmeticError` で返します。
+
+### 最初の計算
+
+次の条件では、仮の中性谷からは Type B 側と判定されます。56.5 m の箱では上端側に谷が現れ、有限箱の出力は `A` になります。
+外側領域付きのモデルで同じ入力を使うと、谷はシースの外に来る `B_out` が得られます。
+
+```python
+from scipy.constants import elementary_charge
+from sheath_model import (
+    FixedReservoir, MaxwellianElectrons, MaxwellianEmission,
+    classify_branch, solve_finite_column, solve_presheath,
+)
+
+wind = FixedReservoir(
+    (MaxwellianElectrons(20e6, 4.0, 400e3),),
+    ion_density_m3=20e6, ion_speed_mps=400e3, ion_temperature_ev=10.0,
+)
+emission = MaxwellianEmission(36e-6 / elementary_charge, 2.2)
+print(classify_branch(wind, emission).outcome)
+column = solve_finite_column(wind, emission, 56.5)
+print(column.branch, column.minimum_height_m)
+outer = solve_presheath(wind, emission, "B_out")
+print(outer.branch, outer.band_potential_v, outer.minimum_potential_v)
+```
 
 ## 補助関数とコマンドライン
 

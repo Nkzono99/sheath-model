@@ -6,6 +6,7 @@
 
 ライブラリは粒子種、メッシュ・幾何、面積、粒子重み、MPI、時間積分を扱いません。
 条件をどう課すかは利用側が決めます（[利用側の責務](#利用側の責務)）。
+面の外部解は、[零電流で更新](#外部解を更新する)するか、内側電場を測定して[電場・電流を合わせる候補を選択](#combined-matching)します。
 
 ## 構成
 
@@ -97,7 +98,7 @@ call evaluate_matching_conditions(input, root, plane, status, message)
 | `electron_inward_flux_m2_s`, `ion_inward_flux_m2_s` | 外部モデルで面に入る電子・イオンの数流束 |
 | `emitted_outward_flux_m2_s`, `emitted_escape_flux_m2_s`, `emitted_return_flux_m2_s` | 放出源の外向き数流束と、そのうち上流へ抜ける分・面へ戻る分 |
 | `net_current_a_m2` | +z 向きの通常電流 `e(Γ_e,in − Γ_i,in − Γ_em,escape)` [A/m²]。J=0 の根ではほぼ 0 |
-| `upstream_negative_band_v`, `upstream_field_deficit_v_m` | ドリフトのある A/C の根（J=0・E_H 指定）を受理した上流の帯 [V] と場の不足 [V/m]。それ以外は 0 |
+| `upstream_negative_band_v`, `upstream_field_deficit_v_m` | ドリフトのある A/C の外部状態を受理した上流の帯 [V] と場の不足 [V/m]。それ以外は 0 |
 
 ### 粒子の注入・反射・除去
 
@@ -177,8 +178,36 @@ Type の継続は数値的な選択であり、安定性による選択ではあ
 `relative_change` は収束の目安で、判定と更新の間隔は利用側で決めます。
 `update` の失敗時に前の条件で続けるか、計算を止めるかも利用側で決めます。
 
-J=0 以外の閉じ方（E_H 指定）の反復は提供していません。E_H を利用側から与える場合は、窓ごとに
+E_H を利用側から厳密に指定する場合は、窓ごとに
 `solver%solve_prescribed_field` を呼び、その根から `evaluate_matching_conditions` で条件を作れます。
+
+<a id="combined-matching"></a>
+
+## 電場と電流を合わせる候補選択
+
+接合面に面電荷を置かない場合、面の直下で観測した電場 E(H⁻) と外部解の電場 E(H⁺) が一致するのが目標です。
+計算窓で測った放出源と内側電場を用意し、次の順で外部状態を選びます。
+
+1. 前の面電位を含む電位の格子を作ります。各電位で `matching_states_at(input, plane_potential_v, candidates, status, message [, minimum_gaps_v, search])` を呼びます。
+   `input` は最新の放出源を持つ `plasma_input` です。手続きは電位の符号に応じた B/C と、上流につながる A を探索し、受理した `sheath_matching_conditions` の配列を返します。
+2. 全電位の候補を並べ、`select_combined_matching_conditions(candidates, previous, inner_field_v_m, sigma_field_v_m, sigma_current, relaxation, max_step_v, selected_index, target_index, status, message)` を呼びます。
+   `previous` は前の有効な接合条件です。`inner_field_v_m` は E(H⁻) [V/m]、`sigma_field_v_m` はその不確かさの尺度 [V/m]、
+   `sigma_current` は J/(eΓ_i) の無次元の尺度で、両方の尺度を正にします。
+3. 成功したら `candidates(selected_index)` を次の窓の条件に使います。
+   `target_index` は $[(E(H^+)-E(H^-))/\sigma_E]^2+[(J/(e\Gamma_i))/\sigma_J]^2$ が最小の候補を指します。
+   前の電位から目標までの差に `relaxation`（0 より大きく 1 以下）を掛け、`max_step_v` [V]（0 で上限を無効化）を適用した提案電位を作ります。
+   `selected_index` は目標と同じ Type の候補のうち、提案電位への距離と、A の場合に目標の谷からの電位差の 0.001 倍を足した値が最小の候補です。
+   同点の場合は配列で先の候補を選びます。上限を適用するのは提案電位で、採用電位には離散格子への丸めが入ります。
+
+A の探索は `min(phi_H, 0)` から谷までの電位差を走査します。`minimum_gaps_v` は正で増加する 2 点以上の配列 [V] で、既定は 0.1 mV から √10 V の対数 33 点です。
+`search` には `sheath_search_options` を渡せます。ドリフト付き A/C の上流の帯の既定は厳密な判定で、帯の許容値は利用側が指定します。
+候補が見つからなければ `SHEATH_NO_PHYSICAL_SOLUTION` で、列挙の配列は長さ 0 です。選択手続きの添字は 1 始まりで、見つからない添字は 0 です。`status == SHEATH_OK` を確認してから採用してください。
+
+電位格子の分担・収集、内側電場と不確かさの推定、帯電中の更新間隔、選んだ条件の保存は利用側で扱います。
+候補列挙と選択を同じ条件で検証するコードは [test_matching.f90](../test/test_matching.f90) にあります。
+
+この閉じ方を使った EMSES の準一次元の柱（4×4 セル）では、面を極小の 2.5 m 下からシースの外（約 10 λ_D）まで動かしても、
+面の電位は単体解と 0.01〜0.05 V で一致しました。シースの外では E(H⁺) が小さいため、差は E(H⁻) の窓平均の雑音に敏感です。
 
 ## checkpoint
 
@@ -197,6 +226,7 @@ plasma と solver は書きません。unit は stream・sequential のどちら
 - 全ランクが同じ放出源で `update` を呼ぶ。同じ実行ファイル・入力なら全ランクで同じ根が得られる。
   念のため `status` をランク間で照合すると、不一致を検出できる。
 - checkpoint は一つのランクが `write_state` で書き、再開時は全ランクが同じ記録を `read_state` で読む。
+- 電場・電流を合わせる場合は、電位格子をランク間に分けて候補を列挙し、候補の順序を揃えて選択する。
 
 ## 利用側の責務
 
@@ -219,21 +249,6 @@ plasma と solver は書きません。unit は stream・sequential のどちら
 - 注入の数流束と `electron_inward_flux_m2_s`・`ion_inward_flux_m2_s`、観測した流出と `emitted_*_flux_m2_s` が整合しているか。
 - 面の電位・電場と `plane_potential_v`・`plane_field_v_m` の符号と基準が揃っているか。
 - checkpoint から再開した直後の条件が、保存前と一致するか（[matching_plane.f90](../example/matching_plane.f90) の最後を参照）。
-
-## 面がシースの内側にあるとき: 場の連続性を使う閉包
-
-J=0 だけで外部根を選ぶと、面がシースの内側にある場合に、電流は合うが面で場が不連続な状態（例えば遅い上流電子を
-入れない Type C）に固定されることがあります。面の上下で場が連続（面に仮想的な電荷がない）ことを条件に加えると避けられます。
-EMSES の研究用実装（`feat/outer-sheath-coupling` の `src/physics/sheath/m_outer_sheath.F90`, `closure = "combined"`）は次の手順です。
-
-1. 前回の φ_H の周りで φ_H を走査し、各 φ_H で取りうる状態を `evaluate_sheath_state` で求める。B/C はそのまま、
-   Type A は `minimum_potential_v` を動かして `connection_residual_normalized` の符号変化を二分法で詰める。
-2. 各状態を ((E(H⁺) − E(H⁻))/σ_E)² + ((J/eΓ_i)/σ_J)² で評価する。E(H⁻) は面の直下の電位から窓平均で求め、
-   σ_E・σ_J はその雑音（下限付き）。
-3. φ_H を最良の状態へ一部だけ動かし（緩和と 1 窓あたりの上限）、現在の状態の電流が大きい間（計算領域の表面がまだ帯電中）は据え置く。
-
-準 1 次元の柱（4×4 セル）では、面を極小の 2.5 m 下（4.5 m）からシースの外（約 10 λ_D）まで同じ設定で、φ_H は単体解と
-0.01〜0.05 V で一致しました。シースの外では E(H⁺) が小さく、精度は E(H⁻) の窓平均の雑音で決まります。
 
 BEACH の実装は、BEACH リポジトリの `src/runtime/sheath/bem_surface_current_model.f90`（条件の写像）と
 `src/runtime/sheath/bem_zhao_outflow_refresh.f90`（窓集計・更新・checkpoint）にあります。
