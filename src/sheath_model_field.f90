@@ -7,8 +7,8 @@ module sheath_model_field
   use sheath_model_status, only: SHEATH_OK, SHEATH_INVALID_ARGUMENT, SHEATH_NO_PHYSICAL_SOLUTION, SHEATH_NUMERICAL_FAILURE, &
       SHEATH_AMBIGUOUS_SOLUTION
   use sheath_model_core, only: zhao_params_type, neutral_electron_density, evaluate_zhao_fluxes
-  use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, valid_search_options, &
-      sheath_continuation_options, valid_continuation_options
+  use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, sheath_continuation_options, &
+      resolve_search_options
   use sheath_model_coordinates, only: encode_unknowns, decode_unknowns, make_branch_guesses
   use sheath_model_state, only: plasma_input, prepare_plasma_params
   use sheath_model_atlas, only: sheath_field_atlas, sheath_atlas_point

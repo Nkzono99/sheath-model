@@ -59,19 +59,13 @@ def _monotone(excess, phi_min, phi_max, height, factor, points):
             def derivative(t):
                 delta = scale*np.sinh(t)
                 return scale*np.cosh(t) / np.sqrt(constant + field_squared(offset(t), delta))
-        elif bottom == y[-1]:
-            a, b = 0, y[-1]
-
-            def offset(t):
-                return y[-1]**2 - t*t
-
-            def derivative(t):
-                return 2*t / np.sqrt(constant + field_squared(offset(t)))
         else:
             a, b = 0, y[-1]
+            span = y[-1]**2
+            reverse = bottom == y[-1]
 
             def offset(t):
-                return t*t
+                return span - t*t if reverse else t*t
 
             def derivative(t):
                 return 2*t / np.sqrt(constant + field_squared(offset(t)))
@@ -118,65 +112,11 @@ def _monotone(excess, phi_min, phi_max, height, factor, points):
     return (z, phi, field), limit
 
 
-def solve_finite_column(reservoir: FixedReservoir, emission: MaxwellianEmission, height_m: float,
-                        *, branch: str | None = None, points: int = 2049, order: int = 80) -> FiniteColumnSolution:
-    """Solve B, A, or C at fixed inlet VDF and upper potential 0 V.
-
-    The upper field is free and the wall current is zero. Specify A or B to
-    search that branch independently. With no branch specified, search the
-    monotone branch followed by the turning branch when the monotone length
-    cannot reach the given height. A finite search gives no uniqueness claim.
-    """
-    if branch not in (None, "A", "B", "C") or not math.isfinite(height_m) or height_m <= 0:
-        raise ValueError("use a positive finite height and branch A, B, C, or None")
-    if points < 129 or order < 24 or not isinstance(emission, MaxwellianEmission) or emission.flux_m2_s <= 0:
-        raise ValueError("use positive half-Maxwellian emission, at least 129 points and quadrature order >= 24")
-    model = FixedReservoirOrbits(reservoir, emission, order)
+def _turning_column(model, height_m, points, lo, upper, monotone_limit):
+    """Match a two-sided turning orbit to the specified height."""
     t = model.temperature
     factor = 2*QE*model.density/EPS0
     scale = model.speed * model.density
-
-    def escape(depth):
-        return model.influx(depth) - model.ion_flux
-
-    available = escape(0)
-    if available <= 0:
-        raise ArithmeticError("electron influx at 0 V does not exceed the ion flux")
-    if available == model.source and branch in (None, "B"):
-        z = np.linspace(0, height_m, points)
-        zeros = np.zeros_like(z)
-        if abs(model.surface_excess(np.array(0.0), 0, available*2/t)) < 1e-12:
-            return FiniteColumnSolution("B", z, zeros, zeros.copy(), available*scale, height_m, math.inf)
-    high = 1.0
-
-    def cutoff(target):
-        nonlocal high
-        while escape(high) > target and high < 1e12:
-            high *= 2
-        return brentq(lambda d: escape(d)-target, 0, high, xtol=1e-14)
-
-    if branch in (None, "C") and available > model.source:
-        depth = cutoff(model.source)
-        pd = model.source * 2/t
-        profile, limit = _monotone(lambda h: model.upstream_edge_excess(h, depth, pd), -depth, 0,
-                                   height_m, factor, points)
-        if profile is None:
-            raise ArithmeticError("the monotone negative-wall branch cannot span the requested height")
-        z, phi, field = profile
-        return FiniteColumnSolution("C", height_m-z[::-1], phi[::-1], -field[::-1], emission.flux_m2_s, 0.0, limit)
-    if branch == "C":
-        raise ArithmeticError("zero current with all emitted electrons escaping requires a negative wall")
-
-    limit = 0.0
-    if available < model.source:
-        wall = t * math.log(model.source / available)
-        if wall < model.ion_limit:
-            profile, limit = _monotone(lambda h: model.surface_excess(h, 0, available*2/t),
-                                       0, wall, height_m, factor, points)
-            if profile is not None and branch != "A":
-                return FiniteColumnSolution("B", *profile, available*scale, height_m, limit)
-    if branch == "B":
-        raise ArithmeticError("the monotone positive-wall branch cannot span the requested height")
 
     def segment(excess, depth, span):
         if span == 0:
@@ -191,7 +131,7 @@ def solve_finite_column(reservoir: FixedReservoir, emission: MaxwellianEmission,
         return distance, y*y-depth, field
 
     def orbit(depth):
-        flux = escape(depth)
+        flux = model.escape_for_zero_current(depth)
         if not 0 < flux <= model.source:
             raise ArithmeticError("turning orbit exceeds the available emission")
         wall_gap = t * math.log(model.source / flux)
@@ -206,8 +146,6 @@ def solve_finite_column(reservoir: FixedReservoir, emission: MaxwellianEmission,
         inner, outer, _ = orbit(depth)
         return inner[0][-1] + outer[0][-1] - height_m
 
-    lo = cutoff(model.source) if available > model.source else 0.0
-    upper = cutoff(0.0)
     previous = None
     bracket = None
     for depth in lo + (upper-lo)*np.r_[0, np.geomspace(1e-7, 0.999999, 130)]:
@@ -244,4 +182,66 @@ def solve_finite_column(reservoir: FixedReservoir, emission: MaxwellianEmission,
     z = np.r_[z_min-inner[0][::-1], z_min+outer[0][1:]]
     phi = np.r_[inner[1][::-1], outer[1][1:]]
     field = np.r_[inner[2][::-1], -outer[2][1:]]
-    return FiniteColumnSolution("A", z, phi, field, flux*scale, z_min, limit)
+    return FiniteColumnSolution("A", z, phi, field, flux*scale, z_min, monotone_limit)
+
+
+def solve_finite_column(reservoir: FixedReservoir, emission: MaxwellianEmission, height_m: float,
+                        *, branch: str | None = None, points: int = 2049, order: int = 80) -> FiniteColumnSolution:
+    """Solve B, A, or C at fixed inlet VDF and upper potential 0 V.
+
+    The upper field is free and the wall current is zero. Specify A or B to
+    search that branch independently. With no branch specified, search the
+    monotone branch followed by the turning branch when the monotone length
+    cannot reach the given height. A finite search gives no uniqueness claim.
+    """
+    if branch not in (None, "A", "B", "C") or not math.isfinite(height_m) or height_m <= 0:
+        raise ValueError("use a positive finite height and branch A, B, C, or None")
+    if points < 129 or order < 24 or not isinstance(emission, MaxwellianEmission) or emission.flux_m2_s <= 0:
+        raise ValueError("use positive half-Maxwellian emission, at least 129 points and quadrature order >= 24")
+    model = FixedReservoirOrbits(reservoir, emission, order)
+    t = model.temperature
+    factor = 2*QE*model.density/EPS0
+    scale = model.speed * model.density
+
+    available = model.escape_for_zero_current(0)
+    if available <= 0:
+        raise ArithmeticError("electron influx at 0 V does not exceed the ion flux")
+    if available == model.source and branch in (None, "B"):
+        z = np.linspace(0, height_m, points)
+        zeros = np.zeros_like(z)
+        if abs(model.surface_excess(np.array(0.0), 0, available*2/t)) < 1e-12:
+            return FiniteColumnSolution("B", z, zeros, zeros.copy(), available*scale, height_m, math.inf)
+    high = 1.0
+
+    def cutoff(target):
+        nonlocal high
+        while model.escape_for_zero_current(high) > target and high < 1e12:
+            high *= 2
+        return brentq(lambda d: model.escape_for_zero_current(d)-target, 0, high, xtol=1e-14)
+
+    if branch in (None, "C") and available > model.source:
+        depth = cutoff(model.source)
+        pd = model.source * 2/t
+        profile, limit = _monotone(lambda h: model.upstream_edge_excess(h, depth, pd), -depth, 0,
+                                   height_m, factor, points)
+        if profile is None:
+            raise ArithmeticError("the monotone negative-wall branch cannot span the requested height")
+        z, phi, field = profile
+        return FiniteColumnSolution("C", height_m-z[::-1], phi[::-1], -field[::-1], emission.flux_m2_s, 0.0, limit)
+    if branch == "C":
+        raise ArithmeticError("zero current with all emitted electrons escaping requires a negative wall")
+
+    limit = 0.0
+    if available < model.source:
+        wall = t * math.log(model.source / available)
+        if wall < model.ion_limit:
+            profile, limit = _monotone(lambda h: model.surface_excess(h, 0, available*2/t),
+                                       0, wall, height_m, factor, points)
+            if profile is not None and branch != "A":
+                return FiniteColumnSolution("B", *profile, available*scale, height_m, limit)
+    if branch == "B":
+        raise ArithmeticError("the monotone positive-wall branch cannot span the requested height")
+
+    lo = cutoff(model.source) if available > model.source else 0.0
+    upper = cutoff(0.0)
+    return _turning_column(model, height_m, points, lo, upper, limit)

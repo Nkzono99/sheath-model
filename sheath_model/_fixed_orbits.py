@@ -33,6 +33,10 @@ class FixedReservoirOrbits:
     def influx(self, depth):
         return self.reservoir.inward_flux(depth) / (self.speed * self.density)
 
+    def escape_for_zero_current(self, depth):
+        """Required escaping emission for a collisionless return path."""
+        return self.influx(depth) - self.ion_flux
+
     def passing(self, depth, cutoff, direction):
         low = np.sqrt(np.maximum(cutoff - depth, 0.0))[..., None]
         energy = depth[..., None] + low**2 + self.q*(2*low + self.q)

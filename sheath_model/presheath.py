@@ -76,7 +76,7 @@ class _Presheath(FixedReservoirOrbits):
         t = self.temperature
 
         def amplitude(depth):
-            return 2 * (self.influx(depth) - self.ion_flux) / t
+            return 2 * self.escape_for_zero_current(depth) / t
 
         def candidate(depth):
             pd = amplitude(depth)
@@ -198,7 +198,7 @@ class _Presheath(FixedReservoirOrbits):
 
     def weak_emission(self, extent):
         def balance(depth):
-            return self.influx(depth) - self.ion_flux - self.source
+            return self.escape_for_zero_current(depth) - self.source
 
         top = 1.0
         while balance(top) > 0 and top < 1e12:

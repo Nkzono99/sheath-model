@@ -11,9 +11,8 @@ contains
     type(zhao_params_type), intent(out) :: params
     integer(i32), intent(out) :: status
     character(len=*), intent(out) :: message
-    ! intent(out) applies component defaults and deallocates previous sources.
-    if (present(search_options)) params%search = search_options
-    if (present(continuation_options)) params%continuation = continuation_options
+    type(sheath_search_options) :: search
+    type(sheath_continuation_options) :: continuation
     status = SHEATH_INVALID_ARGUMENT
     message = 'branch must be auto, A, B, or C.'
     select case (trim(lower_ascii(input%branch)))
@@ -24,17 +23,10 @@ contains
     message = 'The prescribed field must be finite.'
     if (.not. ieee_is_finite(input%electric_field_v_m)) return
     message = 'Invalid search options; bracket requires an explicit B/C branch.'
-    if (.not. valid_search_options(params%search) .or. &
-        .not. valid_continuation_options(params%continuation)) return
-    if (trim(lower_ascii(params%search%method)) == 'bracket') then
-      if (trim(lower_ascii(input%branch)) /= 'b' .and. trim(lower_ascii(input%branch)) /= 'c') return
-    end if
+    if (.not. resolve_search_options(input%branch, search, continuation, search_options, continuation_options)) return
     call prepare_plasma_params(input, params, status, message)
-    params%search = sheath_search_options()
-    params%continuation = sheath_continuation_options()
-    if (present(search_options)) params%search = search_options
-    if (present(continuation_options)) params%continuation = continuation_options
-    params%search%method = lower_ascii(params%search%method)
+    params%search = search
+    params%continuation = continuation
   end subroutine
 
   !> Search bounds are per A/B/C type. A table supplies seeds, not accepted answers.

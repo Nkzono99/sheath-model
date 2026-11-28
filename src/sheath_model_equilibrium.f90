@@ -6,7 +6,7 @@ module sheath_model_equilibrium
   use sheath_model_state, only: plasma_input, prepare_plasma_params
   use sheath_model_core, only: zhao_params_type, evaluate_zhao_fluxes
   use sheath_model_search, only: sheath_search_options, sheath_search_diagnostics, valid_search_options, &
-      sheath_continuation_options, valid_continuation_options
+      sheath_continuation_options, resolve_search_options
   use sheath_model_atlas, only: sheath_equilibrium_atlas
   use sheath_model_atlas_physics, only: equilibrium_key, atlas_equilibrium_seeds, continue_equilibrium_from_atlas
   use sheath_model_coordinates, only: encode_unknowns
@@ -151,8 +151,6 @@ contains
     type(sheath_continuation_options) :: continuation
     character(len=len(input%branch)) :: branch
 
-    if (present(search_options)) search = search_options
-    if (present(continuation_options)) continuation = continuation_options
     branch = lower_ascii(input%branch)
     status = SHEATH_INVALID_ARGUMENT
     message = 'branch must be auto, A, B, or C.'
@@ -163,9 +161,7 @@ contains
     end select
 
     message = 'Invalid search options; bracket is available only for explicit B/C equilibrium branches.'
-    if (.not. valid_search_options(search) .or. .not. valid_continuation_options(continuation)) return
-    search%method = lower_ascii(search%method)
-    if (search%method == 'bracket' .and. branch /= 'b' .and. branch /= 'c') return
+    if (.not. resolve_search_options(branch, search, continuation, search_options, continuation_options)) return
 
     select type (input)
     type is (fixed_entry_equilibrium_input)
@@ -240,10 +236,8 @@ contains
     type(sheath_equilibrium_atlas), intent(in), optional :: atlas
     type(sheath_search_diagnostics) :: search
     real(dp), allocatable :: initial(:, :)
-    real(dp), allocatable :: atlas_initial(:, :)
     real(dp) :: found(3)
-    integer :: i, seed_count, atlas_count
-    real(dp) :: phi0, phim, density
+    integer :: k, atlas_count
     character(len=1) :: order(3)
     integer :: attempt, count
     logical :: nonphysical, unresolved_search
@@ -279,41 +273,17 @@ contains
     do attempt = 1, count
       branch = order(attempt)
       if (branch >= 'a' .and. branch <= 'c') branch = achar(iachar(branch) - 32)
-      seed_count = 0
-      atlas_count = 0
-      if (allocated(initial)) deallocate (initial)
-      allocate (initial(3, 0))
-      if (present(initial_guesses)) then
-        deallocate (initial)
-        allocate (initial(3, size(initial_guesses)))
-        do i = 1, size(initial_guesses)
-          if (.not. initial_guesses(i)%valid .or. initial_guesses(i)%branch /= branch) cycle
-          seed_count = seed_count + 1
-          initial(:, seed_count) = [initial_guesses(i)%surface_potential_v, initial_guesses(i)%minimum_potential_v, &
-              initial_guesses(i)%ambient_electron_density_m3]
-        end do
-      end if
-      if (present(atlas)) then
-        call atlas_equilibrium_seeds(p, branch, atlas, atlas_initial)
-        atlas_count = size(atlas_initial, 2)
-        initial = reshape([reshape(initial(:, :seed_count), [3*seed_count]), &
-            reshape(atlas_initial, [3*atlas_count])], [3, seed_count + atlas_count])
-        seed_count = seed_count + atlas_count
-      end if
-      call search_equilibrium_branch(p, branch, initial(:, :seed_count), found, success, search, atlas_count)
-      if (.not. success .and. present(atlas) .and. .not. search%excluded(index('ABC', branch)) .and. &
-          p%search%method /= 'bracket') then
+      k = index('ABC', branch)
+      call equilibrium_seeds(p, branch, initial, atlas_count, initial_guesses, atlas)
+      call search_equilibrium_branch(p, branch, initial, found, success, search, atlas_count)
+      if (.not. success .and. present(atlas) .and. .not. search%excluded(k) .and. p%search%method /= 'bracket') then
         call continue_equilibrium_from_atlas(p, branch, atlas, search, found, success)
       end if
       if (present(diagnostics)) diagnostics = search
-      phi0 = found(1)
-      phim = found(2)
-      density = found(3)
       if (.not. success) then
         nonphysical = nonphysical .or. any(search%excluded) .or. any(search%rejected > 0)
-        unresolved_search = unresolved_search .or. search%unconverged(index('ABC', branch)) > 0 .or. &
-            search%profile_failures(index('ABC', branch)) > 0 .or. (.not. search%excluded(index('ABC', branch)) .and. &
-            search%roots_found(index('ABC', branch)) == 0 .and. search%rejected(index('ABC', branch)) == 0)
+        unresolved_search = unresolved_search .or. search%unconverged(k) > 0 .or. search%profile_failures(k) > 0 .or. &
+            (.not. search%excluded(k) .and. search%roots_found(k) == 0 .and. search%rejected(k) == 0)
         cycle
       end if
       exit
@@ -328,8 +298,39 @@ contains
       return
     end if
 
-    call make_equilibrium_result(p, branch, [phi0, phim, density], output, status, message)
+    call make_equilibrium_result(p, branch, found, output, status, message)
   end subroutine solve_equilibrium
+
+  !> Explicit guesses keep their input order and precede all atlas predictions.
+  subroutine equilibrium_seeds(p, branch, seeds, atlas_count, guesses, atlas)
+    type(zhao_params_type), intent(in) :: p
+    character(len=1), intent(in) :: branch
+    real(dp), allocatable, intent(out) :: seeds(:, :)
+    integer, intent(out) :: atlas_count
+    type(sheath_equilibrium_result), intent(in), optional :: guesses(:)
+    type(sheath_equilibrium_atlas), intent(in), optional :: atlas
+    real(dp), allocatable :: predictions(:, :)
+    integer :: explicit_count, i, next
+
+    explicit_count = 0
+    if (present(guesses)) explicit_count = count(guesses%valid .and. guesses%branch == branch)
+    atlas_count = 0
+    if (present(atlas)) then
+      call atlas_equilibrium_seeds(p, branch, atlas, predictions)
+      atlas_count = size(predictions, 2)
+    end if
+    allocate (seeds(3, explicit_count + atlas_count))
+    if (present(guesses)) then
+      next = 0
+      do i = 1, size(guesses)
+        if (.not. guesses(i)%valid .or. guesses(i)%branch /= branch) cycle
+        next = next + 1
+        seeds(:, next) = [guesses(i)%surface_potential_v, guesses(i)%minimum_potential_v, &
+            guesses(i)%ambient_electron_density_m3]
+      end do
+    end if
+    if (atlas_count > 0) seeds(:, explicit_count + 1:) = predictions
+  end subroutine equilibrium_seeds
 
   subroutine make_equilibrium_result(p, branch, physical, output, status, message)
     type(zhao_params_type), intent(in) :: p
@@ -385,9 +386,9 @@ contains
     type(sheath_search_diagnostics) :: search
     type(zhao_params_type) :: p
     type(sheath_equilibrium_result) :: root
-    real(dp), allocatable :: initial(:, :), atlas_initial(:, :), physical_roots(:, :)
+    real(dp), allocatable :: initial(:, :), physical_roots(:, :)
     real(dp) :: first(3)
-    integer :: k, i, seed_count, atlas_count, limit
+    integer :: k, i, atlas_count, limit
     logical :: success, use_deflation
     character(len=1) :: branch
     character(len=1), parameter :: branches(3) = ['A', 'B', 'C']
@@ -411,28 +412,8 @@ contains
       branch = branches(k)
       if (trim(lower_ascii(input%branch)) /= 'auto' .and. &
           trim(lower_ascii(input%branch)) /= lower_ascii(branch)) cycle
-      seed_count = 0
-      atlas_count = 0
-      if (allocated(initial)) deallocate (initial)
-      allocate (initial(3, 0))
-      if (present(initial_guesses)) then
-        deallocate (initial)
-        allocate (initial(3, size(initial_guesses)))
-        do i = 1, size(initial_guesses)
-          if (.not. initial_guesses(i)%valid .or. initial_guesses(i)%branch /= branch) cycle
-          seed_count = seed_count + 1
-          initial(:, seed_count) = [initial_guesses(i)%surface_potential_v, initial_guesses(i)%minimum_potential_v, &
-              initial_guesses(i)%ambient_electron_density_m3]
-        end do
-      end if
-      if (present(atlas)) then
-        call atlas_equilibrium_seeds(p, branch, atlas, atlas_initial)
-        atlas_count = size(atlas_initial, 2)
-        initial = reshape([reshape(initial(:, :seed_count), [3*seed_count]), reshape(atlas_initial, [3*atlas_count])], &
-            [3, seed_count + atlas_count])
-        seed_count = seed_count + atlas_count
-      end if
-      call search_equilibrium_branch(p, branch, initial(:, :seed_count), first, success, search, atlas_count, &
+      call equilibrium_seeds(p, branch, initial, atlas_count, initial_guesses, atlas)
+      call search_equilibrium_branch(p, branch, initial, first, success, search, atlas_count, &
           physical_roots, use_deflation, limit)
       if (.not. success .and. present(atlas) .and. .not. search%excluded(k) .and. p%search%method /= 'bracket') then
         call continue_equilibrium_from_atlas(p, branch, atlas, search, first, success)

@@ -115,13 +115,33 @@ class EquilibriumProblem(SheathPhysics):
     def _unknown_result(self, branch, physical, diagnostics):
         y = self._encode_unknowns(branch, physical)
         norm = float(np.max(np.abs(self._encoded_residual(branch, y, self.search))))
-        band, deficit = self._validate_profile_root(branch, physical[0]/self.p.emission_temperature_ev,
-                                                    physical[1]/self.p.emission_temperature_ev,
-                                                    physical[2]/self.p.density_scale_m3,
-                                                    self.search.upstream_band_tolerance,
-                                                    self.search.upstream_field_floor_v_m)
+        band, deficit = self._check_profile(branch, physical, self.search)
         return EquilibriumResult(self.p, branch, *map(float, physical), norm, diagnostics,
                                  band*self.p.emission_temperature_ev, deficit)
+
+    def _check_profile(self, branch, physical, options):
+        phi0, phim, density = physical
+        p = self.p
+        return self._validate_profile_root(
+            branch, phi0/p.emission_temperature_ev, phim/p.emission_temperature_ev, density/p.density_scale_m3,
+            options.upstream_band_tolerance, options.upstream_field_floor_v_m,
+        )
+
+    def _accept_profile(self, branch, physical, options, diagnostics, k):
+        try:
+            self._check_profile(branch, physical, options)
+        except FloatingPointError:
+            diagnostics.profile_failures[k] += 1
+            return False
+        except RuntimeError:
+            diagnostics.rejected[k] += 1
+            return False
+        diagnostics.roots_found[k] += 1
+        return True
+
+    def _excludes_drifting_branch(self, branch):
+        return (branch in ("A", "C") and self.p.u > 0 and self.search.upstream_band_tolerance <= 0
+                and self.search.upstream_field_floor_v_m <= 0)
 
     def _continue_from_atlas(self, branch, atlas, options, diagnostics):
         from .atlas import parameter_key, params_from_key
@@ -148,11 +168,7 @@ class EquilibriumProblem(SheathPhysics):
                     physical = solver._decode_unknowns(branch, y, options)
                     if physical is None:
                         return False
-                    solver._validate_profile_root(branch, physical[0]/solver.p.emission_temperature_ev,
-                                                  physical[1]/solver.p.emission_temperature_ev,
-                                                  physical[2]/solver.p.density_scale_m3,
-                                                  options.upstream_band_tolerance,
-                                            options.upstream_field_floor_v_m)
+                    solver._check_profile(branch, physical, options)
                 except (ValueError, RuntimeError, FloatingPointError, OverflowError):
                     return False
                 return True
@@ -180,7 +196,7 @@ class EquilibriumProblem(SheathPhysics):
         diagnostics = SearchDiagnostics()
         k = "ABC".index(branch)
         diagnostics.searched[k] = True
-        if branch in ("A", "C") and p.u > 0 and options.upstream_band_tolerance <= 0 and options.upstream_field_floor_v_m <= 0:
+        if self._excludes_drifting_branch(branch):
             diagnostics.excluded[k] = True
             raise SearchFailure("reflected drifting electrons have no neutral semi-infinite profile", diagnostics)
         if atlas is not None:
@@ -192,19 +208,7 @@ class EquilibriumProblem(SheathPhysics):
             return self._encoded_residual(branch, y, options)
 
         def accept(physical):
-            try:
-                self._validate_profile_root(branch, physical[0]/p.emission_temperature_ev,
-                                            physical[1]/p.emission_temperature_ev,
-                                            physical[2]/p.density_scale_m3, options.upstream_band_tolerance,
-                                            options.upstream_field_floor_v_m)
-            except FloatingPointError:
-                diagnostics.profile_failures[k] += 1
-                return False
-            except RuntimeError:
-                diagnostics.rejected[k] += 1
-                return False
-            diagnostics.roots_found[k] += 1
-            return True
+            return self._accept_profile(branch, physical, options, diagnostics, k)
 
         def multivariate(starts, from_atlas=False):
             for encoded in starts:
@@ -268,7 +272,7 @@ class EquilibriumProblem(SheathPhysics):
             from .atlas import EquilibriumAtlas
             if not isinstance(atlas, EquilibriumAtlas):
                 raise TypeError("atlas must be EquilibriumAtlas")
-        if branch in {"A", "C"} and self.p.u > 0 and options.upstream_band_tolerance <= 0 and options.upstream_field_floor_v_m <= 0:
+        if self._excludes_drifting_branch(branch):
             diagnostics.excluded[k] = True
             return CandidateSet((), diagnostics)
         roots = []
@@ -281,19 +285,9 @@ class EquilibriumProblem(SheathPhysics):
                 return False
             if any(np.linalg.norm(encoded-root) < 1e-6 for root in roots):
                 return False
-            try:
-                self._validate_profile_root(branch, physical[0]/self.p.emission_temperature_ev,
-                                            physical[1]/self.p.emission_temperature_ev,
-                                            physical[2]/self.p.density_scale_m3, options.upstream_band_tolerance,
-                                            options.upstream_field_floor_v_m)
-            except FloatingPointError:
-                diagnostics.profile_failures[k] += 1
-                return False
-            except RuntimeError:
-                diagnostics.rejected[k] += 1
+            if not self._accept_profile(branch, physical, options, diagnostics, k):
                 return False
             roots.append(encoded)
-            diagnostics.roots_found[k] += 1
             return len(roots) >= max_roots
 
         if branch != "A" and options.method in {"auto", "bracket"}:

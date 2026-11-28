@@ -7,6 +7,7 @@ module sheath_model_search
   private
   public :: sheath_search_options, sheath_search_diagnostics, valid_search_options
   public :: sheath_continuation_options, valid_continuation_options
+  public :: resolve_search_options
 
   type :: sheath_search_options
     character(len=9) :: method = 'auto' ! auto, newton, lm, bracket (explicit B/C)
@@ -46,6 +47,20 @@ module sheath_model_search
   end type sheath_search_diagnostics
 
 contains
+
+  logical function resolve_search_options(branch, search, continuation, search_options, continuation_options) result(valid)
+    character(len=*), intent(in) :: branch
+    type(sheath_search_options), intent(out) :: search
+    type(sheath_continuation_options), intent(out) :: continuation
+    type(sheath_search_options), intent(in), optional :: search_options
+    type(sheath_continuation_options), intent(in), optional :: continuation_options
+
+    if (present(search_options)) search = search_options
+    if (present(continuation_options)) continuation = continuation_options
+    search%method = lower_ascii(search%method)
+    valid = valid_search_options(search) .and. valid_continuation_options(continuation)
+    if (search%method == 'bracket') valid = valid .and. (lower_ascii(branch) == 'b' .or. lower_ascii(branch) == 'c')
+  end function resolve_search_options
 
   logical function valid_continuation_options(options) result(valid)
     type(sheath_continuation_options), intent(in) :: options
