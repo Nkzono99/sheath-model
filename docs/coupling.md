@@ -4,8 +4,6 @@
 外部シースが上端面に課す条件の取り出し方、上端面を外へ出た電子から外部シースを解き直す方法、
 その状態を checkpoint に保存する方法を説明します。BEACH はこの API を使っており、EMSES など他のシミュレータからも同じ手順で使えます。
 
-ライブラリは粒子種、メッシュ・幾何、面積、粒子重み、MPI、時間積分を扱いません。
-条件をどう課すかは利用側が決めます（[利用側の責務](#利用側の責務)）。
 面の外部解は、[零電流で更新](#外部解を更新する)するか、内側電場を測定して[電場・電流を合わせる候補を選択](#combined-matching)します。
 
 ## 構成
@@ -34,43 +32,15 @@
 
 1. 上流条件を `plasma_input` に詰め、初回の放出源（例えば表面放出の Maxwell 源）を `plasma%emission` に入れる。
 2. `sheath_matching_iteration%initialize` で最初の外部根を解き、`conditions()` で面上の条件を得る。
-3. 窓の間、条件に従って上端面で粒子の注入・反射・除去と場の境界条件を課し、面を外向きに通過した電子を法線エネルギーの bin に集計する。
-4. 窓の終わりに、集計を MPI で合算して面積と時間で割り、`observed_outflow_source` で放出源にする。
-5. `update` で外部根を解き直し、成功すれば新しい条件に切り替える。3 に戻る。
+3. 窓の間、上端面の粒子と場の条件を課し、面を外向きに通過した電子を法線運動エネルギー [eV] の bin ごとに物理粒子数で集計する。
+4. 窓の終わりに、集計を MPI で合算して、面積 [m²] と窓の長さ [s] で割り、`observed_outflow_source` で放出源にする。
+5. `update` で外部根を解き直す。成功時は新しい条件、失敗時は前の条件で 3 に戻る。
 6. checkpoint では `write_state`、再開時は `read_state` を使う。
 
-次は [matching_plane.f90](../example/matching_plane.f90) の抜粋です（`fpm run --example matching_plane` で実行できます）。
-流出の集計は人工的な標本で置き換えています。
+初期化から checkpoint までを、人工的な流出データで実行する例です。[matching_plane.f90](../example/matching_plane.f90)
 
-```fortran
-use sheath_model
-type(sheath_solver) :: solver
-type(plasma_input) :: plasma
-type(sheath_matching_iteration) :: outer
-type(sheath_matching_conditions) :: plane
-type(emission_source) :: source
-real(dp), allocatable :: edges(:), weight(:)
-integer(i32) :: status
-character(len=512) :: message
-
-! 1-2. 上流条件と初回の放出源で外部根を解く
-plasma%electron_drift_mps = 0.0_dp
-plasma%emission = maxwellian_emission(55.42562584220407e6_dp, 2.2_dp)
-call outer%initialize(plasma, solver, status, message)
-if (status /= SHEATH_OK) error stop trim(message)
-plane = outer%conditions()
-
-! 3. 窓の間: 面を外向きに通過した電子ごとに（K は面での法線運動エネルギー [eV]、w は物理粒子数）
-edges = log_energy_edges()
-allocate (weight(size(edges) - 1), source=0.0_dp)
-weight(energy_bin(edges, K)) = weight(energy_bin(edges, K)) + w
-
-! 4. 窓の終わり: 全ランクで weight を合算してから、面積 [m^2] と窓の長さ [s] で割る
-call observed_outflow_source(edges, weight/(area_m2*duration_s), source, status, message)
-
-! 5. 外部根を解き直す。失敗しても前の根と条件が残る
-call outer%update(source, status, message)
-if (status == SHEATH_OK) plane = outer%conditions()
+```bash
+fpm run --example matching_plane
 ```
 
 ## 面上の条件を取り出す
@@ -232,23 +202,12 @@ plasma と solver は書きません。unit は stream・sequential のどちら
 
 | 責務 | 内容 |
 | --- | --- |
-| 単位系 | シミュレータの規格化単位と SI・eV の換算 |
-| 粒子種と集団の対応 | どの粒子種を上流電子・イオン・放出電子とみなすか、上流条件を `plasma_input` に詰める |
-| 面の幾何 | 面の位置・法線の向き・面積、電位の基準 |
-| 注入・反射・除去 | 上流からの注入（接線方向の速度を含む）、面での反射と除去 |
-| 場の境界条件 | φ_H による Dirichlet か E(H⁺) による Neumann か |
-| 流出の集計 | 外向き通過の bin 集計、窓の長さ、物理粒子数への換算、MPI 合算 |
-| 更新の判断 | 更新の間隔、失敗時の扱い、`relative_change` による収束判定 |
-| checkpoint | `write_state`/`read_state` の unit 管理と、再開時の設定の一致 |
-
-新しいシミュレータへ組み込むときは、次を確認してください。
-
-- 面を外向きに通過する電子を、由来によらずすべて集計しているか（計算領域内で反射した上流電子を含む）。
-  面で外部障壁に反射して計算領域へ戻す電子も、反射する前の外向き通過として数える。これを除くと、面が極小より下（Type A）の
-  状態で、面の上で折り返す遅い光電子が放出源から抜け、外部根が歪む。
-- 注入の数流束と `electron_inward_flux_m2_s`・`ion_inward_flux_m2_s`、観測した流出と `emitted_*_flux_m2_s` が整合しているか。
-- 面の電位・電場と `plane_potential_v`・`plane_field_v_m` の符号と基準が揃っているか。
-- checkpoint から再開した直後の条件が、保存前と一致するか（[matching_plane.f90](../example/matching_plane.f90) の最後を参照）。
+| 幾何と単位 | 面の位置・法線・面積を定め、シミュレータの規格化単位を SI・eV に換算する |
+| 入射と反射 | 粒子種を上流電子・イオン・放出電子に対応づける。接線方向も含めて注入・反射・除去を実装し、入射数流束を `electron_inward_flux_m2_s`・`ion_inward_flux_m2_s` と照合する |
+| 電位・電場 | φ_H による Dirichlet か E(H⁺) による Neumann かを選び、符号と基準を `plane_potential_v`・`plane_field_v_m` と揃える |
+| 流出の集計 | 由来によらず、外向きに通過した電子を反射処理の前に数える。Type A で面の上から戻る遅い光電子も放出源に含め、流出と `emitted_*_flux_m2_s` を照合する |
+| 更新の判断 | 時間積分、更新間隔、失敗時の扱い、`relative_change` による収束判定を管理する |
+| checkpoint | unit を管理し、保存前と再開直後の条件が一致することを確認する。[実行例](../example/matching_plane.f90) |
 
 BEACH の実装は、BEACH リポジトリの `src/runtime/sheath/bem_surface_current_model.f90`（条件の写像）と
 `src/runtime/sheath/bem_zhao_outflow_refresh.f90`（窓集計・更新・checkpoint）にあります。

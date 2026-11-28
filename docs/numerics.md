@@ -120,5 +120,9 @@ B/C は上流の厳密な電位から積分し、無限遠の端点は除きま�
   外部解の更新・失敗時の保持・stream/sequential での再開・版の不一致、電場と電流を合わせる候補選択）。
 - 固定入射での分岐境界、有限箱での谷の位置、外側領域の四つの枝と 0 V の横断、壁電流と外側領域の準中性残差。
 
+コンパイラ別の確認記録では、GNU Fortran 8.5 で `fpm test` の全件が通っています。
+Intel ifx 2023.2 ではビルド・実行を確認し、`test_delegated_physics` の `spectral A field inversion` で失敗を確認しています。
+この検査では、bin 源の Type A を静的評価から得た境界電場で解き直します。
+
 上流の帯の物理的な解釈の検証は [upstream_relaxation_20261009](../outputs/upstream_relaxation_20261009/REPORT.md)、
 matching plane で外向き流束を放出源とする定義の検証は [boundary_validation_20260923](../outputs/boundary_validation_20260923/REPORT.md) にあります。

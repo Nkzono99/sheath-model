@@ -6,21 +6,7 @@ Python パッケージ `sheath_model` は NumPy/SciPy で実装した二つの�
 Zhao モデルの E_H 指定・静的評価・bin 放出源とシミュレータ結合は [Fortran API](fortran-api.md) にあります。
 単位と符号は [共通の規約](conventions.md) に従います。
 
-```python
-from sheath_model import FixedEntryParams, SheathSolver, SearchOptions, ProfileOptions
-
-inputs = FixedEntryParams(
-    ion_density_m3=8.7e6, ion_entry_speed_mps=405299.88897111727,
-    ion_temperature_ev=12., ion_pressure_factor=3.,
-    electron_temperature_ev=12., electron_drift_mps=0.,
-    emission_density_m3=55.42562584220407e6, emission_temperature_ev=2.2,
-)
-solver = SheathSolver(search=SearchOptions(method="newton"), profile=ProfileOptions(zmax_hat=120.))
-root = solver.solve_equilibrium(inputs, branch="A")
-profile = solver.build_profile(root)
-print(root.surface_potential_v, root.minimum_potential_v)
-print(profile.fluxes(0.)["J_net_Apm2"])
-```
+Zhao モデルを解き、境界の場と流束を取り出す実行例があります。[fixed_entry.py](../examples/fixed_entry.py) · [導入と最初の計算](getting-started.md)
 
 入力、solver、結果、プロファイルは変更できない dataclass です。値を変えるときは `dataclasses.replace` を使います。
 solver は前回の解を保持せず、別の物理入力にも再利用できます。
@@ -127,19 +113,7 @@ Fortran と同じ意味と既定値です（`method="parameter"` または `"arc
 
 ## 解マップ
 
-```python
-from dataclasses import replace
-from sheath_model import EquilibriumAtlas, ContinuationOptions
-
-sweep = [replace(inputs, emission_density_m3=value) for value in (54e6, 57e6)]
-atlas = solver.build_equilibrium_atlas(sweep, branches=("A",))
-atlas.save("equilibrium-atlas.txt")
-worker = replace(solver, equilibrium_atlas=EquilibriumAtlas.load("equilibrium-atlas.txt"),
-                 continuation=ContinuationOptions(method="arclength"))
-query = worker.solve_equilibrium(inputs, branch="A")
-found = worker.solve_equilibrium_candidates(inputs, branch="A")
-print(len(found.candidates), found.diagnostics.atlas_hits)
-```
+表を構築・保存し、読み込んだ表を `SheathSolver(equilibrium_atlas=...)` に渡して根を探す実行例です。[solution_atlas.py](../examples/solution_atlas.py)
 
 | 名前 | 意味 |
 | --- | --- |

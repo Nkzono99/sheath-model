@@ -1,7 +1,6 @@
 # 図と計算例
 
-[README](../README.md) と各文書の説明図、および公開 Fortran API の計算結果を Matplotlib で描画したグラフをまとめます。
-説明図の用途と、計算グラフの条件・元データ・再生成手順は以下のとおりです。
+概念図、Zhao モデルの計算グラフと再生成手順、Fortran・Python の実行例を掲載します。
 
 ## 概念図
 
@@ -28,8 +27,7 @@
 | 光電子源規格化密度 `n_pe,0` | `n_pe,ref sin(alpha)` |
 | 電位基準と座標 | 上流で 0 V、+z は表面から上流向き、`E_z=-dphi/dz` |
 
-`alpha` は太陽高度です。背景電子 Maxwell 分布の規格化は両モデルとも未知量で、
-実際の上流総電子密度とは異なります。
+`alpha` は太陽高度です。背景電子 Maxwell 分布の規格化は J=0 と境界電場指定の両方で未知量です。
 電子ドリフトを正にすると A/C の半無限上流条件が成立しなくなるため、図の範囲をそのまま適用できません。
 仮定と制約は [物理モデル](model.md) を参照してください。
 
@@ -60,6 +58,8 @@ A は `phi_min < min(phi_H,0)` を満たす非単調解で、負の表面電位�
 
 ## 解の Type マップ
 
+[![左は J=0、右は E_H 指定の Type マップ。単独の Type は A が青、B が橙、C が緑。複数 Type の組み合わせも色で示す。](figures/sheath_type_maps.png)](figures/sheath_type_maps.pdf)
+
 縦軸は光電子源の強さ `r=n_pe,ref/n_i`、対数軸です。
 各パネルは **257 × 129 点**、合計 66,306 点の計算結果です。
 
@@ -85,7 +85,6 @@ A+B などは同じ条件で複数の Type が得られたことを表し、安�
 
 | ファイル | 内容 |
 | --- | --- |
-| [PNG](figures/sheath_type_maps.png) / [PDF](figures/sheath_type_maps.pdf) | 2 つの境界条件の Type マップ |
 | [equilibrium_map.csv](figures/data/equilibrium_map.csv) | J=0 の格子データ |
 | [field_map.csv](figures/data/field_map.csv) | E_H 指定の格子データ |
 | [summary.json](figures/data/summary.json) | 固定入力、代表解、Type ごとの格子点数 |
@@ -102,20 +101,14 @@ E_H 側は枝ごとの `sheath_search_diagnostics` から未解決・棄却の�
 
 ## 図を再生成する
 
-リポジトリを取得し、Fortran 2008 対応コンパイラ、fpm、Python 3.10+ を用意してください。
-以下はリポジトリ直下で実行します。
+リポジトリ直下で実行します。描画には Python の `plot` オプション、データの再計算には Fortran の環境が必要です。[導入と最初の計算](getting-started.md)
 
 ```bash
 python -m pip install -e '.[plot]'
-```
-
-**保存済みの CSV から描画するだけなら、次のコマンドで再生成できます。**
-
-```bash
 python examples/plot_readme_figures.py
 ```
 
-電位・電場の PNG / PDF、Type マップの PNG / PDF、集計 JSON を `docs/figures/` に書き出します。
+保存済みの CSV から、電位・電場と Type マップの PNG / PDF、集計 JSON を `docs/figures/` に書き出します。
 別の出力先を使う場合は `--output build/readme-figures` を追加してください。
 入力データの場所は `--data` で変更できます。
 
@@ -134,12 +127,11 @@ python examples/plot_readme_figures.py
 引数を省略した既定の格子も 257 × 129 点です。描画処理は
 [plot_readme_figures.py](../examples/plot_readme_figures.py) にあります。
 
-KUDPC 等の共有環境では、ビルド・ソルバー・テスト・描画を計算ノード割当内で実行してください。
-上記の並列計算では、割り当てたコア数と `OMP_NUM_THREADS` を揃えます。
+共有環境で上記の並列計算を実行するときは、計算ノードに割り当てたコア数と `OMP_NUM_THREADS` を揃えます。
 
 ## 実行例の一覧
 
-リポジトリ直下で実行します。KUDPC 等の共有環境では計算ノード割当内で実行してください。
+リポジトリ直下で実行します。
 
 ### Fortran（`fpm run --example <名前>`）
 
@@ -152,10 +144,10 @@ KUDPC 等の共有環境では、ビルド・ソルバー・テスト・描画�
 | [potential_scan](../example/potential_scan.f90) | bin 放出源の Type B を電位で走査し、符号付き E²・電場・N_e・電流・判定を CSV で出力 | [静的評価](fortran-api.md#静的評価) |
 | [solution_atlas](../example/solution_atlas.f90) | J=0 の解マップを作り（引数のファイルへ保存・読込）、問い合わせと候補探索に使う | [解マップ](fortran-api.md#解マップと-continuation) |
 | [field_atlas](../example/field_atlas.f90) | E_H 指定の解マップと arclength continuation | 同上 |
-| [matching_plane](../example/matching_plane.f90) | 結合: 面上の条件、流出スペクトルからの放出源、外部解の更新と checkpoint の往復 | [シミュレータとの結合](coupling.md) |
-| [readme_data](../example/readme_data.f90) | README の図のデータを計算する（[図を再生成する](#図を再生成する)） | |
+| [matching_plane](../example/matching_plane.f90) | 面上の条件、流出スペクトルからの放出源、外部解の更新と checkpoint の往復 | [シミュレータとの結合](coupling.md) |
+| [readme_data](../example/readme_data.f90) | プロファイル図と Type マップのデータを計算する | [図を再生成する](#図を再生成する) |
 
-`equilibrium_profile` は標準のプロファイル設定を使うため、README の図とは遠方の打ち切りが異なります。
+`equilibrium_profile` は標準のプロファイル設定を使うため、[掲載図](#profiles)とは遠方の打ち切りが異なります。
 
 ### Python（`python examples/<名前>.py`）
 
@@ -164,4 +156,4 @@ KUDPC 等の共有環境では、ビルド・ソルバー・テスト・描画�
 | [fixed_entry.py](../examples/fixed_entry.py) | Fortran の `fixed_entry` と同じ条件を解き、境界の流束を表示 |
 | [plot_profiles.py](../examples/plot_profiles.py) | Zhao 入力の A/B/C プロファイルを `profiles.png` に描く |
 | [solution_atlas.py](../examples/solution_atlas.py) | 解マップの構築・保存・読込と候補探索 |
-| [plot_readme_figures.py](../examples/plot_readme_figures.py) | README の図を CSV から描く |
+| [plot_readme_figures.py](../examples/plot_readme_figures.py) | プロファイル図と Type マップを CSV から描く |
