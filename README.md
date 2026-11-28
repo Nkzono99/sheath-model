@@ -32,7 +32,7 @@ python examples/fixed_entry.py
 
 [![Type A は内部に電位の極小を持ち、Type B/C は表面から上流へ単調に変化する。上段は電位、下段は電場。](docs/figures/sheath_profiles.png)](docs/figures/sheath_profiles.pdf)
 
-[プロファイルの計算条件と CSV](docs/examples.md#profiles) · [解の Type マップ](docs/examples.md#maps) · [実行例の一覧](docs/examples.md#実行例の一覧)
+[模式図](docs/examples.md#模式図) · [プロファイルの計算条件と CSV](docs/examples.md#profiles) · [解の Type マップ](docs/examples.md#maps) · [実行例の一覧](docs/examples.md#実行例の一覧)
 
 ## リファレンス
 

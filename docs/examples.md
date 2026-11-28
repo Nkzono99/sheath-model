@@ -2,16 +2,20 @@
 
 概念図、Zhao モデルの計算グラフと再生成手順、Fortran・Python の実行例を掲載します。
 
-## 概念図
+<a id="概念図"></a>
+
+## 模式図
 
 | 画像 | 読み方・関連する文書 |
 | --- | --- |
 | [境界と粒子集団](figures/sheath_overview.png) | Type A の入射・反射・放出・脱出。[物理モデル](model.md#対象とする系) |
+| [固定入射モデルの電位](figures/fixed_reservoir_schematic.png) | 有限箱と、外側領域付きの A・B_out で谷ができる位置。[有限箱と外側領域](model.md#有限箱と外側領域) |
 | [計算領域と外部シースの結合](figures/matching_plane_coupling.png) | matching plane を境にした領域の分担と、観測窓ごとの条件・流束の受け渡し。[シミュレータとの結合](coupling.md#構成) |
+| [接合面の候補選択](figures/matching_selection_schematic.png) | 電場・電流の残差で目標を求め、電位の更新幅を制限して条件を採用する手順。[電場と電流を合わせる候補選択](coupling.md#combined-matching) |
 
-概念図は画像生成で作成し、本文の粒子集団・座標・結合手順と照合しています。
-位置・粒子数・矢印は縮尺を持たず、矢印の横方向の広がりは集団や流れを区別するための表現です。
-以下の計算グラフは、保存済みの数値データから再生成できます。
+粒子集団と計算領域の図は画像生成で作成し、本文の粒子集団・座標・結合手順と照合しています。
+電位と候補選択の模式図は、リポジトリ直下で `python examples/plot_schematics.py` を実行すると再生成できます。
+Matplotlib の導入は手順書を参照してください。[描画オプション](getting-started.md#python) · [描画スクリプト](../examples/plot_schematics.py)
 
 ## 共通の計算条件
 
